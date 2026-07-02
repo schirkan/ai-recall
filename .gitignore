@@ -48,3 +48,20 @@ data/
 models/
 *.pkl
 *.h5
+
+# --- .NET / Visual Studio ---
+bin/
+obj/
+out/
+*.user
+*.suo
+.vs/
+TestResults/
+*.userosscache
+*.sln.docstates
+*.nuget.props
+*.nuget.targets
+
+# Capture / Laufzeit-Artefakte (AI Recall)
+capture/
+logs/

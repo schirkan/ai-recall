@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
+    <ProjectReference Include="..\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Browser\AiRecall.AppReader.Browser.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
