@@ -1,0 +1,50 @@
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# --- Editoren / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# --- Logs / Temp ---
+*.log
+*.tmp
+*.bak
+*.orig
+.cache/
+
+# --- Secrets / Env ---
+.env
+.env.local
+.env.*.local
+secrets/
+*.pem
+*.key
+
+# --- Node ---
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+coverage/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# --- Data / Models (Platzhalter, später prüfen) ---
+data/
+models/
+*.pkl
+*.h5
