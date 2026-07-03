@@ -14,4 +14,8 @@
     <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ReverseMarkdown" Version="3.13.0" />
+  </ItemGroup>
+
 </Project>

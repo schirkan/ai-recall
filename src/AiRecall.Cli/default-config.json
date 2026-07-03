@@ -39,7 +39,12 @@
     "pluginPath": ".",
     "maxContentKB": 64,
     "browser": {
-      "maxTextLengthKB": 50
+      "maxTextLengthKB": 50,
+      "cdp": {
+        "enabled": false,
+        "endpoint": "http://localhost:9222",
+        "timeoutMs": 1500
+      }
     },
     "notepad": {
       "maxBufferKB": 256

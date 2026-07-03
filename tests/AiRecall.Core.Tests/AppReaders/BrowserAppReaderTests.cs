@@ -55,6 +55,80 @@ public class BrowserAppReaderTests
         Assert.Contains("Test Page", result.ContentMarkdown);
         // UIA auf IntPtr.Zero liefert kein Address-Bar → URL bleibt leer
         Assert.True(string.IsNullOrEmpty(result.Extra!["url"]));
+        // Weder CDP (kein Browser auf Port 9222) noch UIA-Data (Stub-Hwnd) → "none"
+        Assert.Equal("none", result.Extra["contentSource"]);
+    }
+
+    [Fact]
+    public void Read_NoCdpNoUia_GracefullyReportsContentSource()
+    {
+        // CDP läuft auf localhost:9222 in der Sandbox nicht (kein Browser gestartet).
+        // UIA auf IntPtr.Zero liefert nichts. → contentSource "none", kein Crash.
+        var reader = new BrowserAppReader();
+        var win = Win("msedge", "Any Page - Microsoft Edge");
+        var result = reader.Read(win, Ctx());
+
+        Assert.NotNull(result);
+        Assert.Equal("none", result!.Extra!["contentSource"]);
+        // Markdown enthält Source-Hinweis
+        Assert.Contains("**Content source:** none", result.ContentMarkdown);
+    }
+
+    [Fact]
+    public void Read_ContentMarkdown_IncludesUrlTitleSuffix()
+    {
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("chrome", "Foo - Google Chrome"), Ctx());
+        Assert.NotNull(result);
+        var md = result!.ContentMarkdown;
+        Assert.Contains("**Tab title:** Foo", md);
+        Assert.Contains("**URL:**", md);
+        Assert.Contains("**Browser suffix:**", md);
+        Assert.Contains("**Content source:**", md);
+    }
+
+    [Fact]
+    public void Read_CdpEnabledButNoServer_FallsBackGracefully()
+    {
+        // cdp.enabled = true, aber kein Browser lauscht auf localhost:9222
+        // (Sandbox). CDP-Aufruf wirft → TryReadActivePage liefert null.
+        // UIA auf IntPtr.Zero liefert ebenfalls nichts → contentSource "none",
+        // kein Crash.
+        var cfg = new AppConfig();
+        cfg.AppReader.Browser.Cdp.Enabled = true;
+        cfg.AppReader.Browser.Cdp.Endpoint = "http://127.0.0.1:39999"; // sicher nicht belegt
+        cfg.AppReader.Browser.Cdp.TimeoutMs = 200;
+
+        var ctx = new AppReaderContext { Config = cfg, Logger = new LoggerConfiguration().CreateLogger() };
+
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("msedge", "Sample - Microsoft Edge"), ctx);
+
+        Assert.NotNull(result);
+        Assert.Equal("none", result!.Extra!["contentSource"]);
+    }
+
+    [Fact]
+    public void Read_CdpEnabledWithShortTimeout_DoesNotBlockLong()
+    {
+        // Sicherstellen, dass ein sehr kurzer Timeout tatsächlich greift (kein 1500 ms-Default).
+        var cfg = new AppConfig();
+        cfg.AppReader.Browser.Cdp.Enabled = true;
+        cfg.AppReader.Browser.Cdp.Endpoint = "http://127.0.0.1:1"; // Port 1 sollte immer failen
+        cfg.AppReader.Browser.Cdp.TimeoutMs = 100;
+
+        var ctx = new AppReaderContext { Config = cfg, Logger = new LoggerConfiguration().CreateLogger() };
+
+        var reader = new BrowserAppReader();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = reader.Read(Win("chrome", "Anything - Google Chrome"), ctx);
+        sw.Stop();
+
+        Assert.NotNull(result);
+        Assert.Equal("none", result!.Extra!["contentSource"]);
+        // Bei 100 ms Timeout kann der Aufruf minimal länger sein (Connect-Retry),
+        // aber sicher unter 2 s (Sandbox-Test).
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"CDP call took too long: {sw.ElapsedMilliseconds} ms");
     }
 
     [Fact]

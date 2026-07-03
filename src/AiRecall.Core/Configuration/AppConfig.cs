@@ -65,6 +65,29 @@ public sealed class BrowserConfig
 {
     [JsonPropertyName("maxTextLengthKB")]
     public int MaxTextLengthKB { get; set; } = 50;
+
+    /// <summary>Chrome DevTools Protocol Anbindung (optional, erfordert Browser-Start mit <c>--remote-debugging-port</c>).</summary>
+    [JsonPropertyName("cdp")]
+    public CdpConfig Cdp { get; set; } = new();
+}
+
+public sealed class CdpConfig
+{
+    /// <summary>
+    /// Wenn <c>false</c> (Default), wird der CDP-Pfad übersprungen und der Browser-Reader
+    /// fällt direkt auf UIA zurück. Aktivieren nur, wenn Browser/Edge mit
+    /// <c>--remote-debugging-port=9222</c> gestartet wurde.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>CDP-HTTP-Endpoint, typisch <c>http://localhost:9222</c>.</summary>
+    [JsonPropertyName("endpoint")]
+    public string Endpoint { get; set; } = "http://localhost:9222";
+
+    /// <summary>Timeout (ms) für HTTP-Lookup + WebSocket-Roundtrip.</summary>
+    [JsonPropertyName("timeoutMs")]
+    public int TimeoutMs { get; set; } = 1500;
 }
 
 public sealed class NotepadConfig
