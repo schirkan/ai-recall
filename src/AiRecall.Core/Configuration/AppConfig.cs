@@ -19,6 +19,58 @@ public sealed class AppConfig
 
     [JsonPropertyName("logging")]
     public LoggingConfig Logging { get; set; } = new();
+
+    [JsonPropertyName("appReader")]
+    public AppReaderConfig AppReader { get; set; } = new();
+}
+
+public sealed class AppReaderConfig
+{
+    /// <summary>Master-Switch: wenn <c>false</c>, werden keine App-Reader ausgeführt.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Verzeichnis mit <c>AiRecall.AppReader.*.dll</c>. Relativ =&gt; <c>AppContext.BaseDirectory</c>.</summary>
+    [JsonPropertyName("pluginPath")]
+    public string PluginPath { get; set; } = ".";
+
+    /// <summary>Maximale Länge des extrahierten Inhalts pro Reader (KB).</summary>
+    [JsonPropertyName("maxContentKB")]
+    public int MaxContentKB { get; set; } = 64;
+
+    [JsonPropertyName("outlook")]
+    public OutlookConfig Outlook { get; set; } = new();
+
+    [JsonPropertyName("browser")]
+    public BrowserConfig Browser { get; set; } = new();
+
+    [JsonPropertyName("notepad")]
+    public NotepadConfig Notepad { get; set; } = new();
+}
+
+public sealed class OutlookConfig
+{
+    [JsonPropertyName("folders")]
+    public List<string> Folders { get; set; } = new() { "Inbox", "Sent Items" };
+
+    [JsonPropertyName("pollIntervalSeconds")]
+    public int PollIntervalSeconds { get; set; } = 60;
+
+    /// <summary>Wenn true: Mails, die offenbar durch Outlook-Regeln "berührungslos" verarbeitet wurden, werden nicht persistiert.</summary>
+    [JsonPropertyName("ignoreAutoRuleMails")]
+    public bool IgnoreAutoRuleMails { get; set; } = false;
+}
+
+public sealed class BrowserConfig
+{
+    [JsonPropertyName("maxTextLengthKB")]
+    public int MaxTextLengthKB { get; set; } = 50;
+}
+
+public sealed class NotepadConfig
+{
+    [JsonPropertyName("maxBufferKB")]
+    public int MaxBufferKB { get; set; } = 256;
 }
 
 public sealed class CaptureConfig

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AiRecall.AppReader.Base;
 using AiRecall.Cli.Logging;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
@@ -155,20 +156,67 @@ internal static class ActiveWindowCommand
             hash,
             config.Capture.RootPath);
 
+        // App-Reader: vor OCR oder parallel — liefert strukturierten Content, der als
+        // *.content.md neben dem Capture-MD persistiert wird (Spec 0004).
+        AppReaderResult? appReaderResult = null;
+        string? contentPath = null;
+        if (config.AppReader.Enabled)
+        {
+            var pluginDir = ResolvePluginDir(config.AppReader.PluginPath);
+            var registry = AppReaderRegistry.LoadFromDirectory(pluginDir, logger);
+            var context = new AppReaderContext
+            {
+                Config = config,
+                Logger = logger,
+                CancellationToken = default
+            };
+            appReaderResult = registry.TryRead(window, context);
+            if (appReaderResult is not null)
+            {
+                var coreRecord = new AppContentRecord(
+                    appReaderResult.ContentMarkdown,
+                    appReaderResult.ContextLabel,
+                    appReaderResult.ContextKind,
+                    appReaderResult.ReaderName,
+                    appReaderResult.ReaderVersion,
+                    appReaderResult.Extra);
+                contentPath = CaptureWriter.WriteContent(
+                    coreRecord,
+                    window,
+                    item.Timestamp,
+                    config.Capture.RootPath,
+                    appReaderResult.ContextLabel);
+                logger.Information(
+                    "AppReader {Reader} produced content for {Process}/{Title} -> {Path}",
+                    appReaderResult.ReaderName, window.ProcessName, window.Title, contentPath);
+            }
+        }
+
         sw.Stop();
         Console.WriteLine();
         Console.WriteLine("Capture written:");
-        Console.WriteLine($"  Screenshot: {item.ScreenshotPath}");
-        Console.WriteLine($"  Markdown:   {item.MarkdownPath}");
-        Console.WriteLine($"  Hash:       {item.ContentHash}");
-        Console.WriteLine($"  Text chars: {item.ContentText.Length}");
-        Console.WriteLine($"  Took:       {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"  Screenshot:  {item.ScreenshotPath}");
+        Console.WriteLine($"  Markdown:    {item.MarkdownPath}");
+        if (contentPath is not null)
+            Console.WriteLine($"  App-Reader:  {contentPath}  ({appReaderResult?.ReaderName}, kind={appReaderResult?.ContextKind})");
+        Console.WriteLine($"  Hash:        {item.ContentHash}");
+        Console.WriteLine($"  Text chars:  {item.ContentText.Length}");
+        Console.WriteLine($"  Took:        {sw.ElapsedMilliseconds} ms");
 
         logger.Information(
-            "Captured {Process}/{Title} -> {Path} (hash={Hash}, chars={Chars}, elapsedMs={Elapsed})",
-            window.ProcessName, window.Title, item.ScreenshotPath, hash, contentText.Length, sw.ElapsedMilliseconds);
+            "Captured {Process}/{Title} -> {Path} (hash={Hash}, chars={Chars}, appReader={AppReader}, elapsedMs={Elapsed})",
+            window.ProcessName, window.Title, item.ScreenshotPath, hash, contentText.Length,
+            appReaderResult?.ReaderName ?? "none", sw.ElapsedMilliseconds);
 
         return 0;
+    }
+
+    private static string ResolvePluginDir(string configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath)) configuredPath = ".";
+        return Path.IsPathRooted(configuredPath)
+            ? configuredPath
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, configuredPath));
     }
 
     private static void PrintUsage()
@@ -181,5 +229,9 @@ internal static class ActiveWindowCommand
         Console.WriteLine("  --hwnd <hex>          Capture a specific window by HWND (skips GetForegroundWindow).");
         Console.WriteLine("  --config <path>       Override the config JSON path.");
         Console.WriteLine("  -h, --help            Show this help.");
+        Console.WriteLine();
+        Console.WriteLine("App-Reader (auto-loaded from <appBase>/AiRecall.AppReader.*.dll):");
+        Console.WriteLine("  Browser (msedge, chrome)  Tab-Titel + URL via UIA");
+        Console.WriteLine("  Notepad                   Buffer + Dateiname via Win32");
     }
 }

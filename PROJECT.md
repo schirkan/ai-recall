@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**MVP1 — `active-window` implementiert, App-Reader in Planung.**
+**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad).**
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -23,9 +23,16 @@
 - [x] `recall active-window` (Spec 0003) — lauffähig mit Ignore-Liste, OCR (Tesseract), SHA-256, YAML-Frontmatter
 - [x] OCR mit echten Tessdata-Dateien manuell auf WindowsTerminal verifiziert (2882 Zeichen, 6 s)
 - [x] Tech-Defaults final (Tesseract, Serilog, xUnit, manueller CLI-Switch, Blacklist) — siehe `DECISIONS.md`
-- [x] Tests: 18/18 grün (Hashing, IgnoreMatcher, ConfigLoader)
-- [x] **App-Reader-Spec entworfen** (`specs/0004-app-reader.md`) — eine DLL pro App (Browser/Outlook/Word/Excel/PowerPoint/Notepad/Explorer) mit Outlook-Mail-Log inkl. Auto-Regel-Mail-Setting
-- [ ] Push auf `origin/main` (Spec 0004 noch offen → nach Martin-Review)
+- [x] **App-Reader-Architektur** (Spec 0004) implementiert:
+  - `IAppReader` + `AppReaderResult` + `AppReaderContext` + `AppReaderRegistry` (Reflection-Loader)
+  - `CaptureWriter.WriteContent()` für `*.content.md` neben Capture-MD
+  - **Browser-Reader** (msedge, chrome): Tab-Titel + URL via UIA `ValuePattern`, Body via `TextPattern`
+  - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant)
+- [x] Tests: 28/28 grün (+10 AppReader-Tests)
+- [x] Smoke-Test: Notepad-Reader liefert echten Buffer (15 Zeilen, 363 Zeichen) als strukturiertes `*.content.md`
+- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint, Explorer
+- [ ] Trigger-Pipeline (`recall record`)
+- [ ] Push auf `origin/main` (nach Tests + Smoke-Test — siehe unten)
 
 ## Projektziel (Kurzfassung)
 

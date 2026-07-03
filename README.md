@@ -23,8 +23,14 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
   - SHA-256-Hash für spätere Dedup
   - Blacklist-Ignore-Liste (Apps, URLs, Window-Titles)
   - Serilog-Logging (Console + Rolling-File)
+- ✅ App-Reader ([Spec 0004](./specs/0004-app-reader.md)) — Plugin-DLLs liefern
+  strukturierten Content statt OCR-Fallback:
+  - **Browser** (Edge, Chrome): Tab-Titel + URL via UIA + Titel-Parsing
+  - **Notepad**: Buffer + Dateiname via Win32 `WM_GETTEXT`
+  - Inhalt als zusätzliche `*.content.md` neben dem Capture-MD
+  - Reflection-basierte Plugin-Discovery (eine DLL pro App)
+- ⏳ App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint, Explorer
 - ⏳ Trigger-Pipeline (`recall record`, geplant)
-- ⏳ App-Reader: Browser / Outlook / Word / Excel (Stubs vorhanden)
 - MVP2: Auto-Meeting-Recording (Audio + Transcription)
 - MVP3: Auto Knowledge Base / Wiki
 
@@ -111,15 +117,19 @@ Details: [`specs/0002-mvp1-scope.md` §"Konfiguration"](./specs/0002-mvp1-scope.
 
 ## Architektur
 
-Siehe [`specs/0002-mvp1-scope.md` §"Architektur"](./specs/0002-mvp1-scope.md).
+Siehe [`specs/0002-mvp1-scope.md` §"Architektur"](./specs/0002-mvp1-scope.md)
+und [`specs/0004-app-reader.md`](./specs/0004-app-reader.md).
 Kurzfassung:
 
 ```
-AiRecall.Cli → Core + ScreenCapture + AppReader.*
+AiRecall.Cli → Core + ScreenCapture + AppReader.Base + AppReader.*
 ScreenCapture → Core
 AppReader.Base → Core
-AppReader.{Browser,Outlook,Documents} → AppReader.Base → Core
+AppReader.{Browser,Notepad,Outlook,Documents} → AppReader.Base
 ```
+
+Plugin-Discovery: `AppReaderRegistry.LoadFromDirectory(scanDir, logger)`
+lädt alle `AiRecall.AppReader.*.dll` neben der Exe via Reflection.
 
 Entscheidungen mit Datum/Begründung: [`DECISIONS.md`](./DECISIONS.md).
 
