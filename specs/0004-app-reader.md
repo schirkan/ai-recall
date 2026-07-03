@@ -115,6 +115,8 @@ Code-Blöcke bleiben erhalten). URL stammt dann ebenfalls aus CDP.
 **Vorteile gegenüber UIA-only:**
 - Reichhaltigerer Content (echte Strukturen statt Plain-Text)
 - URL + Body in einem Roundtrip
+- Konvertierung über `appReader.browser.markdown` 1:1-konfigurierbar
+  (siehe Konfiguration)
 
 **Nachteile / Voraussetzungen:**
 - Browser muss mit ` --remote-debugging-port` gestartet werden (manueller Schritt)
@@ -240,6 +242,16 @@ Neue Sektion in `default-config.json`:
         "enabled": false,
         "endpoint": "http://localhost:9222",
         "timeoutMs": 1500
+      },
+      "markdown": {
+        "unknownTags": "PassThrough",
+        "githubFlavored": false,
+        "removeComments": true,
+        "whitelistUriSchemes": ["http", "https", "ftp", "ftps", "mailto", "tel"],
+        "smartHrefHandling": false,
+        "tableWithoutHeaderRowHandling": "Default",
+        "listBulletChar": "*",
+        "defaultCodeBlockLanguage": ""
       }
     },
     "office": {
@@ -259,6 +271,20 @@ Felder:
 - `appReader.browser.cdp.endpoint` (Default `http://localhost:9222`) — HTTP-Basis-URL.
 - `appReader.browser.cdp.timeoutMs` (Default `1500`) — sowohl HTTP-Lookup
   als auch WebSocket-Roundtrip.
+- `appReader.browser.markdown.*` — 1:1-Mapping auf `ReverseMarkdown.Config`
+  (v3.13). Wirkt unabhängig vom CDP-Gate; alle Felder optional, nicht
+  gesetzte Felder lassen die Library-Defaults unangetastet.
+  - `unknownTags` (string) — `"PassThrough"` (Default) / `"Drop"` / `"Bypass"` / `"Raise"`
+  - `githubFlavored` (bool, Default `false`)
+  - `removeComments` (bool, Default `true` in `default-config.json` — Note:
+    Library-Default ist `false`; `StripNoise` entfernt HTML-Kommentare
+    bereits vorher, daher setzen wir `true`)
+  - `whitelistUriSchemes` (List<string>, Default `["http","https","ftp","ftps","mailto","tel"]`)
+  - `smartHrefHandling` (bool, Default `false`)
+  - `tableWithoutHeaderRowHandling` (string) — `"Default"` / `"EmptyRow"`
+  - `listBulletChar` (string, erstes Zeichen gewinnt; Default `*` — Note:
+    Library-Default ist `-`)
+  - `defaultCodeBlockLanguage` (string, optional)
 
 ## Integration in `recall active-window`
 
@@ -331,6 +357,9 @@ Felder:
       geschrieben.
 - [ ] Capture-MD bekommt einen `## App-Reader`-Abschnitt mit Link auf
       Content-MD.
+- [ ] Jedes Feld in `appReader.browser.markdown` setzt das gleichnamige
+      Feld auf `ReverseMarkdown.Config`; nicht gesetzte Felder bleiben auf
+      Library-Default. Per Unit-Test abgesichert (`BuildConverter_*`).
 
 ## Out of Scope (MVP1)
 

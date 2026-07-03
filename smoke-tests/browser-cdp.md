@@ -127,20 +127,22 @@ Get-ChildItem "projects\ai-recall\src\AiRecall.Cli\bin\Debug\net8.0-windows\capt
 - **Roundtrip-Zeit:** ≈ 300–400 ms für die CDP-Operation (HTTP `/json` +
   WebSocket `Runtime.evaluate`).
 - **Maximale Roh-HTML-Größe:** auf `heise.de`-Startseite ~880 KB vor
-  `body.innerHTML`, ~515 KB danach. Wird durch `maxTextLengthKB`
-  gekappt (Default 50, für Smoke-Test 200).
+  `body.innerHTML`, ~515 KB danach, ~457 KB nach Strip-Pass inkl.
+  inline-SVG-Ersetzung. Wird durch `maxTextLengthKB` gekappt (Default
+  50, für Smoke-Test 200).
 - **Aktiv ohne CDP-Server:** BrowserAppReader fällt lautlos auf UIA
   zurück (`contentSource = "none"` wenn weder CDP noch UIA liefern),
   siehe `Read_CdpEnabledButNoServer_FallsBackGracefully`.
+- **Inline-SVG-Data-URLs** in `<img src="data:image/svg+xml;base64,...">`
+  werden vom Strip-Pass auf den Marker `src="(inline-svg)"` gekürzt
+  (auf `heise.de` typisch 20–40 Vorkommen pro Capture).
 
 ## 8. Bekannte Limitierungen
 
-- **Inline base64-SVGs:** `<img src="data:image/svg+xml;base64,...">`
-  (Lazy-Load-Placeholders, häufig bei heise.de und anderen modernen
-  Seiten) bleiben im Markdown. Strip-Pass matcht nur die Elemente
-  `<script>`, `<style>`, `<svg>`, `<noscript>` und HTML-Kommentare.
-  Mögliche Folge-Iteration: zusätzliches `src="data:image/svg+xml[^"]*"`
-  Regex oder Wechsel auf einen HTML-Parser (HtmlAgilityPack).
+- **Andere Data-URLs (PNG/JPEG/WebP):** Nur SVG-Data-URLs werden
+  ersetzt. PNG/JPEG-Base64 in `src=` (selten bei reinen Nachrichten-
+  Seiten, häufiger bei Apps mit lokalisierten Icons) bleiben im MD.
+  Bei Bedarf Regex erweitern auf `data:image/(png|jpeg|webp)`.
 - **Erste page-Target-Filterung:** Wir nehmen das erste `type=="page"`
   Target, nicht zwingend das sichtbare Tab. Bei mehreren offenen Tabs
   vorher prüfen, dass das gewünschte zuerst gelistet wird.

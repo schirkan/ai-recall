@@ -35,6 +35,17 @@
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
 - [x] Tests: 83/83 grün (+20 AppReader-Tests seit `Browser-Reader Tests (App-Reader Iteration 2)`; inkl. CDP-Iter. 3: `Read_NoCdpNoUia_GracefullyReportsContentSource`, `Read_ContentMarkdown_IncludesUrlTitleSuffix`, `Read_CdpEnabledButNoServer_FallsBackGracefully`, `Read_CdpEnabledWithShortTimeout_DoesNotBlockLong`)
+- [x] **Browser-Reader Iter. 4 — ReverseMarkdown 1:1 via JSON:** neue Sektion
+  `appReader.browser.markdown` mappt alle 8 öffentlichen `ReverseMarkdown.Config`-Felder
+  (`unknownTags`, `githubFlavored`, `removeComments`, `whitelistUriSchemes`,
+  `smartHrefHandling`, `tableWithoutHeaderRowHandling`, `listBulletChar`,
+  `defaultCodeBlockLanguage`) per POCO. Per-Call `BuildConverter()` statt statischem
+  Converter — so greifen Reload-Änderungen sofort. Tests 98/98 grün
+  (+11: `BuildConverter_NullSettings_*`, `_EmptySettings_PreservesLibraryDefaults`,
+  `_AllSettings_AppliesAllValues`, `_UnknownTags_IsCaseInsensitive`,
+  `_UnknownTags_InvalidString_LeavesDefault`, `_TableWithoutHeaderRow_*`,
+  `_ListBulletChar_TakesFirstCharOnly`, `_WhitelistUriSchemes_EmptyList_*`,
+  `ConvertHtmlToMarkdown_*` End-to-End, `AppConfig_BrowserConfig_HasMarkdownSettings`).
 - [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint
 - [ ] Trigger-Pipeline (`recall record`) — naechste Iteration
 - [ ] Push auf `origin/main` (nach Tests + Smoke-Test)
