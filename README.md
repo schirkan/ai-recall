@@ -59,6 +59,16 @@ Capture landet in `capture/<yyyy-MM-dd>/<process>/<HHmmss-fff>-<title>.{png,md}`
    - `deu.traineddata`
    - `eng.traineddata`
    - (oder weitere Sprachen — `tessdata_fast` ist klein + schnell)
+
+   **PowerShell-One-Liner** für beide Sprachen:
+
+   ```powershell
+   $td = 'src\AiRecall.Cli\bin\Debug\net8.0-windows\tessdata'
+   New-Item -ItemType Directory -Force -Path $td | Out-Null
+   Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/deu.traineddata' -OutFile (Join-Path $td 'deu.traineddata')
+   Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata' -OutFile (Join-Path $td 'eng.traineddata')
+   ```
+
 3. `recall active-window` (ohne `--no-ocr`) probieren.
 
 Sprachen und Pfad stehen in `default-config.json` (`ocr.languages`,
