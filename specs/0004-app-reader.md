@@ -89,8 +89,8 @@ public sealed class AppReaderContext
 
 | App | Process-Match | Lese-Strategie | Output-Schema |
 |---|---|---|---|
-| **msedge** | `msedge` | UIA (`Document` + `Address Band` Control), Fallback: Fenster-Titel | URL + Title + main-Text (gekürzt 50 KB) |
-| **chrome** | `chrome` | UIA, Fallback: Fenster-Titel | URL + Title + main-Text |
+| **msedge** | `msedge` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text (gekürzt 50 KB) |
+| **chrome** | `chrome` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text |
 | **outlook** | `OUTLOOK` | COM `Outlook.Application` → aktives Inspector oder Explorer → MailItem / Selection | Mail-Header + Body (HTML→MD), siehe Outlook-Spezial unten |
 | **word** | `WINWORD` | COM `Word.Application` → ActiveDocument | Pfad + Sichtbarer Text (Range.Text) + Tabellen vereinfacht |
 | **excel** | `EXCEL` | COM `Excel.Application` → ActiveWorkbook → ActiveSheet | Dateiname + Sheet-Name + UsedRange als Markdown-Tabelle |
@@ -98,8 +98,29 @@ public sealed class AppReaderContext
 | **notepad** | `Notepad` | Win32 `EM_GETLINE` / `Edit`-Control-Text + Fenster-Titel | Buffer komplett (UTF-8) + Dateipfad falls in Titel |
 | **explorer** | `explorer` | Shell COM `IShellBrowser` → aktueller Pfad, Fallback: Titel-Parsing | Pfad + selektierte Dateien |
 
-Firefox ist **nicht** in MVP1 dabei (UI-Automation schwächer, CDP-Setup
-aufwendig). Kann später ergänzt werden, ohne Architekturänderung.
+### Browser-Reader: CDP-Pfad (opt-in)
+
+Standardstrategie für msedge/chrome ist **UIA** (`ValuePattern` für die
+Address-Bar, `TextPattern` für den Document-Bereich). Das liefert ohne
+zusätzliche Browser-Konfiguration URL + Plain-Text-Body.
+
+Als reichhaltigere Alternative unterstützt der Browser-Reader
+**Chrome DevTools Protocol (CDP)** — per **`appReader.browser.cdp.enabled = true`** opt-in aktivierbar. Der Browser muss dann zwingend mit
+`--remote-debugging-port=PORT` gestartet sein (üblich 9222). Bei aktivem
+CDP ersetzt ein `Runtime.evaluate("document.documentElement.outerHTML")`
+die UIA-Textextraktion; das HTML wird via [ReverseMarkdown](https://github.com/mysticmind/reversemarkdown)
+in strukturiertes Markdown konvertiert (Links, Überschriften, Listen,
+Code-Blöcke bleiben erhalten). URL stammt dann ebenfalls aus CDP.
+
+**Vorteile gegenüber UIA-only:**
+- Reichhaltigerer Content (echte Strukturen statt Plain-Text)
+- URL + Body in einem Roundtrip
+
+**Nachteile / Voraussetzungen:**
+- Browser muss mit ` --remote-debugging-port` gestartet werden (manueller Schritt)
+- Bei Firefox wäre CDP ebenfalls möglich — wird aber erst erschlossen, wenn
+  die Edge/Chrome-Variante etabliert ist (YAGNI).
+- Bei mehreren offenen Tabs wird der „erste page-type Target" genommen (nicht zwingend der sichtbare Tab) — Grenzfall, manuell zu prüfen.
 
 ## Outlook-Spezial: Mail-Log
 
@@ -214,7 +235,12 @@ Neue Sektion in `default-config.json`:
       "ignoreAutoRuleMails": false
     },
     "browser": {
-      "maxTextLengthKB": 50
+      "maxTextLengthKB": 50,
+      "cdp": {
+        "enabled": false,
+        "endpoint": "http://localhost:9222",
+        "timeoutMs": 1500
+      }
     },
     "office": {
       "includeTables": true,
@@ -226,6 +252,13 @@ Neue Sektion in `default-config.json`:
   }
 }
 ```
+
+Felder:
+- `appReader.browser.cdp.enabled` (Default `false`) — Master-Switch. `false`
+  ⇒ UIA-Pfad wie bisher, CDP wird nicht angesprochen.
+- `appReader.browser.cdp.endpoint` (Default `http://localhost:9222`) — HTTP-Basis-URL.
+- `appReader.browser.cdp.timeoutMs` (Default `1500`) — sowohl HTTP-Lookup
+  als auch WebSocket-Roundtrip.
 
 ## Integration in `recall active-window`
 
@@ -240,6 +273,9 @@ Neue Sektion in `default-config.json`:
    gezeigt wenn App-Reader geliefert hat (sonst Duplicate). Stattdessen
    Link auf die OCR-Sektion am Ende.
 5. Bei mehreren Readern pro Fenster: nur den ersten nehmen (Best Match).
+6. **Browser-Reader Reihenfolge intern** (nur relevant bei aktivem
+   CDP-Pfad): CDP-Versuch liefert URL + Body; wenn CDP-`enabled = false`
+   oder kein Browser lauscht, geht es ohne Verzögerung auf UIA weiter.
 
 > **Default-Entscheidung:** OCR läuft weiter, wird aber im MD nur
 > verlinkt wenn App-Reader Content geliefert hat.
@@ -275,7 +311,12 @@ Neue Sektion in `default-config.json`:
 
 - [ ] `AppReaderRegistry` lädt alle `AiRecall.AppReader.*.dll` neben der Exe.
 - [ ] Fehlende / nicht-laden-bare DLLs werden geloggt, kein Crash.
-- [ ] Browser-Reader liefert für `chrome`/`msedge` mindestens URL + Titel.
+- [ ] Browser-Reader liefert für `chrome`/`msedge` mindestens URL + Titel
+      (UIA-Pfad ohne CDP).
+- [ ] Browser-Reader mit `cdp.enabled = true` und aktivem CDP-Browser
+      liefert URL + strukturiertes Markdown.
+- [ ] Browser-Reader mit `cdp.enabled = true`, aber ohne CDP-Server,
+      fällt lautlos auf UIA zurück (kein Crash, `contentSource = "none"`).
 - [ ] Outlook-Reader liefert für aktiven Inspector-Mail mindestens Subject + Body.
 - [ ] Outlook-Mail-Log persistiert alle Mails aus Inbox + Sent Items,
       die nicht in `outlook-seen.json` stehen.
@@ -293,7 +334,7 @@ Neue Sektion in `default-config.json`:
 
 ## Out of Scope (MVP1)
 
-- Firefox-Reader (UIA zu schwach)
+- Firefox-Reader (UIA zu schwach; CDP-Pfad ist über die Edge/Chrome-Variante erschlossen, Firefox-Erweiterung ist später möglich)
 - Weitere Browser (Brave, Opera, Vivaldi) — können über Edge/Chrome-Pfad fallen
 - Outlook-**New**-Outlook (PIM-basiert, kein COM)
 - Word/Excel-Macros, eingebettete Objekte

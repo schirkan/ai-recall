@@ -27,9 +27,14 @@
   - `IAppReader` + `AppReaderResult` + `AppReaderContext` + `AppReaderRegistry` (Reflection-Loader)
   - `CaptureWriter.WriteContent()` für `*.content.md` neben Capture-MD
   - **Browser-Reader** (msedge, chrome): Tab-Titel + URL via UIA `ValuePattern`, Body via `TextPattern` (Smoke-Test steht aus, kein Browser in der Sandbox-Session)
+    - **Browser-Reader Iter. 3 — CDP als Opt-in:** zusätzlich Chrome DevTools Protocol
+      (`appReader.browser.cdp.enabled`, Default `false`). Erfordert Browser-Start mit
+      `--remote-debugging-port`. HTML → MD via `ReverseMarkdown 3.13.0`.
+      DisplayName aktualisiert: „Browser (UIA; CDP opt-in via config)".
+      Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 63/63 grün (+35 AppReader-Tests seit letztem Sync)
+- [x] Tests: 83/83 grün (+20 AppReader-Tests seit `Browser-Reader Tests (App-Reader Iteration 2)`; inkl. CDP-Iter. 3: `Read_NoCdpNoUia_GracefullyReportsContentSource`, `Read_ContentMarkdown_IncludesUrlTitleSuffix`, `Read_CdpEnabledButNoServer_FallsBackGracefully`, `Read_CdpEnabledWithShortTimeout_DoesNotBlockLong`)
 - [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint
 - [ ] Trigger-Pipeline (`recall record`) — naechste Iteration
 - [ ] Push auf `origin/main` (nach Tests + Smoke-Test)
@@ -87,6 +92,7 @@ Folgen `projects/PROJECT-RULES.md`:
    - Outlook-Mail-Log mit `ignoreAutoRuleMails`-Setting
    - Persistenz als zusätzliche `*.content.md` neben dem Capture-MD
    - Plugin-Discovery via Reflection
+   - **Browser-Reader CDP opt-in erledigt (Iter. 3)** — siehe DECISIONS.md-Eintrag 2026-07-03
 2. **Trigger-Pipeline (`recall record`):** Polling auf `GetForegroundWindow` + Scroll/Click-Detection + Throttle + Dedup (TR-1..6)
 3. **UIA-Fallback:** Wenn OCR zu schlecht, Windows UIA als zusätzliche Textquelle (oder als App-Reader-Default)
 4. **OCR-Tessdata-Doku:** README-Schritt-für-Schritt-Anleitung zum Download ✅ (PS-One-Liner drin)
