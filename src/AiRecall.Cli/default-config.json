@@ -44,6 +44,16 @@
         "enabled": false,
         "endpoint": "http://localhost:9222",
         "timeoutMs": 1500
+      },
+      "markdown": {
+        "unknownTags": "PassThrough",
+        "githubFlavored": false,
+        "removeComments": true,
+        "whitelistUriSchemes": ["http", "https", "ftp", "ftps", "mailto", "tel"],
+        "smartHrefHandling": false,
+        "tableWithoutHeaderRowHandling": "Default",
+        "listBulletChar": "*",
+        "defaultCodeBlockLanguage": ""
       }
     },
     "notepad": {

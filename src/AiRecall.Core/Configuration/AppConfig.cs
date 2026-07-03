@@ -69,6 +69,14 @@ public sealed class BrowserConfig
     /// <summary>Chrome DevTools Protocol Anbindung (optional, erfordert Browser-Start mit <c>--remote-debugging-port</c>).</summary>
     [JsonPropertyName("cdp")]
     public CdpConfig Cdp { get; set; } = new();
+
+    /// <summary>
+    /// ReverseMarkdown-Konfiguration für die HTML→Markdown-Konvertierung.
+    /// Wirkt unabhängig vom CDP-Gate; alle Felder sind optional und fallen auf
+    /// die <see cref="MarkdownSettings"/>-Defaults zurück.
+    /// </summary>
+    [JsonPropertyName("markdown")]
+    public MarkdownSettings Markdown { get; set; } = new();
 }
 
 public sealed class CdpConfig
@@ -88,6 +96,59 @@ public sealed class CdpConfig
     /// <summary>Timeout (ms) für HTTP-Lookup + WebSocket-Roundtrip.</summary>
     [JsonPropertyName("timeoutMs")]
     public int TimeoutMs { get; set; } = 1500;
+}
+
+/// <summary>
+/// 1:1-Konfiguration für <c>ReverseMarkdown.Config</c> (v3.13). Alle Felder sind optional.
+/// Ungesetzte Felder werden nicht in den Converter geschrieben → die Library-Defaults
+/// bleiben erhalten. Enums werden als Strings in JSON erwartet (case-insensitive).
+/// </summary>
+public sealed class MarkdownSettings
+{
+    /// <summary>
+    /// Wie unbekannte HTML-Tags behandelt werden:
+    /// <c>"PassThrough"</c> (Default), <c>"Drop"</c>, <c>"Bypass"</c>, <c>"Raise"</c>.
+    /// </summary>
+    [JsonPropertyName("unknownTags")]
+    public string? UnknownTags { get; set; }
+
+    /// <summary>GitHub-Flavored-Markdown (Tabellen, fenced code, etc.). Default: <c>false</c>.</summary>
+    [JsonPropertyName("githubFlavored")]
+    public bool? GithubFlavored { get; set; }
+
+    /// <summary>HTML-Kommentare vor Konvertierung entfernen. Default: <c>true</c>.</summary>
+    [JsonPropertyName("removeComments")]
+    public bool? RemoveComments { get; set; }
+
+    /// <summary>
+    /// Erlaubte URI-Schemes für <c>&lt;a href&gt;</c>. Default in der Library:
+    /// <c>{"http", "https", "ftp", "ftps", "mailto", "tel"}</c>.
+    /// </summary>
+    [JsonPropertyName("whitelistUriSchemes")]
+    public List<string>? WhitelistUriSchemes { get; set; }
+
+    /// <summary>
+    /// Smarte Href-Behandlung (URL-Dekodierung, Whitespaces). Default: <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("smartHrefHandling")]
+    public bool? SmartHrefHandling { get; set; }
+
+    /// <summary>
+    /// Tabellen ohne Header-Zeile: <c>"Default"</c> oder <c>"EmptyRow"</c>.
+    /// </summary>
+    [JsonPropertyName("tableWithoutHeaderRowHandling")]
+    public string? TableWithoutHeaderRowHandling { get; set; }
+
+    /// <summary>
+    /// Bullet-Character für unsortierte Listen. Als einzelnes Zeichen oder String;
+    /// bei leerem Wert fällt die Library auf <c>'*'</c> zurück.
+    /// </summary>
+    [JsonPropertyName("listBulletChar")]
+    public string? ListBulletChar { get; set; }
+
+    /// <summary>Default-Sprache für Code-Blöcke (z. B. <c>"text"</c>, <c>"bash"</c>).</summary>
+    [JsonPropertyName("defaultCodeBlockLanguage")]
+    public string? DefaultCodeBlockLanguage { get; set; }
 }
 
 public sealed class NotepadConfig

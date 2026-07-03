@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Automation;
 using AiRecall.AppReader.Base;
+using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
 
 namespace AiRecall.AppReader.Browser;
@@ -42,8 +43,6 @@ public sealed class BrowserAppReader : AppReaderBase
         @"^(https?://[^\s]+|file://[^\s]+|about:[^\s]+|chrome://[^\s]+|edge://[^\s]+|chrome-extension://[^\s]+)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    private static readonly ReverseMarkdown.Converter MarkdownConverter = new();
-
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
@@ -67,7 +66,7 @@ public sealed class BrowserAppReader : AppReaderBase
 
             if (!string.IsNullOrEmpty(cdp?.Html))
             {
-                contentMarkdown = ConvertHtmlToMarkdown(cdp.Html, maxChars);
+                contentMarkdown = ConvertHtmlToMarkdown(cdp.Html, maxChars, context.Config.AppReader.Browser.Markdown);
                 contentSource = "cdp";
             }
             else
@@ -137,12 +136,22 @@ public sealed class BrowserAppReader : AppReaderBase
         @"<!--.*?-->",
         RegexOptions.Singleline | RegexOptions.Compiled);
 
-    private static string ConvertHtmlToMarkdown(string html, int maxChars)
+    /// <summary>
+    /// Matcht <c>src="data:image/svg+xml;base64,..."</c>-Data-URLs (Lazy-Load-Placeholder,
+    /// Inline-Icon-SVGs). Wird durch einen Marker ersetzt, damit das umgebende
+    /// <c>&lt;img&gt;</c>-Tag gültig bleibt.
+    /// </summary>
+    private static readonly Regex InlineSvgSrcRegex = new(
+        @"src=""data:image/svg\+xml[^""]*""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static string ConvertHtmlToMarkdown(string html, int maxChars, MarkdownSettings? settings)
     {
         try
         {
             var cleaned = StripNoise(html);
-            var md = MarkdownConverter.Convert(cleaned);
+            var converter = BuildConverter(settings);
+            var md = converter.Convert(cleaned);
             return Truncate(md, maxChars);
         }
         catch (Exception ex)
@@ -153,8 +162,43 @@ public sealed class BrowserAppReader : AppReaderBase
     }
 
     /// <summary>
+    /// Baut einen frischen <see cref="ReverseMarkdown.Converter"/> mit den aus
+    /// <paramref name="settings"/> gemappten <see cref="ReverseMarkdown.Config"/>-Werten.
+    /// Felder, die in <paramref name="settings"/> nicht gesetzt sind, bleiben auf den
+    /// Library-Defaults. Damit ist die JSON-Konfiguration 1:1 auf die
+    /// ReverseMarkdown-Optionen abbildbar.
+    /// </summary>
+    public static ReverseMarkdown.Converter BuildConverter(MarkdownSettings? settings)
+    {
+        var converter = new ReverseMarkdown.Converter();
+        if (settings is null) return converter;
+
+        var cfg = converter.Config;
+
+        if (settings.UnknownTags is { Length: > 0 } ut &&
+            Enum.TryParse<ReverseMarkdown.Config.UnknownTagsOption>(ut, ignoreCase: true, out var u))
+        {
+            cfg.UnknownTags = u;
+        }
+        if (settings.GithubFlavored is bool gf) cfg.GithubFlavored = gf;
+        if (settings.RemoveComments is bool rc) cfg.RemoveComments = rc;
+        if (settings.WhitelistUriSchemes is { } ws) cfg.WhitelistUriSchemes = ws.ToArray();
+        if (settings.SmartHrefHandling is bool sh) cfg.SmartHrefHandling = sh;
+        if (settings.TableWithoutHeaderRowHandling is { Length: > 0 } twh &&
+            Enum.TryParse<ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption>(twh, ignoreCase: true, out var tt))
+        {
+            cfg.TableWithoutHeaderRowHandling = tt;
+        }
+        if (settings.ListBulletChar is { Length: > 0 } lb) cfg.ListBulletChar = lb[0];
+        if (settings.DefaultCodeBlockLanguage is { Length: > 0 } dcl) cfg.DefaultCodeBlockLanguage = dcl;
+
+        return converter;
+    }
+
+    /// <summary>
     /// Entfernt Content-Blöcke, die für Markdown-Aufzeichnung sinnlos sind:
-    /// &lt;script&gt;/&lt;style&gt;/&lt;svg&gt;/&lt;noscript&gt; und HTML-Kommentare.
+    /// &lt;script&gt;/&lt;style&gt;/&lt;svg&gt;/&lt;noscript&gt;, HTML-Kommentare
+    /// und inline base64-SVG-Data-URLs in <c>src</c>-Attributen.
     /// </summary>
     public static string StripNoise(string html)
     {
@@ -162,7 +206,8 @@ public sealed class BrowserAppReader : AppReaderBase
         try
         {
             var withoutComments = HtmlCommentsRegex.Replace(html, string.Empty);
-            return NoiseTagsRegex.Replace(withoutComments, string.Empty);
+            var withoutNoiseTags = NoiseTagsRegex.Replace(withoutComments, string.Empty);
+            return InlineSvgSrcRegex.Replace(withoutNoiseTags, "src=\"(inline-svg)\"");
         }
         catch
         {

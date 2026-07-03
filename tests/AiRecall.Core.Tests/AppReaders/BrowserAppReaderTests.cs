@@ -104,6 +104,31 @@ public class BrowserAppReaderTests
     }
 
     [Fact]
+    public void StripNoise_ReplacesInlineSvgDataUrlsWithMarker()
+    {
+        var dataUrl = "data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9InJlZCIvPjwvc3ZnPg==";
+        var html = $"<img src=\"{dataUrl}\" width=\"32\" height=\"32\" alt=\"dot\"> tail";
+        var out2 = BrowserAppReader.StripNoise(html);
+
+        Assert.Contains("alt=\"dot\"", out2);
+        Assert.Contains("width=\"32\"", out2);
+        Assert.Contains("tail", out2);
+        Assert.Contains("(inline-svg)", out2);
+        Assert.DoesNotContain("PD94bWwg", out2); // base64 data gone
+        Assert.DoesNotContain("base64", out2);
+    }
+
+    [Fact]
+    public void StripNoise_DoesNotTouchNonSvgDataUrls()
+    {
+        // data:image/png base64 should remain (we only filter SVG)
+        var html = "<img src=\"data:image/png;base64,iVBORw0KGgoAAAA=\" alt=\"png\">";
+        var out2 = BrowserAppReader.StripNoise(html);
+        Assert.Contains("data:image/png;base64", out2);
+        Assert.Contains("iVBORw0KGgo", out2);
+    }
+
+    [Fact]
     public void StripNoise_HandlesEmptyAndMalformedGracefully()
     {
         Assert.Equal("", BrowserAppReader.StripNoise(""));
@@ -207,5 +232,144 @@ public class BrowserAppReaderTests
     {
         var reader = new BrowserAppReader();
         Assert.False(string.IsNullOrEmpty(reader.DisplayName));
+    }
+
+    // ---- MarkdownSettings -> BuildConverter ----
+
+    [Fact]
+    public void BuildConverter_NullSettings_ReturnsValidConverter()
+    {
+        var converter = BrowserAppReader.BuildConverter(null);
+
+        Assert.NotNull(converter);
+        Assert.NotNull(converter.Config);
+        // Smoke-Test: muss etwas Konvertieren, ohne zu werfen.
+        var md = converter.Convert("<p>Hello <strong>World</strong></p>");
+        Assert.Contains("Hello", md);
+        Assert.Contains("World", md);
+    }
+
+    [Fact]
+    public void BuildConverter_EmptySettings_PreservesLibraryDefaults()
+    {
+        // Bei komplett leerem MarkdownSettings darf KEIN Config-Wert überschrieben werden.
+        // Defaults der Library v3.13 sind hier dokumentiert (per Reflection verifiziert).
+        var converter = BrowserAppReader.BuildConverter(new MarkdownSettings());
+        var cfg = converter.Config;
+
+        Assert.False(cfg.RemoveComments);   // Library-Default
+        Assert.Equal('-', cfg.ListBulletChar); // Library-Default
+        Assert.False(cfg.GithubFlavored);
+        Assert.False(cfg.SmartHrefHandling);
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.UnknownTags);
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.Default, cfg.TableWithoutHeaderRowHandling);
+        Assert.Null(cfg.DefaultCodeBlockLanguage);
+        Assert.Null(cfg.WhitelistUriSchemes);
+    }
+
+    [Fact]
+    public void BuildConverter_AllSettings_AppliesAllValues()
+    {
+        var s = new MarkdownSettings
+        {
+            UnknownTags = "Drop",
+            GithubFlavored = true,
+            RemoveComments = false,
+            WhitelistUriSchemes = new() { "https", "mailto" },
+            SmartHrefHandling = true,
+            TableWithoutHeaderRowHandling = "EmptyRow",
+            ListBulletChar = "+",
+            DefaultCodeBlockLanguage = "bash"
+        };
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.UnknownTags);
+        Assert.True(cfg.GithubFlavored);
+        Assert.False(cfg.RemoveComments);
+        Assert.Equal(new[] { "https", "mailto" }, cfg.WhitelistUriSchemes);
+        Assert.True(cfg.SmartHrefHandling);
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.TableWithoutHeaderRowHandling);
+        Assert.Equal('+', cfg.ListBulletChar);
+        Assert.Equal("bash", cfg.DefaultCodeBlockLanguage);
+    }
+
+    [Fact]
+    public void BuildConverter_UnknownTags_IsCaseInsensitive()
+    {
+        var s = new MarkdownSettings { UnknownTags = "drop" }; // lowercase
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.UnknownTags);
+    }
+
+    [Fact]
+    public void BuildConverter_UnknownTags_InvalidString_LeavesDefault()
+    {
+        // Ungültiger String → kein Override → Library-Default bleibt.
+        var s = new MarkdownSettings { UnknownTags = "NotAValidOption" };
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.UnknownTags);
+    }
+
+    [Fact]
+    public void BuildConverter_TableWithoutHeaderRow_IsCaseInsensitive()
+    {
+        var s = new MarkdownSettings { TableWithoutHeaderRowHandling = "emptyrow" };
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.TableWithoutHeaderRowHandling);
+    }
+
+    [Fact]
+    public void BuildConverter_ListBulletChar_TakesFirstCharOnly()
+    {
+        // Auch wenn der String mehrere Zeichen enthält, wird nur das erste übernommen.
+        var s = new MarkdownSettings { ListBulletChar = "->" };
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+        Assert.Equal('-', cfg.ListBulletChar);
+    }
+
+    [Fact]
+    public void BuildConverter_WhitelistUriSchemes_EmptyList_OverridesDefault()
+    {
+        // Leere Liste soll die Whitelist komplett leeren (nicht Default lassen).
+        var s = new MarkdownSettings { WhitelistUriSchemes = new() };
+        var cfg = BrowserAppReader.BuildConverter(s).Config;
+        Assert.Empty(cfg.WhitelistUriSchemes);
+    }
+
+    [Fact]
+    public void ConvertHtmlToMarkdown_EndToEnd_WithGithubFlavored_RendersTable()
+    {
+        const string html = "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>";
+
+        var s = new MarkdownSettings { GithubFlavored = true };
+        var md = BrowserAppReader.BuildConverter(s).Convert(BrowserAppReader.StripNoise(html));
+
+        // GFM table → Pipes + Header-Separator-Zeile
+        Assert.Contains("|", md);
+        Assert.Contains("---", md);
+    }
+
+    [Fact]
+    public void ConvertHtmlToMarkdown_WithCustomBulletChar_UsesIt()
+    {
+        const string html = "<ul><li>one</li><li>two</li></ul>";
+
+        var s = new MarkdownSettings { ListBulletChar = "+" };
+        var md = BrowserAppReader.BuildConverter(s).Convert(BrowserAppReader.StripNoise(html));
+
+        Assert.Contains("+ one", md);
+        Assert.Contains("+ two", md);
+    }
+
+    [Fact]
+    public void AppConfig_BrowserConfig_HasMarkdownSettings()
+    {
+        // Sicherstellen, dass die JSON-Bindung über BrowserConfig.Markdown erreichbar ist
+        // und Standardwerte gesetzt sind (kein null).
+        var cfg = new AppConfig();
+        Assert.NotNull(cfg.AppReader.Browser.Markdown);
+        Assert.Null(cfg.AppReader.Browser.Markdown.UnknownTags);
+        Assert.Null(cfg.AppReader.Browser.Markdown.GithubFlavored);
+        Assert.Null(cfg.AppReader.Browser.Markdown.ListBulletChar);
     }
 }
