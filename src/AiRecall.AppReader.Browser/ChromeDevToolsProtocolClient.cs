@@ -16,7 +16,8 @@ namespace AiRecall.AppReader.Browser;
 ///   1. HTTP GET <c>{endpoint}/json/version</c> um die WebSocket-URL des Browser-Targets zu bekommen
 ///      (oder <c>/json</c> für alle offenen Tabs)
 ///   2. WebSocket-Connect auf die Browser-Target-WS-URL
-///   3. Sende <c>Runtime.evaluate("document.documentElement.outerHTML")</c>
+///   3. Sende <c>Runtime.evaluate("document.body.innerHTML")</c> — nur sichtbarer Body,
+///      Head/Scripts/Styles bleiben draußen.
 ///   4. Parse Response, gib URL + HTML zurück
 ///
 /// Bei jedem Fehler (Port nicht offen, Timeout, Browser blockiert CDP) → <c>null</c>.
@@ -78,7 +79,7 @@ internal static class ChromeDevToolsProtocolClient
                 method = "Runtime.evaluate",
                 @params = new
                 {
-                    expression = "document.documentElement.outerHTML",
+                    expression = "document.body ? document.body.innerHTML : document.documentElement.innerHTML",
                     returnByValue = true
                 }
             });

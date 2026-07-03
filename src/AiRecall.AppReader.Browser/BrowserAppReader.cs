@@ -129,17 +129,44 @@ public sealed class BrowserAppReader : AppReaderBase
         return (title, "");
     }
 
+    private static readonly Regex NoiseTagsRegex = new(
+        @"<(script|style|svg|noscript)\b[^>]*>.*?</\1\s*>",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex HtmlCommentsRegex = new(
+        @"<!--.*?-->",
+        RegexOptions.Singleline | RegexOptions.Compiled);
+
     private static string ConvertHtmlToMarkdown(string html, int maxChars)
     {
         try
         {
-            var md = MarkdownConverter.Convert(html);
+            var cleaned = StripNoise(html);
+            var md = MarkdownConverter.Convert(cleaned);
             return Truncate(md, maxChars);
         }
         catch (Exception ex)
         {
             // ReverseMarkdown kann bei exotischem HTML scheitern — Fallback auf Plain-Text
             return $"```\n{TruncateForCodeBlock(StripHtmlTags(html), maxChars)}\n```\n_(HTML→MD failed: {ex.Message})_";
+        }
+    }
+
+    /// <summary>
+    /// Entfernt Content-Blöcke, die für Markdown-Aufzeichnung sinnlos sind:
+    /// &lt;script&gt;/&lt;style&gt;/&lt;svg&gt;/&lt;noscript&gt; und HTML-Kommentare.
+    /// </summary>
+    public static string StripNoise(string html)
+    {
+        if (string.IsNullOrEmpty(html)) return html;
+        try
+        {
+            var withoutComments = HtmlCommentsRegex.Replace(html, string.Empty);
+            return NoiseTagsRegex.Replace(withoutComments, string.Empty);
+        }
+        catch
+        {
+            return html;
         }
     }
 

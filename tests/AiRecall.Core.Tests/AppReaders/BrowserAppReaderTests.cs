@@ -88,6 +88,31 @@ public class BrowserAppReaderTests
     }
 
     [Fact]
+    public void StripNoise_RemovesScriptsStylesSvgsAndComments()
+    {
+        const string html = "<div><p>Hello</p><script>alert('x')</script><style>body { color:red }</style><svg width=\"100\"><path d=\"M0 0\"/></svg><noscript>nope</noscript><!-- a comment --><p>World</p></div>";
+
+        var out2 = BrowserAppReader.StripNoise(html);
+
+        Assert.Contains("Hello", out2);
+        Assert.Contains("World", out2);
+        Assert.DoesNotContain("alert", out2);
+        Assert.DoesNotContain("body {", out2);
+        Assert.DoesNotContain("<path", out2);
+        Assert.DoesNotContain("nope", out2);
+        Assert.DoesNotContain("a comment", out2);
+    }
+
+    [Fact]
+    public void StripNoise_HandlesEmptyAndMalformedGracefully()
+    {
+        Assert.Equal("", BrowserAppReader.StripNoise(""));
+        var partial = "<div>kept<script>oops<span>also kept</span>";
+        var out2 = BrowserAppReader.StripNoise(partial);
+        Assert.Contains("kept", out2);
+    }
+
+    [Fact]
     public void Read_CdpEnabledButNoServer_FallsBackGracefully()
     {
         // cdp.enabled = true, aber kein Browser lauscht auf localhost:9222
