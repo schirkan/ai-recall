@@ -1,0 +1,37 @@
+{
+  "capture": {
+    "rootPath": "capture",
+    "screenshotFormat": "png"
+  },
+  "screenRecorder": {
+    "throttleMs": 1000,
+    "periodicCaptureMs": 0,
+    "ignoreApps": [
+      "1Password",
+      "KeePass",
+      "Bitwarden"
+    ],
+    "ignoreUrls": [
+      "banking",
+      "accounts.google.com"
+    ],
+    "ignoreWindowTitles": [
+      "Sign in",
+      "Anmelden",
+      "Passwort",
+      "Fingerprint"
+    ]
+  },
+  "ocr": {
+    "engine": "tesseract",
+    "languages": [
+      "deu",
+      "eng"
+    ],
+    "tessDataPath": "tessdata"
+  },
+  "logging": {
+    "level": "info",
+    "path": "logs"
+  }
+}

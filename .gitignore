@@ -43,9 +43,8 @@ __pycache__/
 .venv/
 venv/
 
-# --- Data / Models (Platzhalter, später prüfen) ---
+# --- Data / ML-Modelle (Platzhalter, später prüfen) ---
 data/
-models/
 *.pkl
 *.h5
 
@@ -65,3 +64,5 @@ TestResults/
 # Capture / Laufzeit-Artefakte (AI Recall)
 capture/
 logs/
+tessdata/
+*.traineddata

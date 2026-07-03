@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**Spec-Phase** — Vision + MVP1-Scope bestätigt, .NET-Solution-Skeleton in Arbeit.
+**MVP1 — `active-window` implementiert** (Spec 0003).
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -18,9 +18,15 @@
 - [x] Architektur-Entscheidungen bestätigt (MIT, Windows-only, Hybrid-DLLs, Trigger-Pipeline)
 - [x] `LICENSE` (MIT) angelegt
 - [x] `README.md` angelegt
-- [ ] dotnet-8-Solution-Skeleton (`AiRecall.sln` + 7 Projekte)
-- [ ] Erstes CLI-Command (`recall list-windows`) lauffähig
-- [ ] Push auf `origin/main`
+- [x] `dotnet-8`-Solution-Skeleton (8 Projekte)
+- [x] `recall list-windows` — lauffähig
+- [x] `recall active-window` (Spec 0003) — lauffähig mit Ignore-Liste, OCR (Tesseract), SHA-256, YAML-Frontmatter
+- [x] Tech-Defaults final (Tesseract, Serilog, xUnit, manueller CLI-Switch, Blacklist) — siehe `DECISIONS.md`
+- [x] Tests: 18/18 grün (Hashing, IgnoreMatcher, ConfigLoader)
+- [ ] OCR mit echten Tessdata-Dateien manuell auf Desktop verifiziert
+- [ ] `recall record` (kontinuierlich mit Trigger-Pipeline)
+- [ ] App-Reader: Browser, Outlook, Word, Excel
+- [ ] Push auf `origin/main` (nach Tests + manueller Verifikation)
 
 ## Projektziel (Kurzfassung)
 
@@ -38,15 +44,25 @@ Ausführlich: `specs/0001-vision.md`
 |---|---|
 | `LICENSE` | MIT-Lizenztext |
 | `README.md` | GitHub-Readme (Status, Features, Quick Start, Architektur) |
-| `.gitignore` | Generische Ausschlüsse (wird um .NET-Spezifika ergänzt) |
+| `DECISIONS.md` | Architektur- und Stack-Entscheidungen mit Datum/Begründung |
+| `.gitignore` | Generische + .NET + Capture/Laufzeit-Ausschlüsse (inkl. `tessdata/`, `*.traineddata`) |
 | `PROJECT.md` | Diese Datei — Current Status, Project Files |
+| `AiRecall.sln` | Solution mit 8 Projekten |
+| `global.json` | .NET SDK-Pin (8.0.422, `latestFeature`) |
 | `specs/` | Spezifikationen, Roadmaps |
 | `specs/0001-vision.md` | Vision + Roadmap MVP1/MVP2/MVP3 |
 | `specs/0002-mvp1-scope.md` | MVP1-Scope, User Stories, Architektur, Config |
-| `src/` | (geplant) .NET-Solution `AiRecall.sln` + Projekte |
-| `tests/` | (geplant) Unit-/Integration-Tests |
+| `specs/0003-active-window.md` | `recall active-window` Command-Spec |
+| `src/` | .NET-Solution-Projekte |
+| `src/AiRecall.Core/` | Models, Configuration, Persistence, Util |
+| `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR, Trigger-Logik |
+| `src/AiRecall.AppReader.Base/` | IAppReader-Basis (leer, für App-Reader-DLLs) |
+| `src/AiRecall.AppReader.{Browser,Outlook,Documents}/` | App-Reader (Stubs, kommen nach `active-window`) |
+| `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
+| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core (Hashing, IgnoreMatcher, ConfigLoader) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
-| `DECISIONS.md` | (geplant) Architekturentscheidungen |
+| `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
+| `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |
 
 ## Konventionen
 
@@ -56,12 +72,10 @@ Folgen `projects/PROJECT-RULES.md`:
 - Decisions in `DECISIONS.md`
 - Current Status hier aktuell halten
 
-## Offene Punkte (für MVP1 noch zu klären)
+## Offene Punkte (für MVP1 nach `active-window`)
 
-1. **Ignore-Liste:** Apps/URLs/Pattern, die nie erfasst werden sollen
-   (z. B. Banking, 1Password, Inkognito-Browser)
-2. **OCR-Engine:** Tesseract (lokal, mehrsprachig) oder Windows.Media.Ocr
-   (built-in, nur en-US auf älteren Windows-Versionen)?
-3. **CLI-Library:** System.CommandLine vs. Spectre.Console.Cli
-4. **Logging:** Serilog oder Microsoft.Extensions.Logging
-5. **Tests:** xUnit, NUnit, oder MSTest?
+1. **Trigger-Pipeline (`recall record`):** Polling auf `GetForegroundWindow` + Scroll/Click-Detection + Throttle + Dedup (TR-1..6)
+2. **App-Reader:** Browser (Chrome/Edge/FF URL+Text), Outlook Classic (MAPI), Word, Excel → MD
+3. **UIA-Fallback:** Wenn OCR zu schlecht, Windows UIA als zusätzliche Textquelle
+4. **State-File:** Letzter Hash pro Prozess für dedup, evtl. SQLite in MVP2/3
+5. **OCR-Tessdata-Doku:** README-Schritt-für-Schritt-Anleitung zum Download
