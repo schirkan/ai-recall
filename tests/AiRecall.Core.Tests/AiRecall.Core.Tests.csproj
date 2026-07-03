@@ -24,6 +24,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AiRecall.Core\AiRecall.Core.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Base\AiRecall.AppReader.Base.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.Browser\AiRecall.AppReader.Browser.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
   </ItemGroup>
 
 </Project>

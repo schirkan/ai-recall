@@ -26,13 +26,13 @@
 - [x] **App-Reader-Architektur** (Spec 0004) implementiert:
   - `IAppReader` + `AppReaderResult` + `AppReaderContext` + `AppReaderRegistry` (Reflection-Loader)
   - `CaptureWriter.WriteContent()` für `*.content.md` neben Capture-MD
-  - **Browser-Reader** (msedge, chrome): Tab-Titel + URL via UIA `ValuePattern`, Body via `TextPattern`
-  - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant)
-- [x] Tests: 28/28 grün (+10 AppReader-Tests)
-- [x] Smoke-Test: Notepad-Reader liefert echten Buffer (15 Zeilen, 363 Zeichen) als strukturiertes `*.content.md`
-- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint, Explorer
-- [ ] Trigger-Pipeline (`recall record`)
-- [ ] Push auf `origin/main` (nach Tests + Smoke-Test — siehe unten)
+  - **Browser-Reader** (msedge, chrome): Tab-Titel + URL via UIA `ValuePattern`, Body via `TextPattern` (Smoke-Test steht aus, kein Browser in der Sandbox-Session)
+  - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
+  - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
+- [x] Tests: 63/63 grün (+35 AppReader-Tests seit letztem Sync)
+- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint
+- [ ] Trigger-Pipeline (`recall record`) — naechste Iteration
+- [ ] Push auf `origin/main` (nach Tests + Smoke-Test)
 
 ## Projektziel (Kurzfassung)
 

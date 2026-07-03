@@ -22,14 +22,16 @@ public sealed class BrowserAppReader : AppReaderBase
     public override string DisplayName => "Browser (UIA + Title-Parsing)";
 
     // Bekannte Suffixe, die Browser an den Tab-Titel hängen.
+// WICHTIG: Längste zuerst! Sonst matched " - Microsoft Edge" vor
+// " - InPrivate - Microsoft Edge" und "InPrivate" bleibt im Titel.
     private static readonly string[] BrowserSuffixes =
     {
+        " - InPrivate - Microsoft\u00A0Edge",  // non-breaking space
+        " - InPrivate - Microsoft Edge",
+        " - Microsoft\u00A0Edge",
+        " - Microsoft Edge",
         " - Google Chrome",
         " - Chrome",
-        " - Microsoft Edge",
-        " - Microsoft\u00A0Edge",      // non-breaking space
-        " - InPrivate - Microsoft Edge",
-        " - InPrivate - Microsoft\u00A0Edge",
         " - Mozilla Firefox"            // Firefox fällt hier zwar nicht hin, schadet nicht
     };
 

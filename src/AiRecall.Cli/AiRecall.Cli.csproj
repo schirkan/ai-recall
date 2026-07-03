@@ -5,6 +5,7 @@
     <ProjectReference Include="..\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Base\AiRecall.AppReader.Base.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Browser\AiRecall.AppReader.Browser.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Notepad\AiRecall.AppReader.Notepad.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
