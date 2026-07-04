@@ -316,6 +316,47 @@ CLI-Subcommand `recall record [--foreground]`:
   Hash + Capture reichen für MVP1.
 - Hot-Standby / Service-Installation (Windows-Service via SCM). MVP1
   startet `recall record` als User-Prozess.
+- **MVP2-Tray-EXE** (Hinweis Martin 2026-07-04): Vollwertige Windows-
+  Anwendung mit Notification-Area-Icon zum Steuern von `recall record`
+  (Start/Stop/Pause/Status). Aktuell wird `recall record` als CLI-
+  gestarteter User-Prozess betrieben. TriggerService wird in MVP2 über
+  ein `ITriggerService`-Interface gekapselt, sodass CLI und Tray-EXE
+  denselben Code nutzen. CLI bleibt für Scripts erhalten.
+- **IPC / Service-Interface:** Aktuell kein Inter-Process-Communication.
+  Für die MVP2-Tray-EXE wird ein Mechanismus nötig (Named Pipe, Signal-
+  File oder Windows-Service), damit die Tray-Anwendung den
+  TriggerService steuern und Status abfragen kann. MVP1 beschränkt sich
+  auf CLI-Subcommands; `recall status`-Subcommand liefert bereits
+  strukturierte Capture-/Skip-/Duplicate-Counts für externe Konsumenten.
+- **CLI-Headless-Mode:** Für MVP2-Tray-EXE ist ein `--headless`-Flag
+  an `recall record` vorgesehen, das Console-Output unterdrückt und
+  nur in die Serilog-Rolling-Logs schreibt. Status läuft dann
+  ausschließlich über `ITriggerService`-Properties.
+
+## Zukunft: MVP2 — Tray-Icon-EXE
+
+MVP1-`recall record` ist nur ein CLI-Einstiegspunkt. MVP2 bringt eine
+vollwertige Windows-Anwendung mit Notification-Area-Icon:
+
+- Start/Stop/Pause der Trigger-Pipeline per Klick
+- Live-Status: Capture-Count, aktuelles Vordergrund-Fenster, Throttle-Treffer
+- Schnellzugriff auf Capture-Verzeichnis (Explorer öffnen)
+- Konfigurationsoberfläche (alternativ zur JSON-Datei)
+- Optional: Quiet-Hours (Trigger pausiert automatisch)
+
+`TriggerService` wird über ein `ITriggerService`-Interface gekapselt, sodass
+CLI und Tray-EXE denselben Code nutzen. Die Schnittstelle wird in
+Schritt F (MVP1) bereits als Interface angelegt, auch wenn nur die
+CLI-Implementierung in MVP1 ausgeliefert wird — so ist die
+Tray-EXE-Anbindung in MVP2 ein reines Wiring-Thema.
+
+Status-Reports laufen bereits jetzt strukturiert über Serilog. Für
+die MVP2-IPC wird eine schlanke Variante gewählt (Kandidat: Named Pipe
+für bidirektionale Steuerung + Status-Polling, oder Signal-File für
+unidirektionale Befehle).
+
+Spec für die Tray-EXE folgt nach MVP1-Abschluss (Spec-Kandidat 0006 oder
+Bestandteil von MVP2-Scope).
 
 ## Verwandte Specs
 

@@ -104,7 +104,16 @@ Folgen `projects/PROJECT-RULES.md`:
    - Persistenz als zusätzliche `*.content.md` neben dem Capture-MD
    - Plugin-Discovery via Reflection
    - **Browser-Reader CDP opt-in erledigt (Iter. 3)** — siehe DECISIONS.md-Eintrag 2026-07-03
-2. **Trigger-Pipeline (`recall record`):** Polling auf `GetForegroundWindow` + Scroll/Click-Detection + Throttle + Dedup (TR-1..6)
+2. **Trigger-Pipeline (`recall record`):** SetWinEventHook (out-of-context) als
+   Hauptquelle + Heartbeat-Polling-Fallback + Throttle (per HWND + per App) +
+   HWND-Dedup + Parent-Context für modale Dialoge (Spec 0005, TR-1..9).
+   Iteration läuft (Schritte A-C committed, D-H offen).
 3. **UIA-Fallback:** Wenn OCR zu schlecht, Windows UIA als zusätzliche Textquelle (oder als App-Reader-Default)
 4. **OCR-Tessdata-Doku:** README-Schritt-für-Schritt-Anleitung zum Download ✅ (PS-One-Liner drin)
-5. **State-File:** Letzter Hash pro Prozess für dedup, evtl. SQLite in MVP2/3
+5. **State-File:** Letzter Hash pro HWND für Dedup, evtl. SQLite in MVP2/3
+6. **MVP2: Tray-Icon-EXE** (Hinweis Martin 2026-07-04): Vollwertige
+   Windows-Anwendung mit Notification-Area-Icon zum Steuern von
+   `recall record` (Start/Stop/Pause/Status-Anzeige). CLI bleibt für
+   Scripts erhalten. `TriggerService` wird über ein
+   `ITriggerService`-Interface gekapselt, damit CLI und Tray-EXE
+   denselben Code nutzen. Spec folgt nach MVP1-Abschluss.
