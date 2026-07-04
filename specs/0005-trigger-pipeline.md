@@ -29,7 +29,6 @@ Subskribierte Events:
 | `EVENT_OBJECT_NAMECHANGE` | `0x800C` | Titel/URL geändert (Browser-Tab-Titel, Dokument-Titel) |
 | `EVENT_OBJECT_VALUECHANGE` | `0x800E` | Inhalt geändert (TextBox, WebView, Edit-Control) |
 | `EVENT_OBJECT_SCROLL` | `0x8015` | Scroll-Bewegung |
-| `EVENT_OBJECT_SELECTION` | `0x8006` | Text-Selektion (optional) |
 | `EVENT_SYSTEM_MENUPOPUPSTART` | `0x0005` | Menü/Kontextmenü geöffnet |
 
 Out-of-context Hooks liefern diese Events systemweit; in-process
@@ -43,8 +42,13 @@ Ein 30-s-Loop (`trigger.heartbeatIntervalSeconds`) ruft
 
 ### Outlook: Background-Polling (App-Reader-intern)
 
-Bereits in Spec 0004 dokumentiert: Outlook-Reader pollt alle 60 s
-(`outlook.pollIntervalSeconds`) und persistiert neue Mails.
+Outlook-Mail-Stream ist inhärent polling-basiert (kein OS-Event für
+„neue Mail") und liegt daher **nicht** unter `trigger.*`. Konfiguration
+in Spec 0004 unter `appReader.outlook.*` (`pollIntervalSeconds`,
+`folders`, `ignoreAutoRuleMails`).
+
+**Konvention:** App-spezifische Polling-Konfiguration bleibt unter
+`appReader.<reader>.*`. Diese Spec behandelt nur Window-basierte Events.
 
 ## Architektur
 
@@ -93,7 +97,6 @@ public enum TriggerKind
     NameChange,        // EVENT_OBJECT_NAMECHANGE
     ValueChange,       // EVENT_OBJECT_VALUECHANGE
     Scroll,            // EVENT_OBJECT_SCROLL
-    Selection,         // EVENT_OBJECT_SELECTION
     MenuPopup,         // EVENT_SYSTEM_MENUPOPUPSTART
     Heartbeat          // Polling-Fallback
 }
@@ -116,8 +119,9 @@ public enum TriggerKind
    nicht-null-Reader liefert `ContentMarkdown` (Spec 0004).
 7. **OCR** — Tesseract-Snapshot des Fensters (Bild-Beweis).
 8. **Hash berechnen** — SHA-256 über `processName + contentText + title`.
-9. **Hash-Dedup** — Wenn Hash == letzter Hash dieser App → skip Capture
-   (kein Schreiben, aber Throttle-Timestamps aktualisieren).
+9. **Hash-Dedup pro HWND** — Dictionary `lastHashes[HWND]`. Wenn Hash ==
+   letzter Hash **dieses Fensters** → skip Capture (kein Schreiben,
+   aber Throttle-Timestamps aktualisieren).
 10. **Capture schreiben** — `CaptureWriter.WriteCapture(window, ocrText, appReaderResult)`
     → PNG + Capture-MD + ggf. Content-MD.
 
@@ -183,7 +187,6 @@ Neue Top-Level-Sektion in `default-config.json`:
       "nameChange": true,
       "valueChange": true,
       "scroll": true,
-      "selection": false,
       "menuPopup": true
     },
     "blacklist": {
@@ -208,8 +211,6 @@ Felder:
 - `trigger.heartbeatIntervalSeconds` (Default `30`) — Polling-Fallback.
   `0` deaktiviert Heartbeat.
 - `trigger.winEvents.*` — Granular pro Event-Typ ein-/ausschalten.
-  `selection: false` per Default (Selektionen liefern für MVP1 zu viel
-  Rauschen; kann später aktiviert werden).
 - `trigger.blacklist.windowClasses` — Liste von Win32-Window-Klassen
   zum Ignorieren.
 - `trigger.blacklist.processes` — Liste von Prozess-Namen zum Ignorieren.
@@ -243,8 +244,10 @@ CLI-Subcommand `recall record [--foreground]`:
   einen Capture erstellt.
 - **TR-2** *(MVP1)* Innerhalb desselben HWND wird nicht für jeden
   Fokus-Sub-Wechsel ein Capture erstellt (`throttleMs`).
-- **TR-3** *(MVP1)* Wenn der Inhalt eines Fensters sich nicht geändert
-  hat (gleicher Hash), wird kein neuer Capture geschrieben.
+- **TR-3** *(MVP1)* Wenn der Inhalt eines HWND sich nicht geändert hat
+  (gleicher Hash), wird kein neuer Capture geschrieben. Dictionary
+  `lastHashes[HWND]` — verschiedene Fenster derselben App deduplizieren
+  unabhängig voneinander.
 - **TR-4** *(MVP1)* Maximal ein Capture pro App pro `throttlePerAppSeconds`.
 - **TR-5** *(MVP1)* Heartbeat-Polling stellt sicher, dass auch bei
   verlorenen Events Captures entstehen.
@@ -274,8 +277,11 @@ CLI-Subcommand `recall record [--foreground]`:
 - [ ] Bei `EVENT_SYSTEM_FOREGROUND` wird ein Capture ausgelöst, sofern
       Throttle OK und Hash != letzter Hash.
 - [ ] Bei `EVENT_OBJECT_NAMECHANGE` ohne vorherigen
-      `EVENT_SYSTEM_FOREGROUND`: Hash-Dedup verhindert redundantes
-      Capture, wenn der Titel-Wechsel keinen Inhalts-Wechsel bedeutet.
+      `EVENT_SYSTEM_FOREGROUND`: Hash-Dedup **pro HWND** verhindert
+      redundantes Capture, wenn der Titel-Wechsel keinen Inhalts-Wechsel bedeutet.
+- [ ] Zwei verschiedene HWNDs derselben App (z. B. zwei Notepad-Fenster)
+      deduplizieren unabhängig voneinander — gleicher Hash in Fenster A
+      blockt keinen Capture in Fenster B.
 - [ ] `GetAncestor(hwnd, GA_ROOT)` normalisiert Child-HWNDs auf
       Top-Level-Fenster (Test mit Button-in-Word-HWND).
 - [ ] Heartbeat-Polling läuft alle 30 s, wenn
