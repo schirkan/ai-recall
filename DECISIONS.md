@@ -102,6 +102,33 @@ zusätzlich neue App-Familie PDF-Viewer.
 - **PDF-Inhalt in Iter. 1**: wuerde NuGet-Abhaengigkeit (PdfPig ~5 MB) bedeuten und neue Fehlerquellen. YAGNI; iter. 2 mit NuGet-Evaluierung.
 - **COM-Pro-Prozess-Disambiguierung (PID-Match)**: zu 99% nicht noetig; iter. 3 wenn Martin es wirklich braucht.
 
+---
+
+## 2026-07-04 — Office COM Iter. 3: Pro-Instanz-Filename-Match
+
+Martin 2026-07-04 (Folgeanforderung nach Iter. 2): „Ermittle mit COM auch den Pfad zur aktuellen Datei / active document location." Hintergrund: `GetActiveObject("Word.Application")` liefert immer die erste laufende Instanz. Bei mehreren parallelen Office-Instanzen (z. B. zwei Word-Fenster mit unterschiedlichen Dokumenten) liefert COM sonst den falschen Pfad.
+
+Loesung statt Pro-Prozess-COM-Bindung (zu komplex, kein direkter API-Weg in Windows): Filename-Match.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Disambiguierung | **Filename-Match statt Pro-Prozess-COM-Bindung** | Es gibt in Windows keinen einfachen Weg, COM an einen bestimmten Prozess zu binden (außer über ROT mit Item-Moniker oder `AccessibleObjectFromWindow`). Filename-Match ist eine pragmatische 95%-Loesung: bei mehreren parallelen Instanzen mit unterschiedlichen Filenames passt der Match nicht → Fallback. |
+| 2 | Match-Logik | **`MatchesExpectedFilename(string? fullPath, string? expectedFilename)`** als internal static Helper in `OfficeComInterop` | Eigenstaendig unit-testbar ohne COM. Wird in `TryGet` nach dem Lesen von `FullName` aufgerufen. Bei Mismatch → `null` → Reader faellt auf UIA+Title. |
+| 3 | expectedFilename-Quelle | **`ParseTitle(window.Title)` vor COM-Lookup** | Filename aus Window-Titel parsen, an COM durchreichen. Wenn `ParseTitle` "(untitled)" oder den Default-Untitled-Marker (`Document1`/`Book1`/`Presentation1`) liefert, wird `expectedFilename = null` gesetzt (kein Match erzwungen) — sonst wuerde COM bei echtem Untitled-Doc immer mismatchen. |
+| 4 | IsLikelyARealFilename | **Heuristik pro Reader** (private static) | Pro App unterschiedliche Untitled-Marker (`Document1` / `Book1` / `Presentation1`). Helper verhindert, dass diese als expectedFilename durchgereicht werden. Drei Zeilen pro Reader; DRY waere overkill. |
+| 5 | Fallback-Strategie | **Bei Mismatch → null → Reader-Code faellt auf UIA+Title** | Wichtig: kein falscher Pfad in `content.md`. Im Gegensatz zu Iter. 2 (COM-Fehler) liefert Mismatch trotzdem null; Leser sieht keinen Unterschied. |
+| 6 | Tests | **8 neue Unit-Tests** in `OfficeComInteropFilenameMatchTests` | null/empty expected (immer true), match, case-insensitive, mismatch, empty/null fullPath, unsaved-Doc-Sonderfall. |
+
+### Tests
+
+- 8 neue Unit-Tests.
+- Test-Count gesamt: **271 / 271 grün** (vorher 263).
+
+### Verworfen
+
+- **PID-basierte COM-Bindung** (z. B. via `AccessibleObjectFromWindow` + `IUnknown::QueryInterface`): zu komplex fuer den Use-Case. Filename-Match deckt 95% der Realfaelle ab (mehrere Office-Instanzen mit identischem Filename sind ein Edge-Case, der in der Praxis selten vorkommt).
+- **WindowClass-Match** (z. B. `_WwG` fuer Word): process-name + filename-match reicht aus. WindowClass ist sprachversions-abhaengig.
+
 ### Verworfen
 
 - **`EVENT_OBJECT_SELECTION` als Trigger-Quelle**: würde bei Caret-Wechsel

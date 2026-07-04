@@ -28,8 +28,11 @@ public sealed class WordAppReader : AppReaderBase
     {
         try
         {
-            // 1) COM-Pfad (bevorzugt)
-            var comInfo = OfficeComInterop.TryGetWordInfo();
+            // 1) COM-Pfad (bevorzugt). Filename aus ParseTitle als Erwartung an COM
+            // uebergeben: bei mehreren Word-Instanzen liefert COM sonst die falsche.
+            var (expectedFileName, _, _, _) = ParseTitle(window.Title);
+            var comInfo = OfficeComInterop.TryGetWordInfo(
+                expectedFilename: IsLikelyARealFilename(expectedFileName) ? expectedFileName : null);
             if (comInfo is not null)
             {
                 var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
@@ -168,4 +171,16 @@ public sealed class WordAppReader : AppReaderBase
         if (s.Length <= maxChars) return s.TrimEnd();
         return s[..maxChars].TrimEnd() + "\n… (truncated)";
     }
+
+    /// <summary>
+    /// Heuristik: ist der aus dem Titel geparste Filename ein echter Dateiname
+    /// (kein Placeholder wie "(untitled)" oder leer)?
+    /// COM-Lesart: bei Mismatch wuerde der Match-Check in TryGet null liefern
+    /// und der Reader auf UIA+Title zurueckfallen — das soll nicht passieren,
+    /// wenn der Titel gar keinen verwertbaren Filename enthaelt.
+    /// </summary>
+    private static bool IsLikelyARealFilename(string fileName) =>
+        !string.IsNullOrEmpty(fileName)
+        && fileName != "(untitled)"
+        && !fileName.Equals("Document1", StringComparison.OrdinalIgnoreCase);
 }

@@ -26,8 +26,10 @@ public sealed class ExcelAppReader : AppReaderBase
     {
         try
         {
-            // 1) COM-Pfad (bevorzugt)
-            var comInfo = OfficeComInterop.TryGetExcelInfo();
+            // 1) COM-Pfad (bevorzugt). Filename aus ParseTitle als Erwartung an COM uebergeben.
+            var (expectedFileName, _, _) = ParseTitle(window.Title);
+            var comInfo = OfficeComInterop.TryGetExcelInfo(
+                expectedFilename: IsLikelyARealFilename(expectedFileName) ? expectedFileName : null);
             if (comInfo is not null)
             {
                 var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
@@ -149,4 +151,13 @@ public sealed class ExcelAppReader : AppReaderBase
         if (s.Length <= maxChars) return s.TrimEnd();
         return s[..maxChars].TrimEnd() + "\n… (truncated)";
     }
+
+    /// <summary>
+    /// Heuristik: ist der aus dem Titel geparste Filename ein echter Dateiname
+    /// (kein Placeholder wie "(untitled)" oder leer)?
+    /// </summary>
+    private static bool IsLikelyARealFilename(string fileName) =>
+        !string.IsNullOrEmpty(fileName)
+        && fileName != "(untitled)"
+        && !fileName.Equals("Book1", StringComparison.OrdinalIgnoreCase);
 }

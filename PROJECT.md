@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 263/263 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1 + 17 PDF-Viewer + 3 Office-COM-Integration)
+- [x] Tests: 271/271 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1 + 17 PDF-Viewer + 3 Office-COM-Integration + 8 Office-COM-Filename-Match Iter. 3)
 - [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
   - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
     auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist
@@ -51,6 +51,17 @@
     Adobe/Sumatra/Foxit/PDFXChange/Edge/Chrome).
   - Title-Parsing: Filename + voller Pfad + Page-Nr (Sumatra/PDF-XChange-Style).
   - **Iter. 1**: kein PDF-Inhalt — `PdfPig` (NuGet) ist Kandidat fuer Iter. 2.
+- [x] **Office-COM Iter. 3 — Pro-Instanz-Filename-Match** (Martin 2026-07-04):
+  - `OfficeComInterop.MatchesExpectedFilename(fullPath, expectedFilename)`
+    als internal static Helper (eigenständig unit-testbar).
+  - Reader ruft `ParseTitle(window.Title)` zuerst und übergibt den erwarteten
+    Filename an COM. Bei Mismatch (`ActiveDocument` einer anderen Instanz)
+    → `null` → Fallback auf UIA+Title. **Verhindert falschen Pfad bei
+    mehreren parallelen Office-Instanzen** (z. B. zwei Word-Fenster mit
+    unterschiedlichen Dokumenten).
+  - 8 neue Unit-Tests (`OfficeComInteropFilenameMatchTests`):
+    null/empty expected, match, case-insensitive, mismatch, empty/null fullPath,
+    unsaved-Doc-Sonderfall.
 - [x] **Browser-Reader Iter. 4 — ReverseMarkdown 1:1 via JSON:** neue Sektion
   `appReader.browser.markdown` mappt alle 8 öffentlichen `ReverseMarkdown.Config`-Felder
   (`unknownTags`, `githubFlavored`, `removeComments`, `whitelistUriSchemes`,

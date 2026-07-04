@@ -49,6 +49,26 @@ internal static class OfficeComInterop
             return null;
         }
     }
+
+    /// <summary>
+    /// Filename-Match-Helper: Prueft, ob der von COM gelieferte <paramref name="fullPath"/>
+    /// zur Erwartung <paramref name="expectedFilename"/> passt (case-insensitive).
+    ///
+    /// Wird im COM-Pfad nach dem Lesen von <c>FullName</c> aufgerufen, um zu verhindern,
+    /// dass eine andere Office-Instanz (z. B. zweites Word-Fenster) einen falschen Pfad
+    /// liefert. Bei Mismatch gibt <see cref="TryGet"/> null zurueck → Reader faellt
+    /// auf UIA+Title-Fallback.
+    ///
+    /// <paramref name="expectedFilename"/> = null/leer → kein Match erzwungen (immer true).
+    /// </summary>
+    internal static bool MatchesExpectedFilename(string? fullPath, string? expectedFilename)
+    {
+        if (string.IsNullOrEmpty(expectedFilename)) return true;
+        if (string.IsNullOrEmpty(fullPath)) return false;
+        var actualFilename = System.IO.Path.GetFileName(fullPath);
+        return string.Equals(actualFilename, expectedFilename, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Ergebnis eines COM-Lookups. <see cref="FullPath"/> ist nie null
     /// bei Erfolg. <see cref="Text"/> kann null/leer sein (z. B. leere
@@ -61,25 +81,31 @@ internal static class OfficeComInterop
         string? Error = null);
 
     /// <summary>Word: liefert FullName + Range.Text (Plain).</summary>
-    public static OfficeDocumentInfo? TryGetWordInfo()
+    /// <param name="expectedFilename">Optionaler Filename (aus Window-Titel) zum Match.
+    /// Wenn gesetzt und COM liefert einen anderen Filename, wird <c>null</c> zurueckgegeben
+    /// (verhindert falschen Pfad bei mehreren Office-Instanzen).</param>
+    public static OfficeDocumentInfo? TryGetWordInfo(string? expectedFilename = null)
     {
         return TryGet(
             progId: "Word.Application",
             documentProperty: "ActiveDocument",
             rangeProperty: "Content",
             textProperty: "Text",
-            rowProperty: null);
+            rowProperty: null,
+            expectedFilename: expectedFilename);
     }
 
     /// <summary>Excel: liefert FullName + UsedRange als Markdown-Tabelle.</summary>
-    public static OfficeDocumentInfo? TryGetExcelInfo()
+    /// <param name="expectedFilename">Optionaler Filename (aus Window-Titel) zum Match.</param>
+    public static OfficeDocumentInfo? TryGetExcelInfo(string? expectedFilename = null)
     {
         var info = TryGet(
             progId: "Excel.Application",
             documentProperty: "ActiveWorkbook",
             rangeProperty: "ActiveSheet",
             textProperty: "UsedRange",
-            rowProperty: null);
+            rowProperty: null,
+            expectedFilename: expectedFilename);
 
         if (info == null) return null;
 
@@ -122,14 +148,16 @@ internal static class OfficeComInterop
     }
 
     /// <summary>PowerPoint: liefert FullName + Slide-Texte als Markdown-Liste.</summary>
-    public static OfficeDocumentInfo? TryGetPowerPointInfo()
+    /// <param name="expectedFilename">Optionaler Filename (aus Window-Titel) zum Match.</param>
+    public static OfficeDocumentInfo? TryGetPowerPointInfo(string? expectedFilename = null)
     {
         var info = TryGet(
             progId: "PowerPoint.Application",
             documentProperty: "ActivePresentation",
             rangeProperty: "Slides",
             textProperty: null,
-            rowProperty: null);
+            rowProperty: null,
+            expectedFilename: expectedFilename);
 
         if (info == null) return null;
 
@@ -225,7 +253,8 @@ internal static class OfficeComInterop
         string documentProperty,
         string rangeProperty,
         string? textProperty,
-        string? rowProperty)
+        string? rowProperty,
+        string? expectedFilename = null)
     {
         try
         {
@@ -241,6 +270,9 @@ internal static class OfficeComInterop
                 {
                     var fullPath = (string)doc.GetType().InvokeMember("FullName", BindingFlags.GetProperty, null, doc, null);
                     if (string.IsNullOrEmpty(fullPath)) return null;
+
+                    // Filename-Match (internal static, separat unit-testbar)
+                    if (!MatchesExpectedFilename(fullPath, expectedFilename)) return null;
 
                     if (textProperty == null) return new OfficeDocumentInfo(fullPath, null);
 
