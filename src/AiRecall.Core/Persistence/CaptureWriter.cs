@@ -48,6 +48,186 @@ public static class CaptureWriter
     }
 
     /// <summary>
+    /// Schreibt einen initialen Capture ohne OCR-Text und ohne <c>*.content.md</c>.
+    /// Setzt <c>conversion: pending</c> im Frontmatter und liefert den Pfad zum MD.
+    /// Wird vom Capture-Pfad fuer die Async-Conversion-Pipeline (Spec 0007) verwendet.
+    /// </summary>
+    public static CaptureItem WritePending(
+        WindowInfo window,
+        byte[] screenshotBytes,
+        string contentHash,
+        string captureRoot,
+        string? appContext = null,
+        WindowInfo? parentWindow = null,
+        string? filePath = null,
+        string? uiaContent = null)
+    {
+        var timestamp = DateTimeOffset.Now;
+        var dayDir = Path.Combine(
+            Path.GetFullPath(captureRoot),
+            timestamp.ToString("yyyy-MM-dd"),
+            SanitizeFileName(window.ProcessName));
+        Directory.CreateDirectory(dayDir);
+
+        var stamp = timestamp.ToString("HHmmss-fff");
+        var titleSlug = SanitizeFileName(string.IsNullOrWhiteSpace(window.Title) ? "untitled" : window.Title);
+        var baseName = $"{stamp}-{titleSlug}";
+
+        var screenshotPath = Path.Combine(dayDir, baseName + ".png");
+        var markdownPath = Path.Combine(dayDir, baseName + ".md");
+
+        File.WriteAllBytes(screenshotPath, screenshotBytes);
+        File.WriteAllText(markdownPath, RenderMarkdownPending(
+            window, timestamp, contentHash, baseName + ".png", appContext, parentWindow, filePath, uiaContent),
+            new UTF8Encoding(false));
+
+        return new CaptureItem(
+            timestamp,
+            window,
+            screenshotPath,
+            markdownPath,
+            string.Empty, // leer — OCR/Document kommt async
+            contentHash,
+            appContext);
+    }
+
+    /// <summary>
+    /// Updated nur die Conversion-Felder im Frontmatter einer bestehenden MD-Datei.
+    /// Body bleibt unangetastet. Wird vom ConversionWorker nach erfolgreicher
+    /// (oder fehlgeschlagener) Konvertierung aufgerufen.
+    /// </summary>
+    public static void UpdateConversionStatus(
+        string mdPath,
+        string conversionStatus,
+        string? conversionError = null,
+        string? conversionTimestamp = null,
+        string? conversionSteps = null,
+        string? converterUsed = null)
+    {
+        if (!File.Exists(mdPath)) return;
+
+        var content = File.ReadAllText(mdPath);
+        var lines = content.Split('\n').ToList();
+
+        // Finde Frontmatter-Bereich (zwischen erstem --- und zweitem ---)
+        int startIdx = -1, endIdx = -1;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Trim() == "---")
+            {
+                if (startIdx == -1) startIdx = i;
+                else { endIdx = i; break; }
+            }
+        }
+        if (startIdx == -1 || endIdx == -1) return;
+
+        // Update oder fuege Conversion-Felder hinzu
+        var frontmatter = lines.GetRange(startIdx + 1, endIdx - startIdx - 1);
+        UpdateOrAddFrontmatterField(frontmatter, "conversion", conversionStatus);
+        UpdateOrAddFrontmatterField(frontmatter, "conversionTimestamp", conversionTimestamp ?? DateTimeOffset.Now.ToString("O"));
+        if (conversionError != null)
+            UpdateOrAddFrontmatterField(frontmatter, "conversionError", conversionError);
+        else
+            RemoveFrontmatterField(frontmatter, "conversionError");
+        if (conversionSteps != null)
+            UpdateOrAddFrontmatterField(frontmatter, "conversionSteps", conversionSteps);
+        if (converterUsed != null)
+            UpdateOrAddFrontmatterField(frontmatter, "converterUsed", converterUsed);
+
+        // Schreibe zurueck
+        var sb = new StringBuilder();
+        sb.AppendLine("---");
+        foreach (var line in frontmatter) sb.AppendLine(line);
+        sb.AppendLine("---");
+        for (int i = endIdx + 1; i < lines.Count; i++) sb.AppendLine(lines[i].TrimEnd('\r'));
+
+        File.WriteAllText(mdPath, sb.ToString(), new UTF8Encoding(false));
+    }
+
+    private static void UpdateOrAddFrontmatterField(List<string> frontmatter, string key, string value)
+    {
+        for (int i = 0; i < frontmatter.Count; i++)
+        {
+            var trimmed = frontmatter[i].TrimStart();
+            if (trimmed.StartsWith(key + ":"))
+            {
+                frontmatter[i] = $"{key}: \"{EscapeYaml(value)}\"";
+                return;
+            }
+        }
+        frontmatter.Add($"{key}: \"{EscapeYaml(value)}\"");
+    }
+
+    private static void RemoveFrontmatterField(List<string> frontmatter, string key)
+    {
+        frontmatter.RemoveAll(l => l.TrimStart().StartsWith(key + ":"));
+    }
+
+    private static string RenderMarkdownPending(
+        WindowInfo window,
+        DateTimeOffset timestamp,
+        string contentHash,
+        string screenshotFileName,
+        string? appContext,
+        WindowInfo? parentWindow,
+        string? filePath,
+        string? uiaContent)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("---");
+        sb.AppendLine($"timestamp: {timestamp:O}");
+        sb.AppendLine($"process: \"{EscapeYaml(window.ProcessName)}\"");
+        sb.AppendLine($"pid: {window.ProcessId}");
+        sb.AppendLine($"hwnd: 0x{window.Handle.ToInt64():X}");
+        sb.AppendLine($"title: \"{EscapeYaml(window.Title)}\"");
+        if (parentWindow is not null)
+        {
+            sb.AppendLine($"parentHwnd: 0x{parentWindow.Handle.ToInt64():X}");
+            sb.AppendLine($"parentTitle: \"{EscapeYaml(parentWindow.Title)}\"");
+            sb.AppendLine($"parentProcess: \"{EscapeYaml(parentWindow.ProcessName)}\"");
+        }
+        if (!string.IsNullOrEmpty(appContext))
+        {
+            sb.AppendLine($"context: \"{EscapeYaml(appContext)}\"");
+        }
+        if (!string.IsNullOrEmpty(filePath))
+        {
+            sb.AppendLine($"filePath: \"{EscapeYaml(filePath)}\"");
+        }
+        if (!string.IsNullOrEmpty(uiaContent))
+        {
+            sb.AppendLine($"uiaContent: \"{EscapeYaml(uiaContent)}\"");
+        }
+        sb.AppendLine($"screenshot: {screenshotFileName}");
+        sb.AppendLine($"hash: {contentHash}");
+        sb.AppendLine("conversion: \"pending\"");
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine($"# {window.Title}");
+        sb.AppendLine();
+        sb.AppendLine($"**Process:** `{window.ProcessName}` (PID {window.ProcessId})  ");
+        sb.AppendLine($"**Captured:** {timestamp:yyyy-MM-dd HH:mm:ss zzz}");
+        if (parentWindow is not null)
+        {
+            sb.AppendLine($"**Parent window:** `{parentWindow.ProcessName}` — {parentWindow.Title}  ");
+        }
+        if (!string.IsNullOrEmpty(appContext))
+        {
+            sb.AppendLine($"**Context:** {appContext}  ");
+        }
+        if (!string.IsNullOrEmpty(filePath))
+        {
+            sb.AppendLine($"**File:** `{filePath}`  ");
+        }
+        sb.AppendLine($"**Screenshot:** [{screenshotFileName}]({screenshotFileName})");
+        sb.AppendLine();
+        sb.AppendLine("## Content");
+        sb.AppendLine();
+        sb.AppendLine("_(conversion pending — async via ConversionWorker)_");
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Rendert den Markdown-Body für eine <see cref="AppContentRecord"/>.
     /// Wird sowohl von <see cref="WriteContent"/> als auch von Tests verwendet.
     /// </summary>

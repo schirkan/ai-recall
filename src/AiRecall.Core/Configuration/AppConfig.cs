@@ -30,6 +30,10 @@ public sealed class AppConfig
     /// </summary>
     [JsonPropertyName("trigger")]
     public TriggerConfig Trigger { get; set; } = new();
+
+    /// <summary>Async-Conversion-Pipeline (Spec 0007).</summary>
+    [JsonPropertyName("conversion")]
+    public ConversionConfig Conversion { get; set; } = new();
 }
 
 public sealed class AppReaderConfig
@@ -217,6 +221,33 @@ public sealed class CaptureConfig
     [JsonPropertyName("screenshotFormat")]
     public string ScreenshotFormat { get; set; } = "png";
 }
+
+/// <summary>
+/// Async-Conversion-Pipeline-Konfiguration (Spec 0007 v0.4 final).
+/// Steuert das Verhalten des <c>ConversionWorker</c>.
+/// </summary>
+public sealed class ConversionConfig
+{
+    /// <summary>Globaler Toggle. false = keine Async-Conversion.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Maximale MD-Laenge (KB) pro Konvertierung.</summary>
+    [JsonPropertyName("maxTextKB")]
+    public int MaxTextKB { get; set; } = 64;
+
+    /// <summary>Max. parallele Conversion-Tasks im Worker-Pool.</summary>
+    [JsonPropertyName("batchSize")]
+    public int BatchSize { get; set; } = 2;
+
+    /// <summary>Pro-Capture-Timeout (Sekunden).</summary>
+    [JsonPropertyName("conversionTimeoutSeconds")]
+    public int ConversionTimeoutSeconds { get; set; } = 30;
+}
+
+// Hinweis: OcrConfig existiert bereits separat (Root-Level "ocr"-Property in AppConfig).
+// OCR-spezifische Felder (engine, languages, tessDataPath) bleiben dort.
+// Conversion.ocr.* wird in Schritt 4 ergaenzt, falls noetig.
 
 public sealed class ScreenRecorderConfig
 {
