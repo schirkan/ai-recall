@@ -1,6 +1,6 @@
 # 0007 — Async Document Conversion Pipeline
 
-> **Status:** Draft v0.2 (2026-07-04) — Pandoc raus (Martin-Direktive: Performance wichtiger), nur .NET-Konverter
+> **Status:** Draft v0.3 (2026-07-04) — OCR ebenfalls in Conversion-Pipeline (Martin 2026-07-04 19:25)
 > **Owner:** Martin
 > **Refactored:** Spec 0004 Iter. 4 — App-Reader → DocumentConverter + async pipeline
 
@@ -115,43 +115,69 @@ liefert der Konverter `null` und der Capture wird mit
 
 3. **KEIN `*.content.md`** wird initial geschrieben.
 
-**Conversion (asynchron):**
+**Conversion (asynchron, Martin 2026-07-04 19:25 — OCR ebenfalls async):**
 
-**Option A: `ConversionWorker` als Background-Task im selben Prozess** (`recall record`):
+**Architektur (Martin-Vorschlag, v0.3):** in-process `Channel<string>` als
+Producer-Consumer-Queue. Kein FileSystemWatcher — TriggerWorker enqueued
+direkt nach CaptureWriter.
 
-- `FileSystemWatcher` auf `capture/`-Verzeichnis
-- Filter: `*.md` mit `conversion: pending` (Frontmatter-Parse)
-- Event: neue Datei → in Queue
-- Worker: `DocumentConverter.Convert(filePath)` → schreibt `*.content.md` → updated Frontmatter `conversion: done`
-- Throttle: max. N Konvertierungen parallel (Default 2)
+**Pipeline (alle async im ConversionWorker):**
 
-**Option B: Manueller `recall convert` Subcommand:**
+1. **OCR** (wenn Screenshot vorhanden): Tesseract liest PNG → Plain-Text → `## OCR Content`-Sektion
+2. **DocumentConverter** (wenn `filePath` vorhanden): Format-Extension-basiert → MD-String → `## Document Content (via <name>)`-Sektion
+3. **Persist**: `CaptureWriter.WriteContent` schreibt `*.content.md`, updated Frontmatter
+4. **Status**: `conversion: done` wenn beide erfolgreich, `partial` wenn einer failed, `failed` wenn beide failed
 
-- Scannt `capture/`-Verzeichnis nach pending-MD-Files
-- Konvertiert alle in einem Batch
-- Für Tests, CI und manuelle Recovery
+**TriggerWorker → ConversionWorker:**
 
-**Beide parallel.** FileSystemWatcher für Live-Updates in der
-Capture-Session, `recall convert` für Batch/CI.
+```
+TriggerWorker
+  → WindowScreenshot.CapturePng(window)   // synchron, schnell
+  → CaptureWriter.Write (PNG + *.md mit conversion: pending, KEIN OCR)
+  → Channel<string>.Enqueue(captureMdPath)
+                                          ↓
+ConversionWorker (Background-Task)
+  → liest aus Channel
+  → Parallel:
+     [OCR-Worker]   Tesseract.ExtractText(screenshot) → OCR-Text
+     [Doc-Worker]   DocumentConverter.Convert(filePath) → Doc-MD
+  → CaptureWriter.WriteContent + Frontmatter update
+```
+
+**`recall convert` Subcommand (Martin-Punkt 4):**
+
+- Recovery-Mechanismus: scannt Disk nach `*.md` mit `conversion: pending`
+- Füllt Channel → ConversionWorker verarbeitet asynchron
+- **Nicht blockierend**: gibt Stats zurück (N enqueued), läuft nicht selbst
+- Plus `--include-legacy`: scannt auch Captures ohne `conversion:`-Feld (alle als `pending` behandeln)
+
+**Vorteile ggü. FileSystemWatcher (Martin 2026-07-04 19:25):**
+
+- ✓ Direkt (kein Disk-Roundtrip zwischen Trigger und Worker)
+- ✓ Testbar (Channel< string> kann gemockt werden)
+- ✓ Deterministisch (Queue im Code sichtbar)
+- ✓ Plattform-neutral (kein Win32-FileSystemWatcher)
+- ✓ OCR + Document in einem Worker-Pool → Lastbalancierung
 
 ### Status-Tracking
 
 **Frontmatter:**
 
 ```yaml
-conversion: pending | done | failed
-conversionError: "..."                   # nur bei failed
-conversionTimestamp: 2026-07-04T18:00:00 # bei done/failed
-converterUsed: openxml | pdfpig | reversemarkdown | textfile | none
+conversion: pending | done | partial | failed   # overall status
+conversionError: "..."                          # bei partial/failed, semikolon-getrennt
+conversionTimestamp: 2026-07-04T18:00:00        # bei done/partial/failed
+conversionSteps: "ocr=ok,tesseract;doc=ok,openxml"  # strukturierter Status pro Schritt
 ```
 
 **Log:** `logs/conversion.log` (Serilog) für Diagnose:
 
 ```
-2026-07-04T18:00:00 [INF] Conversion started: Doc.docx (openxml)
-2026-07-04T18:00:01 [INF] Conversion succeeded: Doc.docx (12 KB MD)
-2026-07-04T18:00:02 [ERR] Conversion failed: broken.pdf (pdfpig: corrupted header)
-2026-07-04T18:00:03 [ERR] Conversion failed: notes.odt (no-converter-for-odt)
+2026-07-04T18:00:00 [INF] Conversion started: Doc.docx (ocr=tesseract,doc=openxml)
+2026-07-04T18:00:01 [INF] Conversion done: Doc.docx (12 KB MD, steps=2/2)
+2026-07-04T18:00:02 [ERR] Conversion failed: broken.pdf (doc=pdfpig: corrupted header)
+2026-07-04T18:00:03 [ERR] Conversion partial: notepad.png (ocr=tesseract: empty image, no doc)
+2026-07-04T18:00:04 [ERR] Conversion failed: notes.odt (doc=no-converter-for-odt)
 ```
 
 ### `recall convert` Subcommand
@@ -172,6 +198,12 @@ recall convert [--path <capture-root>] [--max-parallel N] [--timeout S]
 {
   "conversion": {
     "enabled": true,
+    "ocr": {
+      "enabled": true,
+      "engine": "tesseract",
+      "language": "deu+eng",
+      "timeoutSeconds": 15
+    },
     "maxTextKB": 64,
     "batchSize": 2,
     "conversionTimeoutSeconds": 30,
@@ -183,15 +215,19 @@ recall convert [--path <capture-root>] [--max-parallel N] [--timeout S]
 | Feld | Default | Bedeutung |
 |---|---|---|
 | `enabled` | `true` | Globaler Toggle. Wenn `false`: keine Async-Conversion, Capture-MD enthält nur Rohdaten ohne `*.content.md`. |
+| `ocr.enabled` | `true` | OCR-Schritt aktiv. Wenn `false`: nur DocumentConverter, kein OCR-Text. |
+| `ocr.engine` | `"tesseract"` | OCR-Engine. Aktuell nur Tesseract. |
+| `ocr.language` | `"deu+eng"` | Tesseract-Sprachcodes. |
+| `ocr.timeoutSeconds` | `15` | OCR-Timeout pro Bild. |
 | `maxTextKB` | `64` | Maximale MD-Länge (analog zu `appReader.documents.maxTextKB`). |
-| `batchSize` | `2` | Max. parallele Konvertierungen im Worker. |
-| `conversionTimeoutSeconds` | `30` | Pro-Datei-Timeout. |
+| `batchSize` | `2` | Max. parallele Conversion-Tasks im Worker-Pool. |
+| `conversionTimeoutSeconds` | `30` | Pro-Capture-Timeout (gesamt). |
 | `watchDirectory` | leer | Leer = `capture.rootPath`. Anderer Pfad möglich für Test-Setups. |
 
 **Pandoc-Felder entfernt.** `pandocPath` und `fallbackConverters` sind in v0.2 raus,
 da Pandoc nicht mehr unterstützt wird.
 
-## Datenfluss
+## Datenfluss (v0.3, mit OCR in der Pipeline)
 
 ```
 Window-Event
@@ -200,31 +236,39 @@ TriggerWorker (Pipeline-Schritte 1-12)
   ↓
 AppReader.Read(window)  ← nur Rohdaten (Title, FilePath, UIA)
   ↓
-CaptureWriter.Write
+WindowScreenshot.CapturePng(window)  ← synchron, schnell (kein OCR hier mehr)
   ↓
-PNG + MD (mit conversion: pending)
+CaptureWriter.Write (PNG + MD mit conversion: pending)
   ↓
-FileSystemWatcher (in recall record)
+Channel<string>.Enqueue(captureMdPath)
+                                          ↓
+ConversionWorker (Background-Task)
+  ├─ OCR-Sub-Task: Tesseract.ExtractText(screenshot) → "## OCR Content"-Sektion
+  └─ Document-Sub-Task: DocumentConverter.Convert(filePath) → "## Document Content"-Sektion
+                                          ↓
+CaptureWriter.WriteContent + Frontmatter update
   ↓
-ConversionWorker
-  ↓
-DocumentConverter.Convert(filePath)
-  ↓
-*.content.md + Frontmatter conversion: done
+*.content.md + conversion: done | partial | failed
 ```
+
+**OCR-Hinweis:** OCR ist **nicht mehr im synchronen Capture-Pfad** (Martin
+2026-07-04 19:25). Das macht den Capture-Loop deutlich schneller, weil
+Tesseract (typisch 100–500ms pro Bild) erst nachgelagert läuft.
 
 ## Akzeptanzkriterien
 
 - [ ] AppReader lesen nur Rohdaten, kein MD-String mehr (außer Platzhalter)
 - [ ] `DocumentConverter.Convert(filePath)` liefert MD-String für alle unterstützten Formate (docx/xlsx/pptx/pdf/html/txt/md/csv/log)
 - [ ] Edge-Cases (odt, latex, epub, doc/xls/ppt alt) liefern `null` + Log-Hinweis `no-converter-for-<ext>`; Capture wird mit `conversion: failed` markiert
-- [ ] `recall record` schreibt PNG + MD mit `conversion: pending`, **kein** `*.content.md` initial
-- [ ] Hintergrund-Worker konvertiert `*.md` mit `conversion: pending` asynchron zu `*.content.md`
-- [ ] `recall convert` Subcommand konvertiert alle pending-MD-Files in einem Batch
-- [ ] Frontmatter wird nach erfolgreicher Konvertierung auf `conversion: done` gesetzt
-- [ ] Fehlerhafte Konvertierungen markieren `conversion: failed` + `conversionError: …`
+- [ ] `recall record` schreibt PNG + MD mit `conversion: pending`, **kein** OCR-Text, **kein** `*.content.md` initial
+- [ ] Hintergrund-Worker (Channel-Queue) konvertiert `*.md` mit `conversion: pending` asynchron
+- [ ] OCR läuft ebenfalls async (Martin 2026-07-04 19:25) — nicht synchron im Capture-Pfad
+- [ ] Worker-Pool macht parallel: OCR + DocumentConverter (für denselben Capture)
+- [ ] `recall convert` Subcommand enqueued pending-Captures in die Channel-Queue
+- [ ] Frontmatter nach erfolgreicher Konvertierung: `conversion: done` (oder `partial` wenn ein Schritt failed)
+- [ ] Fehlerhafte Konvertierungen markieren `conversion: failed|partial` + `conversionError: …` + `conversionSteps: ...`
 - [ ] `logs/conversion.log` dokumentiert alle Konvertierungen
-- [ ] Tests: DocumentConverter (alle Formate), Frontmatter-Update, Worker-Lifecycle
+- [ ] Tests: DocumentConverter (alle Formate), Frontmatter-Update, Worker-Lifecycle, Channel-Queue
 
 ## Out of Scope
 
@@ -242,18 +286,16 @@ DocumentConverter.Convert(filePath)
 
 ## Offene Fragen (Martin-Review)
 
-1. ~~**Pandoc als externe Dependency OK?**~~ **Erledigt (Martin 2026-07-04 19:12):** Pandoc raus, Performance wichtiger. Edge-Cases (odt, latex, epub, alt-Formate) liefern `null` + Log.
+1. ~~**Pandoc als externe Dependency OK?**~~ **Erledigt (Martin 2026-07-04 19:12):** Pandoc raus.
 2. **NuGet-Packages OK?**
    - `DocumentFormat.OpenXml` (MIT, Microsoft) für docx/xlsx/pptx
    - `UglyToad.PdfPig` (Apache 2.0, MIT-kompatibel) für pdf
    - `ReverseMarkdown` (MIT, vorhanden) für html
-3. **FileSystemWatcher im selben Prozess** (in `recall record`) ODER
-   separater Service? Empfehlung: im selben Prozess (einfacher, kein
-   separater Lifecycle).
-4. **`recall convert` als CLI-Subcommand OK?** Plus optionaler `--include-legacy`-Flag.
-5. **Bestehende Captures:** Legacy-Status akzeptabel oder nachträglich
-   konvertieren? Empfehlung: Legacy akzeptabel, kein Nachträglich-Konvertieren
-   (würde massenhaft Files ändern).
+3. ~~**FileSystemWatcher im selben Prozess?**~~ **Erledigt (Martin 2026-07-04 19:25):** FileSystemWatcher raus, ersetzt durch in-process `Channel<string>`-Queue. TriggerWorker enqueued direkt nach CaptureWriter.
+4. **`recall convert` als CLI-Subcommand OK?** Plus `--include-legacy`-Flag. Empfehlung: ja, scannt Disk nach pending, füllt Channel, läuft non-blocking (gibt Stats zurück, Worker verarbeitet async).
+5. **Bestehende Captures:** Legacy-Status akzeptabel oder nachträglich konvertieren? Empfehlung: Legacy akzeptabel, optionaler `--include-legacy`-Flag für Nachträglich-Konvertierung.
+6. **OCR-Sprache-Default:** `"deu+eng"` (deutsch+englisch) OK? Konfigurierbar via `conversion.ocr.language`.
+7. **OCR-Engine:** aktuell nur Tesseract. Weitere Engines später (z. B. Azure Vision, Google Vision)? — aktuell YAGNI.
 
 ## Implementierungs-Reihenfolge
 
@@ -274,10 +316,12 @@ DocumentConverter.Convert(filePath)
 | Test-Klasse | Tests |
 |---|---|
 | `DocumentConverterTests` | Pro Format 1 Happy-Path + 1 Error-Path. txt/md/log/csv + docx/xlsx/pptx + pdf + html + Unbekannt (null). |
-| `ConversionWorkerTests` | Lifecycle (Start/Stop/Dispose), Throttle, Error-Recovery |
+| `ConversionWorkerTests` | Lifecycle (Start/Stop/Dispose), Throttle, Error-Recovery, Channel-Integration |
+| `OcrWorkerTests` | Tesseract-Integration, Empty-Image-Handling, Timeout, Language-Switch |
 | `CaptureWriterConversionTests` | Frontmatter `conversion: pending` wird korrekt geschrieben |
 | `AppReaderRefactorTests` | Reader liefert nur Rohdaten, ContentMarkdown = Platzhalter |
-| `RecallConvertCommandTests` | CLI-Parsing, Batch-Verarbeitung, Exit-Codes |
+| `RecallConvertCommandTests` | CLI-Parsing, Batch-Verarbeitung, Exit-Codes, --include-legacy |
+| `ChannelQueueTests` | Producer-Consumer-Pattern, Backpressure, Cancellation |
 
 Geschätzt: **~30-40 neue Tests**, Test-Count gesamt: **~300-310**.
 
