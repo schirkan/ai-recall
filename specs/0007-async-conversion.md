@@ -1,6 +1,6 @@
 # 0007 — Async Document Conversion Pipeline
 
-> **Status:** Draft v0.1 (2026-07-04) — Martin-Review ausstehend
+> **Status:** Draft v0.2 (2026-07-04) — Pandoc raus (Martin-Direktive: Performance wichtiger), nur .NET-Konverter
 > **Owner:** Martin
 > **Refactored:** Spec 0004 Iter. 4 — App-Reader → DocumentConverter + async pipeline
 
@@ -60,36 +60,37 @@ public static class DocumentConverter
     /// <summary>
     /// Konvertiert eine Datei nach Markdown.
     /// Liefert null bei Fehler oder unbekanntem Format.
-    /// Strategie: Pandoc bevorzugt, .NET-Fallback pro Format.
+    /// Strategie: Format-Extension-basiert, alle Konverter in-process (kein Spawn).
     /// </summary>
     public static string? Convert(
         string filePath,
         int maxChars = 64 * 1024,
         ILogger? logger = null);
 
-    /// <summary>Prueft, ob Pandoc verfuegbar ist (PATH oder konfigurierter Pfad).</summary>
-    public static bool IsPandocAvailable(string? pandocPath = null);
-
     /// <summary>Liefert den Konverter-Namen, der fuer die Datei benutzt wuerde.</summary>
-    public static string GetConverterForFile(string filePath, string? pandocPath = null);
+    public static string GetConverterForFile(string filePath);
 }
 ```
 
-**Strategie:**
+**Strategie (rein .NET, keine externen Tools):**
 
-1. **Pandoc** (wenn verfügbar) → Aufruf `pandoc -f <from> -t gfm <input> --wrap=none`
-   - Unterstützt ~40 Formate: docx, xlsx, pptx, pdf, html, latex, …
-   - Schnell, robust, einheitliche Output-Qualität
-2. **.NET-Fallback** (wenn Pandoc fehlt oder fehlschlägt):
-   - `.txt`/`.md`/`.log`/`.csv` → `File.ReadAllText` (Plain)
-   - `.docx`/`.doc` → `DocumentFormat.OpenXml` (NuGet)
-   - `.xlsx`/`.xls` → `DocumentFormat.OpenXml` (NuGet, Spreadsheet)
-   - `.pptx`/`.ppt` → `DocumentFormat.OpenXml` (NuGet, Presentation)
-   - `.pdf` → `PdfPig` (NuGet, MIT-Lizenz)
-   - `.html`/`.htm` → `ReverseMarkdown` (haben wir)
-3. **Unbekanntes Format** → `null` + Log-Warnung
+| Extension | Konverter | NuGet-Package |
+|---|---|---|
+| `.txt` / `.md` / `.log` / `.csv` | Plain-Read (`File.ReadAllText`) | — |
+| `.docx` / `.doc` | `DocumentFormat.OpenXml` | `DocumentFormat.OpenXml` (MIT, Microsoft) |
+| `.xlsx` / `.xls` | `DocumentFormat.OpenXml` (Spreadsheet) | dito |
+| `.pptx` / `.ppt` | `DocumentFormat.OpenXml` (Presentation) | dito |
+| `.pdf` | `PdfPig` | `UglyToad.PdfPig` (Apache 2.0) |
+| `.html` / `.htm` | `ReverseMarkdown` | `ReverseMarkdown` (MIT, vorhanden) |
+| `.odt` / `.odp` / `.ods` | **kein Konverter** → `null` + Log | — |
+| `.latex` / `.tex` / `.epub` / `.rtf` / `.docbook` | **kein Konverter** → `null` + Log | — |
 
-**Nie crashen.** Fehler → `null` + Log.
+**Nie crashen.** Fehler → `null` + Log mit `filePath`, `extension`, `errorMessage`.
+
+**Pandoc wird NICHT unterstützt.** Performance ist wichtiger als Format-Coverage
+(Martin 2026-07-04 19:12). Für Edge-Cases (odt, latex, epub, alte doc/xls/ppt)
+liefert der Konverter `null` und der Capture wird mit
+`conversion: failed` + `conversionError: "no-converter-for-<ext>"` markiert.
 
 ### Async-Pipeline
 
@@ -141,15 +142,16 @@ Capture-Session, `recall convert` für Batch/CI.
 conversion: pending | done | failed
 conversionError: "..."                   # nur bei failed
 conversionTimestamp: 2026-07-04T18:00:00 # bei done/failed
-converterUsed: pandoc | openxml | pdfpig | reversemarkdown | textfile | none
+converterUsed: openxml | pdfpig | reversemarkdown | textfile | none
 ```
 
 **Log:** `logs/conversion.log` (Serilog) für Diagnose:
 
 ```
-2026-07-04T18:00:00 [INF] Conversion started: Doc.docx (Pandoc)
+2026-07-04T18:00:00 [INF] Conversion started: Doc.docx (openxml)
 2026-07-04T18:00:01 [INF] Conversion succeeded: Doc.docx (12 KB MD)
-2026-07-04T18:00:02 [ERR] Conversion failed: broken.pdf (PdfPig: corrupted header)
+2026-07-04T18:00:02 [ERR] Conversion failed: broken.pdf (pdfpig: corrupted header)
+2026-07-04T18:00:03 [ERR] Conversion failed: notes.odt (no-converter-for-odt)
 ```
 
 ### `recall convert` Subcommand
@@ -170,9 +172,7 @@ recall convert [--path <capture-root>] [--max-parallel N] [--timeout S]
 {
   "conversion": {
     "enabled": true,
-    "pandocPath": "pandoc",
     "maxTextKB": 64,
-    "fallbackConverters": ["openxml", "pdfpig", "reversemarkdown", "textfile"],
     "batchSize": 2,
     "conversionTimeoutSeconds": 30,
     "watchDirectory": ""
@@ -183,12 +183,13 @@ recall convert [--path <capture-root>] [--max-parallel N] [--timeout S]
 | Feld | Default | Bedeutung |
 |---|---|---|
 | `enabled` | `true` | Globaler Toggle. Wenn `false`: keine Async-Conversion, Capture-MD enthält nur Rohdaten ohne `*.content.md`. |
-| `pandocPath` | `"pandoc"` | Pfad zur pandoc-Exe. `"pandoc"` = PATH-Lookup. Leer = Pandoc deaktiviert, nur .NET-Fallbacks. |
 | `maxTextKB` | `64` | Maximale MD-Länge (analog zu `appReader.documents.maxTextKB`). |
-| `fallbackConverters` | alle | Liste der erlaubten .NET-Fallback-Konverter. Reihenfolge = Priorität. |
 | `batchSize` | `2` | Max. parallele Konvertierungen im Worker. |
 | `conversionTimeoutSeconds` | `30` | Pro-Datei-Timeout. |
 | `watchDirectory` | leer | Leer = `capture.rootPath`. Anderer Pfad möglich für Test-Setups. |
+
+**Pandoc-Felder entfernt.** `pandocPath` und `fallbackConverters` sind in v0.2 raus,
+da Pandoc nicht mehr unterstützt wird.
 
 ## Datenfluss
 
@@ -215,8 +216,8 @@ DocumentConverter.Convert(filePath)
 ## Akzeptanzkriterien
 
 - [ ] AppReader lesen nur Rohdaten, kein MD-String mehr (außer Platzhalter)
-- [ ] `DocumentConverter.Convert(filePath)` liefert MD-String für alle unterstützten Formate
-- [ ] Pandoc bevorzugt, .NET-Fallbacks funktionieren (mit Logger-Diagnose)
+- [ ] `DocumentConverter.Convert(filePath)` liefert MD-String für alle unterstützten Formate (docx/xlsx/pptx/pdf/html/txt/md/csv/log)
+- [ ] Edge-Cases (odt, latex, epub, doc/xls/ppt alt) liefern `null` + Log-Hinweis `no-converter-for-<ext>`; Capture wird mit `conversion: failed` markiert
 - [ ] `recall record` schreibt PNG + MD mit `conversion: pending`, **kein** `*.content.md` initial
 - [ ] Hintergrund-Worker konvertiert `*.md` mit `conversion: pending` asynchron zu `*.content.md`
 - [ ] `recall convert` Subcommand konvertiert alle pending-MD-Files in einem Batch
@@ -241,13 +242,11 @@ DocumentConverter.Convert(filePath)
 
 ## Offene Fragen (Martin-Review)
 
-1. **Pandoc als externe Dependency OK?** Empfehlung: ja, mit .NET-Fallback.
-   Pandoc muss einmalig installiert werden (https://pandoc.org/installing.html).
-   Vorteil: ~40 Formate out-of-the-box (docx/xlsx/pptx/pdf/html/latex/…).
+1. ~~**Pandoc als externe Dependency OK?**~~ **Erledigt (Martin 2026-07-04 19:12):** Pandoc raus, Performance wichtiger. Edge-Cases (odt, latex, epub, alt-Formate) liefern `null` + Log.
 2. **NuGet-Packages OK?**
    - `DocumentFormat.OpenXml` (MIT, Microsoft) für docx/xlsx/pptx
-   - `PdfPig` (MIT) für pdf
-   - `ReverseMarkdown` (haben wir bereits)
+   - `UglyToad.PdfPig` (Apache 2.0, MIT-kompatibel) für pdf
+   - `ReverseMarkdown` (MIT, vorhanden) für html
 3. **FileSystemWatcher im selben Prozess** (in `recall record`) ODER
    separater Service? Empfehlung: im selben Prozess (einfacher, kein
    separater Lifecycle).
@@ -267,14 +266,14 @@ DocumentConverter.Convert(filePath)
 7. **`AppReader` refactoren** zu dünnen Readern (Word/Excel/PowerPoint zuerst)
 8. **`TriggerService` integriert** den `ConversionWorker` (Start/Stop)
 9. **Tests**: Worker-Lifecycle, Frontmatter-Update, Async-Verhalten
-10. **Doku**: PROJECT.md + DECISIONS.md + README.md (Pandoc-Install-Hinweis)
+10. **Doku**: PROJECT.md + DECISIONS.md + README.md (NuGet-Hinweise: DocumentFormat.OpenXml, UglyToad.PdfPig)
 11. **Commit + Push**
 
 ## Tests-Plan
 
 | Test-Klasse | Tests |
 |---|---|
-| `DocumentConverterTests` | Pro Format 1 Happy-Path + 1 Error-Path. Pandoc-mocked wenn nicht verfügbar. |
+| `DocumentConverterTests` | Pro Format 1 Happy-Path + 1 Error-Path. txt/md/log/csv + docx/xlsx/pptx + pdf + html + Unbekannt (null). |
 | `ConversionWorkerTests` | Lifecycle (Start/Stop/Dispose), Throttle, Error-Recovery |
 | `CaptureWriterConversionTests` | Frontmatter `conversion: pending` wird korrekt geschrieben |
 | `AppReaderRefactorTests` | Reader liefert nur Rohdaten, ContentMarkdown = Platzhalter |
@@ -286,7 +285,9 @@ Geschätzt: **~30-40 neue Tests**, Test-Count gesamt: **~300-310**.
 
 - **Eigener Office-OpenXML-Writer** zum Reverse-Konvertieren (MD → docx):
   nicht im Scope.
-- **Streaming-Konvertierung** (Pipe zu pandoc ohne Temp-File): Komplexität
-  vs. Nutzen ungünstig. Temp-Files sind einfach und robust.
+- **Pandoc-Integration** (Martin 2026-07-04 19:12): Performance wichtiger als
+  Format-Coverage. Edge-Cases (odt, latex, epub, alt-Formate) liefern `null`.
+- **Streaming-Konvertierung** (Pipe zu externem Tool ohne Temp-File): Komplexität
+  vs. Nutzen ungünstig. Mit rein .NET-Libraries sowieso irrelevant (in-process).
 - **Worker als Windows-Service**: eigenständiger Lifecycle zu komplex
   für jetzt. Background-Task im selben Prozess reicht.
