@@ -17,7 +17,8 @@ public static class CaptureWriter
         string contentText,
         string contentHash,
         string captureRoot,
-        string? appContext = null)
+        string? appContext = null,
+        WindowInfo? parentWindow = null)
     {
         var timestamp = DateTimeOffset.Now;
         var dayDir = Path.Combine(
@@ -34,7 +35,7 @@ public static class CaptureWriter
         var markdownPath = Path.Combine(dayDir, baseName + ".md");
 
         File.WriteAllBytes(screenshotPath, screenshotBytes);
-        File.WriteAllText(markdownPath, RenderMarkdown(window, timestamp, contentText, contentHash, baseName + ".png", appContext), new UTF8Encoding(false));
+        File.WriteAllText(markdownPath, RenderMarkdown(window, timestamp, contentText, contentHash, baseName + ".png", appContext, parentWindow), new UTF8Encoding(false));
 
         return new CaptureItem(
             timestamp,
@@ -92,7 +93,8 @@ public static class CaptureWriter
         string contentText,
         string contentHash,
         string screenshotFileName,
-        string? appContext)
+        string? appContext,
+        WindowInfo? parentWindow)
     {
         var sb = new StringBuilder();
         sb.AppendLine("---");
@@ -101,6 +103,12 @@ public static class CaptureWriter
         sb.AppendLine($"pid: {window.ProcessId}");
         sb.AppendLine($"hwnd: 0x{window.Handle.ToInt64():X}");
         sb.AppendLine($"title: \"{EscapeYaml(window.Title)}\"");
+        if (parentWindow is not null)
+        {
+            sb.AppendLine($"parentHwnd: 0x{parentWindow.Handle.ToInt64():X}");
+            sb.AppendLine($"parentTitle: \"{EscapeYaml(parentWindow.Title)}\"");
+            sb.AppendLine($"parentProcess: \"{EscapeYaml(parentWindow.ProcessName)}\"");
+        }
         if (!string.IsNullOrEmpty(appContext))
         {
             sb.AppendLine($"context: \"{EscapeYaml(appContext)}\"");
@@ -113,6 +121,10 @@ public static class CaptureWriter
         sb.AppendLine();
         sb.AppendLine($"**Process:** `{window.ProcessName}` (PID {window.ProcessId})  ");
         sb.AppendLine($"**Captured:** {timestamp:yyyy-MM-dd HH:mm:ss zzz}");
+        if (parentWindow is not null)
+        {
+            sb.AppendLine($"**Parent window:** `{parentWindow.ProcessName}` — {parentWindow.Title}  ");
+        }
         if (!string.IsNullOrEmpty(appContext))
         {
             sb.AppendLine($"**Context:** {appContext}  ");

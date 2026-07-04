@@ -194,6 +194,18 @@ public sealed class TriggerWorker : IDisposable
             return;
         }
 
+        // 4b. Modal-Dialog-Detection (Spec 0005 §Modale Dialoge):
+        //     Wenn GA_ROOTOWNER != rootHwnd, dann ist rootHwnd ein modaler
+        //     Dialog und der Owner (parent) ist der eigentliche Hauptfenster-
+        //     Kontext. Wir schreiben NUR den Foreground-Capture, reichern das
+        //     Frontmatter aber mit parentHwnd/parentTitle/parentProcess an.
+        WindowInfo? parentWindow = null;
+        var ownerHwnd = GetAncestor(rootHwnd, GA_ROOTOWNER);
+        if (ownerHwnd != IntPtr.Zero && ownerHwnd != rootHwnd)
+        {
+            parentWindow = WindowInfoLookup.Get(ownerHwnd.ToInt64());
+        }
+
         // 5. Process-Blacklist
         if (MatchesAny(window.ProcessName, _config.Trigger.Blacklist.Processes))
         {
@@ -253,7 +265,7 @@ public sealed class TriggerWorker : IDisposable
         }
 
         // 11. App-Reader (Spec 0004)
-        var item = CaptureWriter.Write(window, pngBytes, contentText, hash, _config.Capture.RootPath);
+        var item = CaptureWriter.Write(window, pngBytes, contentText, hash, _config.Capture.RootPath, parentWindow: parentWindow);
 
         if (_config.AppReader.Enabled && _appReaderRegistry.Readers.Count > 0)
         {
