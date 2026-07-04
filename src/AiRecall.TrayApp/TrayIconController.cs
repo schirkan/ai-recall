@@ -28,6 +28,12 @@ public sealed class TrayIconController : IDisposable
     public event EventHandler? ShowLogviewerRequested;
     public event EventHandler? ShowSettingsRequested;
 
+    /// <summary>Enables the "Live Logviewer" menu item (call after LogviewerWindow is ready).</summary>
+    public void EnableLogviewer() => _showLogsItem.Enabled = true;
+
+    /// <summary>Enables the "Settings" menu item (call after SettingsDialog is ready).</summary>
+    public void EnableSettings() => _settingsItem.Enabled = true;
+
     public TrayIconController(TriggerSupervisor supervisor, Func<AppConfig> configProvider)
     {
         _supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
@@ -49,12 +55,12 @@ public sealed class TrayIconController : IDisposable
         _showLogsItem = new ToolStripMenuItem("📋 Live Logviewer…")
         {
             ShortcutKeys = Keys.L,
-            Enabled = false   // aktiv in Schritt 5 (Spec 0008)
+            Enabled = false   // aktiv in Schritt 5 (Spec 0008) — via EnableLogviewer()
         };
         _settingsItem = new ToolStripMenuItem("⚙ Settings…")
         {
             ShortcutKeys = Keys.Oemcomma,
-            Enabled = false   // aktiv in Schritt 6 (Spec 0009)
+            Enabled = false   // aktiv in Schritt 6 (Spec 0009) — via EnableSettings()
         };
         _quitItem = new ToolStripMenuItem("🚪 Quit")
         {

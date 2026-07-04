@@ -12,6 +12,8 @@ public sealed class TrayAppContext : ApplicationContext
 {
     private readonly TriggerSupervisor _supervisor;
     private readonly TrayIconController _trayIcon;
+    private readonly LogviewerSession _logSession;
+    private LogviewerWindow? _logviewer;
     private AppConfig _config;
 
     /// <summary>
@@ -50,6 +52,12 @@ public sealed class TrayAppContext : ApplicationContext
             Log.Information("Exit requested from tray menu");
             ExitThread();
         };
+        _trayIcon.ShowLogviewerRequested += (_, _) => ShowLogviewer();
+        _trayIcon.ShowSettingsRequested += (_, _) => Log.Information("Settings dialog requested (Schritt 6)");
+
+        _logSession = new LogviewerSession(LogSink);
+        // ShowLogviewerItem aktivieren (Spec 0008 Schritt 5)
+        _trayIcon.EnableLogviewer();
 
         Log.Information("AiRecall TrayApp ready (config={Path})", UserConfigLocator.GetUserConfigPath());
     }
@@ -69,6 +77,17 @@ public sealed class TrayAppContext : ApplicationContext
 
     /// <summary>The live in-memory config (used by SettingsDialog to populate fields).</summary>
     public AppConfig CurrentConfig => _config;
+
+    private void ShowLogviewer()
+    {
+        if (_logviewer is null || _logviewer.IsDisposed)
+        {
+            _logviewer = new LogviewerWindow(_logSession);
+            _logviewer.FormClosed += (_, _) => _logviewer = null;
+        }
+        _logviewer.Show();
+        _logviewer.BringToFront();
+    }
 
     protected override void ExitThreadCore()
     {
