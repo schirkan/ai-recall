@@ -11,6 +11,7 @@ return args[0] switch
     "list-windows" or "lsw" => ListWindowsCommand.Run(args[1..]),
     "active-window" or "aw" => ActiveWindowCommand.Run(args[1..]),
     "record" => RecordCommand.Run(args[1..]),
+    "status" => StatusCommand.Run(args[1..]),
     "-h" or "--help" or "help" => PrintRootUsage(returnCode: 0),
     _ => UnknownCommand(args[0])
 };
@@ -32,6 +33,7 @@ static int PrintRootUsage(int returnCode = 1)
     Console.WriteLine("  list-windows (lsw)    List all open top-level windows.");
     Console.WriteLine("  active-window (aw)    Capture the current foreground window as PNG + MD.");
     Console.WriteLine("  record                Continuous capture with trigger pipeline (Ctrl+C to stop).");
+    Console.WriteLine("  status                Show config, today's captures, trigger settings.");
     Console.WriteLine();
     Console.WriteLine("Run 'recall <command> --help' for command-specific help.");
     return returnCode;
