@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
+    <ProjectReference Include="..\AiRecall.Trigger\AiRecall.Trigger.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Serilog" Version="3.1.1" />

@@ -1,36 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-
+    <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
-
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="Serilog" Version="3.1.1" />
-    <PackageReference Include="xunit" Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
-
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\..\src\AiRecall.Core\AiRecall.Core.csproj" />
-    <ProjectReference Include="..\..\src\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Base\AiRecall.AppReader.Base.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Browser\AiRecall.AppReader.Browser.csproj" />
-    <ProjectReference Include="..\..\src\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.Notepad\AiRecall.AppReader.Notepad.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Pdf\AiRecall.AppReader.Pdf.csproj" />
-    <ProjectReference Include="..\..\src\AiRecall.Conversion\AiRecall.Conversion.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Trigger\AiRecall.Trigger.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.Conversion\AiRecall.Conversion.csproj" />
   </ItemGroup>
-
 </Project>
