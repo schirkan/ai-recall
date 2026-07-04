@@ -5,6 +5,59 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-04 — Trigger-Pipeline: WinEventHook statt Polling
+
+`recall record` (Spec 0005) löst das ursprüngliche Polling auf
+`GetForegroundWindow` (MVP1-Scope TR-1..6) durch eine event-basierte
+Architektur ab.
+
+| Aspekt | Entscheidung | Begründung |
+|---|---|---|
+| Primäre Trigger-Quelle | **`SetWinEventHook` out-of-context** (systemweit, ohne DLL-Injection) | Events kommen asynchron, granular (FOREGROUND/FOCUS/NAMECHANGE/VALUECHANGE/SCROLL/MENUPOPUP), keine CPU-Last durch Polling, keine Latenz zwischen Ereignis und Capture. |
+| Sekundäre Trigger-Quelle | **Heartbeat-Polling** (`trigger.heartbeatIntervalSeconds`, Default 30 s) | Fallback für verschluckte Events (Sleep/Resume, hohe Systemlast). Niedrige Frequenz, reine Foreground-Erkennung, kein Inhalts-Polling. |
+| `WH_SHELL` / `WH_CBT`-Hooks | **Verworfen** | Würden DLL-Injection in jeden anderen Prozess erfordern. Zu invasiv (Admin-Rechte, AV-Warnungen, Stabilitätsrisiko). |
+| UIA-Event-Handler (`IUIAutomation.AddAutomationEventHandler`) | **Verworfen als primäre Quelle** | App-Coverage dünner als WinEventHook; COM-Interop in C# aufwendig. Kann später als Ergänzung dienen, nicht als Ersatz. |
+| Throttle statt Debounce | **`trigger.throttleMs` (Default 500 ms)** — max 1 Capture pro HWND pro Zeitfenster | Klassisches Throttle-Pattern. Debounce („warte bis Ruhe") liefert bei aktivem Scrollen zu lange Pausen. |
+| Per-App-Throttle | **`trigger.throttlePerAppSeconds` (Default 2 s)** | Zusätzliche Bremse: verhindert Capture-Bursts bei schneller Tab-Navigation in derselben App. |
+| Hash-Dedup | **SHA-256 über `processName + contentText + title`** | Verhindert redundante Captures bei reinem Titel-Wechsel ohne Inhalts-Änderung. Nicht über Screenshot-Hash (sonst flackern minimale Pixeländerungen). |
+| Always-on-Top-Filter | **`WS_EX_TOPMOST` ist kein Ausschlusskriterium** | Viele legitime Apps sind AOT (Sticky Notes, Calculator, Chat). Filtern würde zu Lücken führen. |
+| Modale Dialoge | **Eigenes Capture + Parent-Context als Frontmatter** | Bei Word „Speichern unter" o. ä. nur das Vordergrund-Fenster lesen, aber `parentHwnd`/`parentTitle`/`parentProcess` ins Frontmatter. Diskussion 2026-07-04, Option (a). |
+| Tooltip/Notification-Filter | **Class-Blacklist** (`trigger.blacklist.windowClasses`) | Default: `tooltips_class32`, `NotifyIconOverflowWindow`. User-erweiterbar via Config. |
+| Self-Capture-Filter | **PID-Vergleich** (`pid == Process.GetCurrentProcess().Id`) | Verhindert Aufzeichnung des eigenen Capture-/Konfig-Dialogs. |
+| Child-HWND-Normalisierung | **`GetAncestor(hwnd, GA_ROOT)`** vor Throttle-Check | Button-Klick in Word triggert `EVENT_OBJECT_FOCUS` auf Button-HWND; normalisiert wird auf das Word-Fenster. |
+| Outlook-Polling | **Bleibt in Spec 0004** (`outlook.pollIntervalSeconds`, Default 60 s) | Mail-Stream ist inhärent polling-basiert (kein OS-Event für „neue Mail"). Wird vom Outlook-AppReader in `recall record` mitbedient. |
+
+### Auswirkungen
+
+- Neue Spec: `specs/0005-trigger-pipeline.md` mit TR-1..9 (TR-1..6 aus
+  MVP1-Scope bleiben gültig, +TR-7..9 für Tooltips/Modal/Child-HWND).
+- Neue Top-Level-Config-Sektion `trigger.*` in `default-config.json`
+  und `%APPDATA%/AiRecall/config.json`.
+- Neue Komponente: `TriggerService` (IHostedService) in
+  `AiRecall.ScreenCapture/Trigger/`.
+- `EventHookThread` + `WorkerThread` + `Channel<TriggerEvent>` als
+  Pipeline-Backbone.
+- Capture-Writer-Frontmatter wird erweitert um optionale
+  `parentHwnd`/`parentTitle`/`parentProcess` (bereits in `AppReaderResult.Extra`
+  andeutungsweise vorhanden — wird konkretisiert).
+- `recall record` CLI-Subcommand startet den Service und blockiert den
+  Hauptthread bis Ctrl+C / SIGTERM.
+
+### Verworfen
+
+- **Stures Polling auf `GetForegroundWindow` (z. B. 1-Hz)**: Latenz,
+  CPU-Last, verpasste kurze Events. Nur als Heartbeat-Fallback behalten.
+- **Polling + OCR jedes Frames** (Screenpipe-artig): viel zu viel
+  Rauschen + CPU/IO-Last für unseren Anwendungsfall (Recall-ähnliche
+  semantische Erfassung, nicht Full-Framerate).
+- **CDP/WebDriver-Trigger** (z. B. via Chrome Extension): Out of scope,
+  Browser-spezifisch, würde Architektur in den Browser ziehen.
+- **WPF-/Forms-spezifische Application-Idle-Events**: nur prozess-lokal,
+  nicht systemweit.
+- **Trigger-Pipeline als separate Library/DLL**: Bleibt in
+  `AiRecall.ScreenCapture` (Haupt-Capture-Pipeline) — keine eigene DLL,
+  würde nur Split-Komplexität erzeugen.
+
 ## 2026-07-03 — MVP1 Tech-Defaults
 
 Offene Punkte aus `specs/0002-mvp1-scope.md` durch Martin bestätigt
