@@ -1,6 +1,6 @@
 # 0009 — Settings-Dialog (JSON Config Editor)
 
-> **Status:** 📝 Draft v0.1 (2026-07-04) — Martin-Review ausstehend
+> **Status:** 📝 Draft v0.2 (2026-07-04 22:30) — Hot-Reload vereinfacht durch in-process-Architektur
 > **Owner:** Martin
 > **Abhängig von:** Spec 0006 (Tray-EXE Foundation), Spec 0002 (MVP1-Config-Schema)
 
@@ -8,7 +8,7 @@
 
 Eigenes Fenster zum Bearbeiten der JSON-Config (`%APPDATA%/AiRecall/config.json`),
 aufrufbar über Tray-ContextMenu. Validiert Eingaben, schreibt atomar zurück,
-triggert Hot-Reload des Subprozesses.
+triggert Hot-Reload des in-process `TriggerSupervisor`.
 
 ## UI
 
@@ -89,9 +89,11 @@ public sealed class ConfigSectionDescriptor
   3. Serialize `AppConfig` zu JSON (mit `JsonNamingPolicy.CamelCase`)
   4. Atomic write: `config.json.tmp` schreiben → `File.Move(tmp, config.json, overwrite: true)`
   5. Modified-Flag auf SettingsDialog zurücksetzen
-- **Hot-Reload**:
-  - Nach Save → TrayApp's `ProcessSupervisor.Stop()` → `Start()` mit neuer Config
-  - Bei Stop-Fehler → Rollback auf Backup + Warning-Dialog
+- **Hot-Reload (in-process, revidiert v0.2)**:
+  - Nach Save → `TriggerSupervisor.RestartAsync(newConfig)` auf UI-Thread
+  - Bei Restart-Fehler → Rollback auf Backup + Warning-Dialog
+  - TriggerSupervisor disposet den alten `ITriggerService` sauber und startet neuen mit neuer Config
+  - **Keine Prozess-Kill**, **kein Cold-Start**, **kein MMF-Reinit**
 
 ## Tests
 
@@ -106,6 +108,9 @@ public sealed class ConfigSectionDescriptor
   - GetSections gibt alle Top-Level-Sektionen zurück (Logging, Ocr, Conversion, Trigger, AppReader)
   - GetProperty mit Pfad `"appReader.browser.cdp.enabled"` liefert korrektes PropertyDescriptor
   - Required-Attribute wird korrekt erkannt
+- `HotReloadTests` (revidiert v0.2):
+  - SettingsDialog Save → TriggerSupervisor.RestartAsync wird aufgerufen
+  - Mock-TriggerSupervisor prüft: alter Service disposed, neuer Service mit neuer Config gestartet
 
 ## Verworfen
 
@@ -115,7 +120,7 @@ public sealed class ConfigSectionDescriptor
 - **WebView-basierter Editor (HTML/CSS)**: Overkill, WinForms-PropertyGrid reicht für strukturierte Config.
 - **Auto-Save on Change**: zu risky, User soll explizit Save klicken.
 - **Schema-Validation via JSON-Schema-Draft-07**: zusätzliche Drift-Quelle (Schema-File + POCO), POCO-Attributes reichen.
-- **Settings-Dialog ohne Hot-Reload** (User muss TrayApp neustarten): UX-regression.
+- **Hot-Reload via Process-Kill+Restart** (Spec 0006 v0.1): durch in-process-Architektur (revidiert v0.2) unnötig.
 
 ## Offene Punkte
 

@@ -1,13 +1,13 @@
 # 0006 — MVP2 Tray-Icon-EXE (Foundation)
 
-> **Status:** 📝 Draft v0.1 (2026-07-04) — Martin-Review ausstehend
+> **Status:** 📝 Draft v0.2 (2026-07-04 22:30) — Architektur-Korrektur: in-process statt Subprozess
 > **Owner:** Martin
 > **Abhängigkeiten:** Spec 0005 (Trigger-Pipeline, `ITriggerService`), Spec 0007 (Async Conversion, `ConversionWorker`)
 
 ## Ziel
 
 Vollwertige Windows-Anwendung mit Notification-Area-Icon zum Steuern
-von `recall record` (Start/Stop/Pause/Status). CLI bleibt für Scripts
+der Trigger-Pipeline (Start/Stop/Pause/Status). CLI bleibt für Scripts
 erhalten, wird aber vom MVP1-Standalone-Mode zum reinen Worker-Mode
 (`--headless`) degradiert.
 
@@ -15,75 +15,80 @@ erhalten, wird aber vom MVP1-Standalone-Mode zum reinen Worker-Mode
 
 - **CLI ist nur temporärer Einstiegspunkt** (2026-07-04, Spec 0005-Abnahme). MVP2 wird Tray-Icon-EXE.
 - `ITriggerService` ist die Naht-Stelle für Wiederverwendung.
+- **In-Process-Worker statt Subprozess** (Martin 22:29): `ITriggerService` direkt aus `AiRecall.Trigger` referenzieren. TrayApp und CLI nutzen dieselbe Library, aber TrayApp hostet den Service selbst. CLI startet den Service ebenfalls in-process (Standalone-Support).
 - Specs für zwei neue Features: **Live Logviewer** (Spec 0008) + **Settings-Dialog** (Spec 0009). Diese Spec 0006 definiert die gemeinsame Foundation.
 
-## Architektur
+## Architektur (in-process, revidiert v0.2)
 
 ### Neues Projekt
 
 - **`AiRecall.TrayApp`** (WinForms, .NET 8 `net8.0-windows`)
 - Output: `bin/Debug/net8.0-windows/AiRecall.TrayApp.exe`
 - Startet im Hintergrund, NotifyIcon erscheint im System-Tray
-- Beim Quit: sauberer Process-Kill des Subprozesses + Dispose
+- **In-process**: referenziert `AiRecall.Trigger` und instanziiert `ITriggerService` direkt
+- Beim Quit: `ITriggerService.Dispose()` sauber
 
 ### Projekt-Struktur
 
 ```
 src/AiRecall.TrayApp/
-├── AiRecall.TrayApp.csproj              (UseWindowsForms=true)
+├── AiRecall.TrayApp.csproj              (UseWindowsForms=true, ProjectRef → Core+Trigger)
 ├── Program.cs                            (SingleInstance-Mutex + Application.Run)
-├── TrayAppContext.cs                     (ApplicationContext mit NotifyIcon)
-├── TrayIconController.cs                 (NotifyIcon + ContextMenu)
-├── ProcessSupervisor.cs                  (Start/Stop/Restart `recall record --headless`)
-├── MmfLogPipe.cs                         (MemoryMappedFile als Ringbuffer)
+├── TrayAppContext.cs                     (ApplicationContext mit NotifyIcon + TriggerSupervisor)
+├── TrayIconController.cs                 (NotifyIcon + ContextMenu, Status aus Supervisor)
+├── TriggerSupervisor.cs                  (Wraps ITriggerService: Start/Stop/Restart + Hot-Reload)
 ├── Windows/
-│   ├── LogviewerWindow.cs                (Spec 0008)
-│   └── SettingsDialog.cs                 (Spec 0009)
+│   ├── LogviewerWindow.cs                (Spec 0008, liest Serilog-Events direkt)
+│   └── SettingsDialog.cs                 (Spec 0009, ruft TriggerSupervisor.Restart() nach Save)
 ├── Config/
 │   ├── UserConfigLocator.cs              (%APPDATA%/AiRecall/config.json)
 │   └── ConfigSchemaReflection.cs         (AppConfig POCO → PropertyDescriptor)
 └── Resources/
-    └── tray-icon.ico                     (16x16 + 32x32)
+    └── tray-icon.ico                     (16x16 + 32x32, später)
 ```
 
-### Process-Management (ProcessSupervisor)
+### TriggerSupervisor (in-process Wrapper)
 
-TrayApp startet `recall record --headless` als Subprozess:
+`TriggerSupervisor` ist ein dünner Wrapper um `ITriggerService`:
 
+```csharp
+public sealed class TriggerSupervisor : IDisposable
+{
+    public ITriggerService? Service { get; private set; }
+    public TriggerState State { get; private set; }  // Stopped, Starting, Running, Stopping, Crashed
+
+    public Task StartAsync(AppConfig config, CancellationToken ct = default);
+    public Task StopAsync(CancellationToken ct = default);
+    public Task RestartAsync(AppConfig newConfig, CancellationToken ct = default);
+    public event EventHandler<TriggerEventArgs>? TriggerEventReceived;
+    public event EventHandler<SupervisorStateChangedEventArgs>? StateChanged;
+
+    // Counter-Properties für IPC (z. B. Status-Tooltip)
+    public int CaptureCount { get; }
+    public int ThrottleCount { get; }
+    public int CrashCount { get; private set; }
+    public DateTime? LastCrashAt { get; private set; }
+
+    public void Dispose();   // idempotent
+}
+
+public enum TriggerState { Stopped, Starting, Running, Stopping, Crashed }
 ```
-AiRecall.TrayApp.exe
-  └─ Process.Start("AiRecall.Cli.exe", "record --headless")
-       ├─ StandardOutput (gestreamed → MmfLogPipe → LogviewerWindow)
-       ├─ StandardError  (gestreamed → MmfLogPipe als Level=Error)
-       └─ ExitCode       (Watcher, Auto-Restart bei Crash)
-```
 
-- **Args**: `recall record --headless --log-format=plain --log-stdout`
-- **Restart-Strategie**: bei Exit ≠ 0 → 5 s Verzögerung → Restart (max 3 Versuche, dann Pause)
-- **Stop**: TreeKill auf Process + Children
-- **Config-Hot-Reload**: Settings-Dialog Save → ProcessSupervisor.Restart()
-
-### Memory-Mapped-File IPC (MmfLogPipe)
-
-- Name: `Global\AiRecall.LogPipe` (Global für Cross-Session falls später Service läuft)
-- Größe: 64 KB Ringbuffer (Power-of-Two für mask-modulo)
-- Format: Newline-delimited, jedes Event als UTF-8-Text:
-  ```
-  2026-07-04T21:23:45.123+02:00|INF|AiRecall.Trigger.TriggerService|Started capture for hwnd=0x12345
-  2026-07-04T21:23:46.456+02:00|WRN|AiRecall.Conversion.ConversionWorker|OCR failed: tessdata not found
-  ```
-- **Schreiber**: `recall record --headless` über Custom-Serilog-Sink `MmfSink`
-- **Leser**: `LogviewerWindow` über MMF-Stream mit Offset-Tracking
-- **Fallback**: wenn MMF nicht verfügbar (z. B. Crash mid-write) → File-Tail auf `logs/recall-yyyy-MM-dd.log`
+- **Start**: erstellt `TriggerService` mit Config, ruft `StartAsync()`. Setzt State = Starting → Running.
+- **Stop**: ruft `StopAsync()`, setzt State = Stopping → Stopped.
+- **Restart**: Stop → Start mit neuer Config. Atomic auf UI-Thread.
+- **Crash-Recovery**: `TriggerService` exposet `OnError`-Event. Bei unbehandeltem Fehler → State = Crashed → automatischer Restart nach 5 s (max 3 Versuche, dann manueller Re-Start nötig).
+- **Hot-Reload**: Settings-Dialog Save → `RestartAsync(newConfig)`.
+- **Logging**: `TriggerSupervisor` reicht alle `TriggerEvent`s per Event-Handler an Interessenten (TrayIcon für Tooltip, Logviewer für Live-View) weiter.
 
 ### NotifyIcon + ContextMenu (TrayIconController)
 
 ```
 ┌──────────────────────────────┐
-│ 🟢 Recording                │  ← Status-Zeile (live updated)
+│ 🟢 Running — 42 captures    │  ← Status-Zeile (live updated)
 │ ──────────────────────────── │
-│ ▶ Start Recording      (S)  │  ← Toggle je nach ProcessSupervisor-State
-│ ⏸ Stop Recording       (T)  │
+│ ⏸ Stop Recording       (T)  │  ← Toggle je nach TriggerSupervisor.State
 │ ──────────────────────────── │
 │ 📋 Live Logviewer…     (L)  │  ← Spec 0008
 │ ⚙ Settings…           (,)   │  ← Spec 0009
@@ -92,54 +97,82 @@ AiRecall.TrayApp.exe
 └──────────────────────────────┘
 ```
 
-- **Icon-State**: 🟢 = Running, 🔴 = Stopped, 🟡 = Starting/Stopping
-- **Tooltip**: `AiRecall — {process} running ({captures_today} captures today)`
+- **Icon-State**: 🟢 = Running, 🔴 = Stopped, 🟡 = Starting/Stopping, ⚠ = Crashed
+- **Tooltip**: `AiRecall — {state} ({captures_today} captures today)`
 - **Doppelklick auf Icon**: Toggle Start/Stop
-- **Balloon-Tip**: bei Crash → "Recording stopped, will restart in 5s"
+- **Start-Item fehlt** wenn Running; **Stop-Item fehlt** wenn Stopped (single Item "Stop" oder "Start")
 
 ### Single-Instance
 
 - Named-Mutex `Local\AiRecall.TrayApp.SingleInstance`
-- Zweiter Start → Bring-To-Front via `FindWindow` + `SetForegroundWindow` (Named-Window-Message IPC)
+- Zweiter Start → SendMessage via `WM_COPYDATA` an erstes Fenster ("ShowLogviewer" / "ShowSettings" / "ExitSecondInstance")
 - Sauberer Exit beim ersten Process
+
+### Datenfluss (in-process, kein IPC)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      AiRecall.TrayApp.exe                     │
+│                                                              │
+│  ┌─────────────────┐    events    ┌───────────────────────┐  │
+│  │ TriggerSupervisor├────────────►│ TrayIconController    │  │
+│  │  (ITriggerService) │            │ (Status, Tooltip)     │  │
+│  └────────┬─────────┘            └───────────────────────┘  │
+│           │ events                                          │
+│           │                                                  │
+│  ┌────────▼─────────┐                                       │
+│  │ Serilog Logger   ├───► LogviewerWindow (Spec 0008)       │
+│  │  (subscribes via  │     liest direkt aus Serilog-Buffer  │
+│  │   custom sink)    │                                       │
+│  └──────────────────┘                                       │
+│                                                              │
+│  ┌─────────────────┐   reload   ┌───────────────────────┐  │
+│  │ SettingsDialog   ├───────────►│ TriggerSupervisor     │  │
+│  │  (Spec 0009)     │            │ .RestartAsync()       │  │
+│  └─────────────────┘            └───────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Vorteil gegenüber Subprozess**: keine Serialisierung, keine Latenz, keine Cold-Start, kein MMF.
 
 ## Dependencies
 
-- `AiRecall.Trigger` (für `ITriggerService` falls in-process-Variante)
+- `AiRecall.Trigger` (für `ITriggerService`)
 - `AiRecall.Core` (Models, AppConfig, CaptureWriter)
-- `AiRecall.Cli` (nur als Binary, nicht als Lib)
-- `Serilog` + `Serilog.Sinks.Console` für eigenes Logging
+- `AiRecall.Conversion` (für `ConversionWorker`-Property, falls TrayApp `TriggerService` mit Conversion-Worker erstellt)
+- `Serilog` + `Serilog.Sinks.File` für eigenes Logging
 
-## CLI-Änderungen (Begleitend)
+## CLI-Änderungen (minimal)
 
-- `recall record --headless --log-stdout` (neue Option) → schreibt Log-Events nach stdout (Plain-Format für Pipe-Tail)
-- `recall record --log-format=json|plain` (Plain ist Default für Subprozess)
-- `recall status` bleibt unverändert (Tray-App kann das auch via HTTP/File auslesen)
+- `recall record --headless` startet `ITriggerService` weiterhin in-process (wie in Spec 0005).
+- `recall status` bleibt unverändert.
+- TrayApp ist **kein Wrapper** mehr — sie ist eine alternative UI für denselben Code.
 
-## Schritte (Implementierung)
+## Schritte (Implementierung, revidiert)
 
 | #   | Commit      | Inhalt                                                                  |
 |-----|-------------|-------------------------------------------------------------------------|
-| 1   | (tbd)       | `AiRecall.TrayApp`-Projekt + WinForms-NotifyIcon-Skeleton              |
-| 2   | (tbd)       | `ProcessSupervisor` (Start/Stop/Restart mit Crash-Recovery)             |
-| 3   | (tbd)       | `MmfLogPipe` + Custom-Serilog-Sink `MmfSink` in `AiRecall.Cli`          |
-| 4   | (tbd)       | `TrayIconController` + ContextMenu-Wiring + Single-Instance             |
-| 5   | (tbd)       | Settings-Hot-Reload (ProcessSupervisor.Restart nach Save)              |
-| 6   | (tbd)       | Integration-Tests (Mock-ProcessSupervisor, MMF-Round-Trip)              |
-| 7   | (tbd)       | Doku (PROJECT.md + DECISIONS.md + README) + Push                       |
+| 1   | `cff2b50`   | `AiRecall.TrayApp`-Projekt + WinForms-NotifyIcon-Skeleton ✅ DONE       |
+| 2   | (tbd)       | `TriggerSupervisor` (in-process `ITriggerService`-Wrapper, Start/Stop/Restart, Crash-Recovery) |
+| 3   | (tbd)       | `InMemoryLogSink` (Serilog-Sink, in-process Buffer für Logviewer)        |
+| 4   | (tbd)       | `TrayIconController` aktiviert Start/Stop, Status-Subscriptions          |
+| 5   | (tbd)       | `LogviewerWindow` (Spec 0008)                                            |
+| 6   | (tbd)       | `SettingsDialog` (Spec 0009)                                              |
+| 7   | (tbd)       | Integration-Tests (Mock-TriggerSupervisor, Hot-Reload-Round-Trip)        |
+| 8   | (tbd)       | Doku (PROJECT.md + DECISIONS.md + README) + Push                         |
 
 ## Verworfen
 
+- **Subprozess-Spawn** (revidiert v0.2, Martin 22:29): TrayApp ist ohnehin tot ohne Worker — Isolation bringt nichts. Cold-Start, MMF-IPC und Process-Supervision sind unnötige Komplexität.
 - **TrayApp in WPF**: Overhead ohne Mehrwert für Notification-Area-Use-Case.
 - **Avalonia/MauiUI**: Cross-Platform unnötig (Windows-only per Spec 0001).
-- **TrayApp und `recall record` im selben Prozess**: Crashes in der Worker-Pipeline reißen Tray mit runter.
-- **TrayApp als reine Wrapper-EXE ohne eigene Logik**: brauchen Settings + Logviewer → eigene Forms-UI notwendig.
 - **MS-Terminal-Notifier als Tray-Alternative**: User-Erlebnis ist Tray-Icon, nicht Terminal.
-- **Named-Pipe statt MemoryMappedFile**: mehr Setup-Aufwand für bidirektionalen Flow; MMF ist one-way-stream only, reicht für Logs.
+- **MemoryMappedFile als IPC**: durch in-process-Architektur überflüssig.
+- **Named-Pipe für Log-Streaming**: durch in-process-Architektur überflüssig.
 
 ## Offene Punkte
 
 - Tray-Icon-Resource (`tray-icon.ico`) — generieren oder aus Vorlage?
 - Auto-Start mit Windows (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) — optional, Toggle in Settings?
-- Mehrere parallele `recall record`-Instanzen mit unterschiedlichen Configs (Power-User) — out of scope für MVP2.
-- Internationalisierung (DE/EN) der ContextMenu-Labels — später.
+- Trigger-Service und Conversion-Worker gleichzeitig starten — `TriggerService` hat bereits `ConversionWorker`-Property (Spec 0007), wird in `TriggerSupervisor.StartAsync` mit-gewired.
+- Mehrere parallele `TriggerService`-Instanzen mit unterschiedlichen Configs (Power-User) — out of scope für MVP2.
