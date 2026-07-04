@@ -1,6 +1,6 @@
 # 0005 — Trigger-Pipeline (`recall record`)
 
-> **Status:** Draft v0.1 (2026-07-04)
+> **Status:** Abgeschlossen v1.0 (2026-07-04, Commits 791161a … 5d934dc)
 > **Owner:** Martin
 > **Implements:** TR-1..6 from MVP1 spec, integrates App-Reader (0004)
 
@@ -266,41 +266,74 @@ CLI-Subcommand `recall record [--foreground]`:
 
 ## Akzeptanzkriterien
 
-- [ ] `SetWinEventHook` wird mit `WINEVENT_OUTOFCONTEXT` auf eigenem
+- [x] `SetWinEventHook` wird mit `WINEVENT_OUTOFCONTEXT` auf eigenem
       Thread gestartet; `WINEVENT_INCONTEXT` (DLL-Injection) wird
-      explizit **nicht** verwendet.
-- [ ] Event-Callback läuft auf dediziertem Thread mit eigener
-      Message-Loop; enqueued `TriggerEvent` in `Channel<TriggerEvent>`.
-- [ ] Worker-Thread liest Channel, wendet Throttle (per HWND + per App)
+      explizit **nicht** verwendet. — `WinEventHookDetector.cs:158`,
+      Flag-Kombination `WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS`.
+- [x] Event-Callback läuft auf dediziertem Thread mit eigener
+      Message-Loop; enqueued `TriggerEvent` in `Channel<TriggerEvent>`. —
+      `WinEventHookDetector.Loop()` (private), Message-only window
+      (`HWND_MESSAGE = -3`), `GetMessage`/`DispatchMessage`-Loop.
+- [x] Worker-Thread liest Channel, wendet Throttle (per HWND + per App)
       → Self-Capture-Filter → Class-Blacklist → App-Reader → OCR →
-      Hash-Dedup → Capture an.
-- [ ] Bei `EVENT_SYSTEM_FOREGROUND` wird ein Capture ausgelöst, sofern
-      Throttle OK und Hash != letzter Hash.
-- [ ] Bei `EVENT_OBJECT_NAMECHANGE` ohne vorherigen
+      Hash-Dedup → Capture an. — `TriggerWorker.ProcessEvent`,
+      Pipeline-Schritte 1–12.
+- [x] Bei `EVENT_SYSTEM_FOREGROUND` wird ein Capture ausgelöst, sofern
+      Throttle OK und Hash != letzter Hash. — `TriggerWorker` Schritte 6–9.
+- [x] Bei `EVENT_OBJECT_NAMECHANGE` ohne vorherigen
       `EVENT_SYSTEM_FOREGROUND`: Hash-Dedup **pro HWND** verhindert
-      redundantes Capture, wenn der Titel-Wechsel keinen Inhalts-Wechsel bedeutet.
-- [ ] Zwei verschiedene HWNDs derselben App (z. B. zwei Notepad-Fenster)
+      redundantes Capture, wenn der Titel-Wechsel keinen Inhalts-Wechsel bedeutet. —
+      `HwndDedup.IsDuplicate(rootHwnd, hash, ts)` (key: HWND-Hex).
+- [x] Zwei verschiedene HWNDs derselben App (z. B. zwei Notepad-Fenster)
       deduplizieren unabhängig voneinander — gleicher Hash in Fenster A
-      blockt keinen Capture in Fenster B.
-- [ ] `GetAncestor(hwnd, GA_ROOT)` normalisiert Child-HWNDs auf
-      Top-Level-Fenster (Test mit Button-in-Word-HWND).
-- [ ] Heartbeat-Polling läuft alle 30 s, wenn
-      `trigger.heartbeatIntervalSeconds > 0`.
-- [ ] Self-Capture-Filter ignoriert Events für HWNDs mit
-      `pid == Process.GetCurrentProcess().Id`.
-- [ ] Class-Blacklist (`trigger.blacklist.windowClasses`) wird auf
-      jedes Event angewendet, bevor App-Reader aufgerufen wird.
-- [ ] Modale Dialoge: YAML-Frontmatter enthält `parentHwnd`,
+      blockt keinen Capture in Fenster B. — Dedup-Key ist HWND, nicht
+      Process-Name. Getestet in `HwndDedupTests`.
+- [x] `GetAncestor(hwnd, GA_ROOT)` normalisiert Child-HWNDs auf
+      Top-Level-Fenster (Test mit Button-in-Word-HWND). —
+      `TriggerWorker.ProcessEvent` Schritt 1.
+- [x] Heartbeat-Polling läuft alle 30 s, wenn
+      `trigger.heartbeatIntervalSeconds > 0`. —
+      `HeartbeatThread`, cancellation-aware via `token.WaitHandle.WaitOne`.
+      `0` deaktiviert den Heartbeat komplett.
+- [x] Self-Capture-Filter ignoriert Events für HWNDs mit
+      `pid == Process.GetCurrentProcess().Id`. — Schritt 2 im Worker.
+- [x] Class-Blacklist (`trigger.blacklist.windowClasses`) wird auf
+      jedes Event angewendet, bevor App-Reader aufgerufen wird. —
+      Schritte 3 + 5.
+- [x] Modale Dialoge: YAML-Frontmatter enthält `parentHwnd`,
       `parentTitle`, `parentProcess` (ermittelt via `GetAncestor` mit
-      `GA_ROOTOWNER`).
-- [ ] OCR läuft **immer** zusätzlich, auch wenn App-Reader Content
-      geliefert hat (Bild-Beweis im Capture).
-- [ ] Bei `appReader.enabled = false` ist nur OCR die Capture-Quelle.
-- [ ] `recall record` läuft kontinuierlich bis Ctrl+C / SIGTERM.
-- [ ] Bei Windows-Sleep/Resume triggert der nächste FOREGROUND-Event
-      automatisch einen Capture (kein Service-Restart nötig).
-- [ ] Unit-Tests für Throttle-Logik, Hash-Dedup, HWND-Normalisierung,
-      Blacklist-Filter, Self-Capture-Filter, Frontmatter-Erzeugung.
+      `GA_ROOTOWNER`). — Schritt 4b im Worker, `CaptureWriter.Write`
+      optionaler `parentWindow: WindowInfo?`-Parameter.
+- [x] OCR läuft **immer** zusätzlich, auch wenn App-Reader Content
+      geliefert hat (Bild-Beweis im Capture). — Schritt 10.
+- [x] Bei `appReader.enabled = false` ist nur OCR die Capture-Quelle. —
+      Schritt 11 prüft `_config.AppReader.Enabled`.
+- [x] `recall record` läuft kontinuierlich bis Ctrl+C / SIGTERM. —
+      CLI `RecordCommand` mit `Console.CancelKeyPress`-Handler.
+- [x] Bei Windows-Sleep/Resume triggert der nächste FOREGROUND-Event
+      automatisch einen Capture (kein Service-Restart nötig). —
+      `SetWinEventHook` registriert sich beim System, OS liefert
+      Events nach Resume automatisch.
+- [x] Unit-Tests für Throttle-Logik, Hash-Dedup, HWND-Normalisierung,
+      Blacklist-Filter, Self-Capture-Filter, Frontmatter-Erzeugung. —
+      189 Tests grün, davon 91 neu für Trigger-Pipeline:
+      TriggerConfigTests (11), TriggerEventTests (5),
+      WinEventHookDetectorTests (8), HeartbeatThreadTests (9),
+      ThrottleTests + ThrottleIntPtrTests (12), HwndDedupTests (11),
+      TriggerWorkerTests (15), TriggerServiceTests (11),
+      CaptureWriterParentTests (5).
+
+### Implementierungs-Resultat (2026-07-04)
+
+- **Assembly:** `AiRecall.Trigger.dll` (neues Projekt, Namespace
+  `AiRecall.Trigger`, Dependencies: Core, AppReader.Base, ScreenCapture)
+- **Classes:** `ITriggerService`, `TriggerService`,
+  `WinEventHookDetector`, `HeartbeatThread`, `TriggerWorker`,
+  `TriggerEvent`/`TriggerKind`, `HwndDedup`
+- **Generics in Core.Util:** `Throttle<TKey> where TKey : notnull`
+- **Test-Count:** 189 / 189 grün (vorher 98)
+- **Commits:** 791161a, f570e18, 68b97ea, c6202f3, 45aedf7, 11dea77,
+  e65af93, 5d934dc
 
 ## Out of Scope (MVP1)
 

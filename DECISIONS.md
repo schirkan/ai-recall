@@ -5,6 +5,47 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-04 — Trigger-Pipeline: Implementation-Resultat + nachträgliche Entscheidungen
+
+Spec 0005 (Trigger-Pipeline) ist mit Commits `791161a` … `5d934dc`
+abgeschlossen. Die folgenden Entscheidungen wurden während der
+Implementation getroffen (teils Martin-Review-Fixes, teils
+technische Notwendigkeiten):
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Assembly-Struktur | **`AiRecall.Trigger.dll` als eigenes Projekt** | MVP2-Tray-Icon-EXE soll Trigger-Code wiederverwenden, braucht aber kein ScreenCapture. Zyklusfreie Ref-Kette: Core → AppReader.Base → ScreenCapture → Trigger → Cli. |
+| 2 | Trigger-Lifecycle | **`ITriggerService`-Interface + `TriggerService`-Implementierung** | Ermöglicht MVP2-Tray-EXE, denselben Code zu nutzen. `Start`/`Stop`/`Dispose` idempotent. Counter-Properties (`CaptureCount`, `ThrottleCount`, ...) für IPC. |
+| 3 | Generisches Throttling | **`Throttle<TKey> where TKey : notnull`** statt separater `ThrottleIntPtr`/`ThrottleString` | DRY, ein Code-Pfad für `Throttle<IntPtr>` (HWND) und `Throttle<string>` (Prozessname). |
+| 4 | HWND-Dedup | **`HwndDedup` als eigene Klasse** (nicht in `Dedup` integriert) | HWND-Key muss als Hex-String (`0xDEADBEEF`) in JSON persistiert werden, weil `IntPtr` nicht direkt serialisierbar ist. Dedup nach Prozessname nutzt weiterhin die generische `Dedup`-Klasse. |
+| 5 | Channel-Topologie | **`Channel<TriggerEvent>` unbounded, SingleReader (Worker), MultiWriter (WinEventHook + Heartbeat)** | WinEventHook + Heartbeat schreiben parallel, Worker liest sequenziell. Unbounded, damit keine Events verloren gehen (Worker ist schnell genug). |
+| 6 | Modal-Dialog-Strategie | **Option (a) — nur Foreground-Capture, Parent-Context als Frontmatter** (Martin-Diskussion 2026-07-04) | Beim modalen Dialog (z. B. Outlook „Neue Nachricht") wird nur das Vordergrund-Fenster aufgenommen, aber `parentHwnd`/`parentTitle`/`parentProcess` werden im YAML-Frontmatter emittiert. Erkennung via `GetAncestor(GA_ROOTOWNER) != rootHwnd`. |
+| 7 | Selection-Event | **`EVENT_OBJECT_SELECTION` ist NICHT in den Trigger-Quellen** (Martin 2026-07-04) | Würde bei reinem Caret-Wechsel innerhalb desselben Inhalts Captures auslösen — zu viel Rauschen. Nur Fokus/Name/Value/Scroll sind sinnvolle Trigger. |
+| 8 | CLI-Headless-Mode | **`--headless`-Flag** für MVP2-Tray-EXE und CI | Unterdrückt Console-Stats-Output, schreibt nur nach Serilog. Serilog-Output kann von Tray-EXE / NSSM / systemd-logind ausgewertet werden. |
+| 9 | CLI-Trigger-Mode | **`--trigger-mode=events\|polling\|both`** (Default: events) | Tests ohne Message-Loop (z. B. Sandbox) können `--trigger-mode=polling` nutzen. Production-Default ist `events` (sparsam). |
+| 10 | `recall status` | **Neuer Diagnose-Subcommand** | Liest nur von Disk (Config, heutige Captures nach Prozess, aktive Trigger-Config). `--json` für MVP2-IPC. Vorbereitung: Tray-EXE aktualisiert periodisch eine Status-Datei, die `recall status` anzeigt. |
+| 11 | Alte Polling-Pipeline | **`CapturePipeline` + `EventDetector` + `Models.cs` entfernt** | War Dead-Code nach Umstellung auf `TriggerService`. Reduziert Code-Maintenance-Burden. |
+
+### Tests
+
+- 91 neue Tests (Schritte A–G) in `tests/AiRecall.Core.Tests/Trigger/`
+  und `tests/AiRecall.Core.Tests/Persistence/`.
+- Test-Count gesamt: 189 / 189 grün (vorher 98 / 98).
+
+### Verworfen
+
+- **`EVENT_OBJECT_SELECTION` als Trigger-Quelle**: würde bei Caret-Wechsel
+  in Textfeldern jeden Tastendruck als Capture-Event interpretieren.
+  Zu viel Rauschen, dedup würde die meisten schlucken.
+- **Trigger-Mode „events" mit Heartbeat an**: unnötig, da WinEventHook
+  in der Praxis zuverlässig ist. Heartbeat nur als explizit aktivierter
+  Fallback oder im `both`-Mode.
+- **`getAppContext` mit Modal-Kontext** (Option (b) der Diskussion): würde
+  den App-Reader aufrufen, was bei modalen Dialogen oft leer/irrelevant
+  ist. Frontmatter-Only (Option a) ist sauberer.
+
+---
+
 ## 2026-07-04 — Trigger-Pipeline: WinEventHook statt Polling
 
 `recall record` (Spec 0005) löst das ursprüngliche Polling auf
@@ -54,9 +95,12 @@ Architektur ab.
   Browser-spezifisch, würde Architektur in den Browser ziehen.
 - **WPF-/Forms-spezifische Application-Idle-Events**: nur prozess-lokal,
   nicht systemweit.
-- **Trigger-Pipeline als separate Library/DLL**: Bleibt in
-  `AiRecall.ScreenCapture` (Haupt-Capture-Pipeline) — keine eigene DLL,
-  würde nur Split-Komplexität erzeugen.
+- **Trigger-Pipeline als separate Library/DLL**: Anfangs in
+  `AiRecall.ScreenCapture` geplant, dann doch in eigene
+  `AiRecall.Trigger.dll` extrahiert (Martin 2026-07-04, Commit 11dea77),
+  weil die MVP2-Tray-Icon-EXE denselben Code nutzen soll und ScreenCapture
+  nicht braucht. Ref-Kette: Core → AppReader.Base → ScreenCapture →
+  Trigger → Cli (zyklusfrei).
 
 ## 2026-07-03 — MVP1 Tech-Defaults
 

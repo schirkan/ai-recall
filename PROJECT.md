@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad).**
+**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad) + Trigger-Pipeline (Spec 0005).**
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 98/98 grün (+35 AppReader-Tests seit `Browser-Reader Tests (App-Reader Iteration 2)`: +20 inkl. CDP-Iter. 3, +11 für ReverseMarkdown-Config-Mapping in Iter. 4)
+- [x] Tests: 189/189 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern)
 - [x] **Browser-Reader Iter. 4 — ReverseMarkdown 1:1 via JSON:** neue Sektion
   `appReader.browser.markdown` mappt alle 8 öffentlichen `ReverseMarkdown.Config`-Felder
   (`unknownTags`, `githubFlavored`, `removeComments`, `whitelistUriSchemes`,
@@ -46,8 +46,30 @@
   `_UnknownTags_InvalidString_LeavesDefault`, `_TableWithoutHeaderRow_*`,
   `_ListBulletChar_TakesFirstCharOnly`, `_WhitelistUriSchemes_EmptyList_*`,
   `ConvertHtmlToMarkdown_*` End-to-End, `AppConfig_BrowserConfig_HasMarkdownSettings`).
+- [x] **Trigger-Pipeline (Spec 0005) komplett implementiert:**
+  - `AiRecall.Trigger.dll` (eigene Assembly, Namespace `AiRecall.Trigger`):
+    `ITriggerService`, `TriggerService` (Orchestrator), `WinEventHookDetector`
+    (`SetWinEventHook` out-of-context, Message-Loop auf eigenem Thread),
+    `HeartbeatThread` (periodisches `GetForegroundWindow`, Fallback),
+    `TriggerWorker` (Pipeline-Schritte 1–12), `TriggerEvent`/`TriggerKind`,
+    `HwndDedup` (Hex-Persistenz, `0xDEADBEEF`).
+  - `AiRecall.Core.Util.{Throttle<TKey>, Dedup}` (generisch, gemeinsam
+    genutzt).
+  - `AiRecall.Core.Windows.WindowInfoLookup` (HWND → WindowInfo).
+  - `CaptureWriter.Write` um `parentWindow: WindowInfo?` erweitert
+    (Spec 0005 §Modale Dialoge, Option (a): nur Foreground-Capture +
+    `parentHwnd`/`parentTitle`/`parentProcess` im Frontmatter).
+  - `TriggerWorker` Modal-Dialog-Detection via
+    `GetAncestor(GA_ROOTOWNER) != rootHwnd`.
+  - CLI: `recall record` mit `--headless` (MVP2-Tray-EXE) und
+    `--trigger-mode=events|polling|both`. `recall status` (neu):
+    Diagnose (Config-Pfade, heutige Captures nach Prozess, aktive
+    Trigger-Config), `--json` für MVP2-IPC.
+  - Alte `CapturePipeline`/`EventDetector`/`Models.cs` (Polling-basiert)
+    entfernt.
+  - 91 neue Tests (Schritte A–G).
 - [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint
-- [ ] Trigger-Pipeline (`recall record`) — naechste Iteration
+- [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
 - [x] Push auf `origin/main`
 
 ## Projektziel (Kurzfassung)
@@ -76,13 +98,15 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0002-mvp1-scope.md` | MVP1-Scope, User Stories, Architektur, Config |
 | `specs/0003-active-window.md` | `recall active-window` Command-Spec |
 | `specs/0004-app-reader.md` | App-Reader-Architektur (eine DLL pro App, Outlook-Mail-Log) |
+| `specs/0005-trigger-pipeline.md` | Trigger-Pipeline (WinEventHook + Heartbeat + Worker) |
 | `src/` | .NET-Solution-Projekte |
-| `src/AiRecall.Core/` | Models, Configuration, Persistence, Util |
-| `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR, Trigger-Logik |
-| `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen (leer, kommt mit 0004) |
-| `src/AiRecall.AppReader.{Browser,Outlook,Documents}/` | App-Reader-DLLs (Stubs, kommen mit 0004) |
+| `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
+| `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
+| `src/AiRecall.Trigger/` | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service** |
+| `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
+| `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
-| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core (Hashing, IgnoreMatcher, ConfigLoader) |
+| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger (189 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
 | `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
 | `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |
@@ -95,25 +119,24 @@ Folgen `projects/PROJECT-RULES.md`:
 - Decisions in `DECISIONS.md`
 - Current Status hier aktuell halten
 
-## Offene Punkte (für MVP1 nach `active-window`)
+## Offene Punkte (für MVP1)
 
 1. **Spec 0004 (App-Reader) — Martin-Review ausstehend**
-   - IAppReader-Interface-Design
-   - Eine DLL pro App (8 Stück): Browser, Outlook, Documents (Word/Excel/PowerPoint), Notepad, Explorer
-   - Outlook-Mail-Log mit `ignoreAutoRuleMails`-Setting
-   - Persistenz als zusätzliche `*.content.md` neben dem Capture-MD
-   - Plugin-Discovery via Reflection
+   - Eine DLL pro App: Browser ✅, Notepad ✅, Explorer ✅, Outlook ⏳ (mit Mail-Log + Auto-Regel-Setting), Documents (Word/Excel/PowerPoint) ⏳
+   - Persistenz als zusätzliche `*.content.md` neben dem Capture-MD ✅
    - **Browser-Reader CDP opt-in erledigt (Iter. 3)** — siehe DECISIONS.md-Eintrag 2026-07-03
-2. **Trigger-Pipeline (`recall record`):** SetWinEventHook (out-of-context) als
-   Hauptquelle + Heartbeat-Polling-Fallback + Throttle (per HWND + per App) +
-   HWND-Dedup + Parent-Context für modale Dialoge (Spec 0005, TR-1..9).
-   Iteration läuft (Schritte A-C committed, D-H offen).
+   - **Browser-Reader ReverseMarkdown 1:1 erledigt (Iter. 4)** — siehe DECISIONS.md
+2. **Trigger-Pipeline (Spec 0005) — abgeschlossen (Schritte A–G):** ✅
+   - `AiRecall.Trigger.dll`, `ITriggerService`/`TriggerService`
+   - `WinEventHookDetector` (out-of-context) + `HeartbeatThread` (Fallback)
+   - `TriggerWorker` (Pipeline 1–12) + `HwndDedup` + `Throttle<TKey>`
+   - CLI: `recall record --headless --trigger-mode=events|polling|both`
+   - CLI: `recall status [--json]` (Diagnose + MVP2-IPC-Vorbereitung)
+   - Modal-Dialog-Frontmatter (`parentHwnd`/`parentTitle`/`parentProcess`)
 3. **UIA-Fallback:** Wenn OCR zu schlecht, Windows UIA als zusätzliche Textquelle (oder als App-Reader-Default)
 4. **OCR-Tessdata-Doku:** README-Schritt-für-Schritt-Anleitung zum Download ✅ (PS-One-Liner drin)
-5. **State-File:** Letzter Hash pro HWND für Dedup, evtl. SQLite in MVP2/3
-6. **MVP2: Tray-Icon-EXE** (Hinweis Martin 2026-07-04): Vollwertige
+5. **MVP2: Tray-Icon-EXE** (Hinweis Martin 2026-07-04): Vollwertige
    Windows-Anwendung mit Notification-Area-Icon zum Steuern von
    `recall record` (Start/Stop/Pause/Status-Anzeige). CLI bleibt für
-   Scripts erhalten. `TriggerService` wird über ein
-   `ITriggerService`-Interface gekapselt, damit CLI und Tray-EXE
-   denselben Code nutzen. Spec folgt nach MVP1-Abschluss.
+   Scripts erhalten. `ITriggerService` ist die Schnittstelle dafür.
+   Spec folgt nach MVP1-Abschluss.
