@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DocumentFormat.OpenXml: docx/xlsx/pptx (MIT, Microsoft, 700M+ NuGet-Downloads) -->
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <!-- UglyToad.PdfPig: PDF (Apache 2.0, MIT-kompatibel, 21M NuGet-Downloads) -->
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    <!-- ReverseMarkdown: HTML -> MD (MIT, bereits im Projekt) -->
+    <PackageReference Include="ReverseMarkdown" Version="3.13.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
+  </ItemGroup>
+
+</Project>
