@@ -294,3 +294,59 @@ ohne Code-Änderung.
 - **Caching des Converters pro Settings-Hash:** Spart Mikrosekunden pro Call; lohnt den Komplexitäts-Aufwand (Hash-Berechnung, Dictionary-Lookup) bei unserer Call-Frequenz nicht. Read ist ohnehin O(HTML-Größe).
 - **Converter-Konfiguration über Reflection auf private Felder:** Würde private Implementierungs-Details der Library koppeln; die offizielle `Config`-Property reicht.
 - **Automatische Schema-Generierung aus der DLL:** Reflection auf die `ReverseMarkdown.dll` haben wir einmalig zur Verifikation gemacht (siehe `temp/reversemd-inspect/`); für die laufende Konfiguration ist die statische POCO-Definition klarer und typgeprüft.
+
+---
+
+## 2026-07-04 — Async Document Conversion Pipeline (Spec 0007, v1.0 abgeschlossen)
+
+App-Reader entkoppelt von MD-Generierung. Reader liefern nur strukturierte
+Metadaten (Title, FilePath, ggf. UIA-Content), zentrale async
+Conversion-Pipeline assemblet daraus das finale `*.conversion.md`.
+Commits `3a98e04` … `84afab7`. Test-Count 331/331 grün (vorher 271).
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Pandoc-Integration | **Verworfen** (Martin 2026-07-04 19:12) | „Pandoc ist Performance-mäßig raus." Format-Coverage < Performance. Konverter bleiben in-process (.NET-Libraries). Edge-Cases (odt, latex, epub, rtf, docbook) liefern `null` + Log statt Krücke über externen Process-Spawn. |
+| 2 | Format-Mapping | **DocumentFormat.OpenXml + UglyToad.PdfPig + ReverseMarkdown** | OpenXml (MIT, MS, 700M+ Downloads) für docx/xlsx/pptx; PdfPig (Apache 2.0, 21M+ Downloads) für PDF; ReverseMarkdown (MIT, vorhanden) für HTML. ClosedXML (nur xlsx), NPOI (auch alte binäre Formate), iText7 (AGPL-Show-Stopper), PdfSharp (Fokus write) explizit verworfen. |
+| 3 | Channel-Topologie | **In-process `Channel<string>`** (Martin 2026-07-04 19:25) | Producer-Consumer-Queue im Code sichtbar, testbar, deterministisch, plattform-neutral, kein Win32-FileSystemWatcher. SingleReader/MultiWriter, unbounded. |
+| 4 | OCR-Pipeline | **Async im ConversionWorker** (Martin 2026-07-04 19:25) | Tesseract (100–500 ms pro Bild) aus dem synchronen Capture-Pfad raus, läuft im `ConversionWorker`-Pool parallel zu DocumentConverter. `IOcrEngine`-Interface + `TesseractOcrEngineAdapter` (via `Task.Run` um sync `OcrEngine` gewrappt) + `NullOcrEngine` als Default. |
+| 5 | Legacy-Handling | **Keins** (Martin 2026-07-04 20:01) | „Das Tool ist neu." `recall convert` ist reiner **Recovery-Subcommand** für gecrashte Sessions, kein `--include-legacy`-Flag, kein Migrations-Pfad für alte Captures. |
+| 6 | TriggerService-Lifecycle | **ConversionWorker wird vom TriggerService besessen** | `ITriggerService`-Pattern: externe Injection möglich (`conversionWorker: null` → intern erzeugt). `Dispose` disposet nur owned Worker (Ownership-Flag `_ownsConversionWorker`). Tesseract-Init-Fehler (tessdata fehlt) → Fallback `NullOcrEngine` mit Warning, kein ctor-Crash. |
+| 7 | App-Reader dünn | **`IsThinReader=true` + `ContentMarkdown=Platzhalter`** | Reader liefern nur Title/FilePath/ggf. UIA-Content. ConversionWorker assemblet `*.conversion.md` mit `## Document content`, `## OCR Content`, `## App Reader Content (UIA)`. Bei `IsThinReader=true` schreibt der TriggerWorker kein `*.content.md` (Race-Vermeidung mit ConversionWorker). |
+| 8 | Output-Trennung | **`*.content.md` (App-Reader, sync) + `*.conversion.md` (ConversionWorker, async)** | Zwei verschiedene Files, kein Race. Schritt 7 nutzt diese Trennung: dünne Reader (Word/Excel/PowerPoint) schreiben kein `*.content.md`; nicht-dünne (Browser/Notepad) schreiben weiterhin sync. Konsolidierung wäre Schritt-7-Folge. |
+| 9 | Frontmatter-Pattern | **`CaptureWriter.WritePending` initial + `UpdateConversionStatus` nachträglich** | Atomares Schreiben: erstes WritePending erzeugt PNG + MD mit `conversion: "pending"`, optional `filePath`/`uiaContent`. UpdateConversionStatus parst Frontmatter, updated/addiert `conversion`/`conversionError`/`conversionSteps`/`conversionTimestamp`/`converterUsed`. Body bleibt unverändert. |
+| 10 | Frontmatter-Felder | `conversion` (pending/done/partial/failed), `conversionError` (semikolon-getrennt), `conversionTimestamp` (ISO-8601), `conversionSteps` (semikolon-getrennt, `key=value` Paare), `converterUsed` | `conversionSteps` strukturiert: `doc=ok,openxml-word;ocr=ok,tesseract;appreader=ok,uia`. Jeder Schritt hat eigenen Status. Diagnose via `recall status` und log. |
+| 11 | OCR-Engine-Init-Fallback | `TriggerService` ctor: try/catch um `OcrEngine(config.Ocr)` → `NullOcrEngine` | tessdata-Default-Pfad fehlt in CI/Sandbox → ohne Fallback crasht der ctor. Mit Fallback: Warning-Log, ConversionWorker läuft ohne OCR. |
+| 12 | ConversionWorker-Concurrency | **Channel-Reader-Task pro Worker, sequenziell pro Capture** | Pro Capture: erst DocumentConverter, dann OCR, dann Frontmatter-Update. Worker-Pool-Größe implizit durch Channel-Lese-Rate (1 Worker). Parallelität ggf. in Schritt-7-Folge (`batchSize`-Feld in `ConversionConfig` ist da, aber noch nicht ausgenutzt). |
+| 13 | `recall convert` | **CLI-Subcommand, scannt Disk, enqueued ohne Blocking** | Recovery-Tool: `--path` (Default: Config-Root), `--max-wait` (Default 30s), `--config`. Wartet bis Channel leer ODER max-wait abgelaufen, gibt Counter aus, Exit-Code ≠ 0 bei `FailedCount > 0`. Ohne `--include-legacy`-Flag. |
+| 14 | ProjectRef | `AiRecall.Trigger → AiRecall.Conversion` + `AiRecall.Cli → AiRecall.Conversion` | Zyklusfreie Ref-Kette: Core → AppReader.Base → ScreenCapture → Conversion → Trigger → Cli. Trigger und Cli nutzen Conversion als Library. |
+| 15 | Tests | **+60 netto Tests** | DocumentConverter (37) + ConversionWorker (15) + OcrWorker (5) + TriggerService-Integration (6) + UIA-Content-Section (1) - 4 alte App-Reader-Tests ersetzt = +60. Test-Count gesamt 331/331 grün. |
+
+### Tests
+
+- 60 neue Tests (netto) in `tests/AiRecall.Core.Tests/Conversion/` und `tests/AiRecall.Core.Tests/Trigger/TriggerServiceConversionTests.cs`.
+- Test-Count gesamt: **331 / 331 grün** (vorher 271).
+
+### Verworfen
+
+- **Pandoc-Integration** (Martin 2026-07-04 19:12): Performance wichtiger als Format-Coverage. Edge-Cases (odt, latex, epub, doc/xls/ppt alt) liefern `null` + Log mit `no-converter-for-<ext>`.
+- **`recall convert --include-legacy`-Flag** (Martin 2026-07-04 20:01): Tool ist neu, keine Legacy-Captures zu konvertieren.
+- **FileSystemWatcher** (Martin 2026-07-04 19:25): in-process `Channel<string>` reicht, keine Disk-Polling.
+- **Sync OCR im TriggerWorker**: 100–500 ms pro Bild zu viel für den Capture-Loop; Tesseract läuft async im ConversionWorker.
+- **Pid-basierte COM-Bindung für Office-Reader** (Spec 0004 Iter. 3): zu komplex; Filename-Match deckt 95% ab.
+- **Eigener Office-OpenXML-Writer** zum Reverse-Konvertieren (MD → docx): nicht im Scope.
+- **Worker als Windows-Service**: zu komplex; Background-Task im selben Prozess reicht.
+- **Streaming-Konvertierung** (Pipe zu externem Tool ohne Temp-File): unnötig, da in-process.
+- **NuGet-Pakete ClosedXML / NPOI / iText7 / PdfSharp** (Evaluiert 2026-07-04 19:30): alle haben spezifische Nachteile ggü. OpenXml + PdfPig + ReverseMarkdown.
+
+### Auswirkungen
+
+- Neue DLL: `AiRecall.Conversion` (ProjectRef → Core)
+- Neue Config-Sektion: `conversion.*` (enabled, maxTextKB, batchSize, conversionTimeoutSeconds) — `ocr.*` bleibt separat am Root für Backward-Compat
+- `CaptureWriter` API erweitert: `WritePending(...)` (initial) + `UpdateConversionStatus(...)` (Frontmatter-Update)
+- `AppReaderResult.IsThinReader` neues Flag (default `false`)
+- `TriggerWorker` ruft App-Reader **vor** `CaptureWriter.WritePending` auf, übergibt `filePath`/`uiaContent` aus dem Extra-Dict ins Frontmatter
+- `TriggerService` besitzt den `ConversionWorker` als optionale Dependency
+- `recall convert` neuer CLI-Subcommand
+- Frontmatter-Schema erweitert: `conversion`, `conversionError`, `conversionTimestamp`, `conversionSteps`, `converterUsed`
+

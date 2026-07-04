@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad) + Trigger-Pipeline (Spec 0005).**
+**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen).**
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -98,6 +98,17 @@
 - [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting)
 - [x] App-Reader: Word/Excel/PowerPoint (Spec 0004 Iter. Documents — UIA-only, Office nicht erforderlich; Tests grün, e2e-Smoke gegen Office ausstehend)
 - [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
+- [x] **Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen)**
+  - Neue DLL `AiRecall.Conversion` mit `DocumentConverter` (OpenXml/PdfPig/ReverseMarkdown/Plain)
+  - `ConversionWorker` (in-process `Channel<string>`, Background-Task) — async OCR + DocumentConverter
+  - `IOcrEngine` Interface + `TesseractOcrEngineAdapter` (async via `Task.Run`) + `NullOcrEngine`
+  - `CaptureWriter.WritePending` + `UpdateConversionStatus` Frontmatter-Update-Pattern
+  - `recall convert` Subcommand (Recovery für gecrashte Sessions)
+  - Word/Excel/PowerPoint-Reader refactored zu **dünn** (`IsThinReader=true`, `ContentMarkdown=Platzhalter`)
+  - `TriggerService` integriert `ConversionWorker` als Sink
+  - **Test-Count: 331/331 grün** (vorher 271, +60)
+  - Commits: `3a98e04`, `f176bea`, `9c7d9b5`, `de83a7e`, `84afab7`
+  - Martin-Direktiven umgesetzt: Pandoc raus (Performance > Format-Coverage), `Channel<string>` statt FileSystemWatcher, OCR ebenfalls async, kein Legacy-Handling
 - [x] Push auf `origin/main`
 
 ## Projektziel (Kurzfassung)
@@ -127,15 +138,17 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0003-active-window.md` | `recall active-window` Command-Spec |
 | `specs/0004-app-reader.md` | App-Reader-Architektur (eine DLL pro App, Outlook-Mail-Log) |
 | `specs/0005-trigger-pipeline.md` | Trigger-Pipeline (WinEventHook + Heartbeat + Worker) |
+| `specs/0007-async-conversion.md` | Async Document Conversion Pipeline (v1.0 abgeschlossen) |
 | `src/` | .NET-Solution-Projekte |
 | `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
 | `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
 | `src/AiRecall.Trigger/` | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service** |
 | `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
 | `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
+| `src/AiRecall.Conversion/` | **Async Document Conversion (Spec 0007)**: `DocumentConverter` + `ConversionWorker` + `IOcrEngine`/`TesseractOcrEngineAdapter`/`NullOcrEngine` |
 | `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
-| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader (243 Tests) |
+| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (331 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
 | `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
 | `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |
@@ -169,3 +182,7 @@ Folgen `projects/PROJECT-RULES.md`:
    `recall record` (Start/Stop/Pause/Status-Anzeige). CLI bleibt für
    Scripts erhalten. `ITriggerService` ist die Schnittstelle dafür.
    Spec folgt nach MVP1-Abschluss.
+6. **Spec 0007 Folge-Iterationen (nach v1.0)**:
+   - PDF-Verschlüsselung-Handling + mehrseitige Dokumente
+   - OCR-Preprocessing (Binarization/Deskew) optional
+   - `*.conversion.md` ↔ `*.content.md` Vereinheitlichung (Schritt 7 nutzt `*.conversion.md` als Trennung zum App-Reader)
