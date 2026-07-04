@@ -1,13 +1,18 @@
 namespace AiRecall.ScreenCapture.Trigger;
 
 /// <summary>
-/// Pro-Prozess-Throttle (Spec 0002 TR-4). Hält für jeden Prozessnamen den
-/// Zeitpunkt des letzten Captures. Erlaubt ein neues Capture erst nach
-/// Ablauf des konfigurierten Intervalls.
+/// Generischer Throttle: pro Key (Prozessname, HWND, …) wird der Zeitpunkt
+/// des letzten Captures gespeichert; ein neues Capture ist erst nach
+/// Ablauf des Intervalls erlaubt.
+///
+/// Spec 0002 TR-4 (pro-App) und Spec 0005 §Pipeline-Schritte 2+3
+/// (per-HWND + per-App). Generisch, damit derselbe Code für
+/// <c>Throttle&lt;string&gt;</c> (Prozessname) und
+/// <c>Throttle&lt;IntPtr&gt;</c> (HWND) genutzt werden kann.
 /// </summary>
-public sealed class Throttle
+public sealed class Throttle<TKey> where TKey : notnull
 {
-    private readonly Dictionary<string, DateTimeOffset> _lastCapture = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<TKey, DateTimeOffset> _lastCapture = new();
     private readonly TimeSpan _window;
 
     public Throttle(TimeSpan window)
@@ -17,21 +22,24 @@ public sealed class Throttle
     }
 
     /// <summary>
-    /// True, wenn der Prozess jetzt capturen darf (Intervall abgelaufen oder
+    /// True, wenn der Key jetzt capturen darf (Intervall abgelaufen oder
     /// noch nie capturiert).
     /// </summary>
-    public bool Allows(string processKey, DateTimeOffset now)
+    public bool Allows(TKey key, DateTimeOffset now)
     {
-        if (!_lastCapture.TryGetValue(processKey, out var last)) return true;
+        if (!_lastCapture.TryGetValue(key, out var last)) return true;
         return now - last >= _window;
     }
 
-    /// <summary>Markiert „jetzt gerade capturiert" für den Prozess.</summary>
-    public void Mark(string processKey, DateTimeOffset now)
+    /// <summary>Markiert „jetzt gerade capturiert" für den Key.</summary>
+    public void Mark(TKey key, DateTimeOffset now)
     {
-        _lastCapture[processKey] = now;
+        _lastCapture[key] = now;
     }
 
     /// <summary>Setzt den State zurück (für Tests).</summary>
     public void Reset() => _lastCapture.Clear();
+
+    /// <summary>Anzahl der getrackten Keys (für Diagnostik/Tests).</summary>
+    public int TrackedKeyCount => _lastCapture.Count;
 }

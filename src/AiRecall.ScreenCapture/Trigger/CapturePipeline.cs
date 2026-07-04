@@ -19,7 +19,7 @@ public sealed class CapturePipeline : IDisposable
 {
     private readonly AppConfig _config;
     private readonly Serilog.ILogger _logger;
-    private readonly Throttle _throttle;
+    private readonly Throttle<string> _throttle;
     private readonly Dedup _dedup;
     private readonly AppReaderRegistry _appReaderRegistry;
 
@@ -36,7 +36,7 @@ public sealed class CapturePipeline : IDisposable
     {
         _config = config;
         _logger = logger;
-        _throttle = new Throttle(TimeSpan.FromMilliseconds(config.ScreenRecorder.ThrottleMs));
+        _throttle = new Throttle<string>(TimeSpan.FromMilliseconds(config.ScreenRecorder.ThrottleMs));
 
         var stateFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
