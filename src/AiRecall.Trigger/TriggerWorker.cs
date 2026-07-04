@@ -256,15 +256,12 @@ public sealed class TriggerWorker : IDisposable
             return;
         }
 
-        // 10. Pending-MD schreiben (ohne OCR-Text, ohne App-Reader-Content).
-        //     Spec 0007: OCR + DocumentConverter laufen async im ConversionWorker.
-        //     App-Reader schreibt sein *.content.md weiterhin synchron (Schritt 7
-        //     refactored den App-Reader duenn, dann laeuft auch das async).
-        var item = CaptureWriter.WritePending(
-            window, pngBytes, hash, _config.Capture.RootPath,
-            parentWindow: parentWindow);
-
-        // 11. App-Reader (Spec 0004) — schreibt *.content.md synchron
+        // 10. App-Reader (Spec 0004) — wird VOR dem Pending-MD aufgerufen,
+        //     damit filePath/uiaContent aus dem Extra-Dict ins Frontmatter
+        //     geschrieben werden koennen. Spec 0007 Schritt 7: duenne Reader
+        //     (Word/Excel/PowerPoint) liefern nur Metadaten, der Conversion-
+        //     Worker assemblet daraus spaeter das *.conversion.md.
+        AppReaderResult? readerResult = null;
         if (_config.AppReader.Enabled && _appReaderRegistry.Readers.Count > 0)
         {
             var context = new AppReaderContext
@@ -273,18 +270,40 @@ public sealed class TriggerWorker : IDisposable
                 Logger = _logger,
                 CancellationToken = default
             };
-            var readerResult = _appReaderRegistry.TryRead(window, context);
-            if (readerResult is not null)
-            {
-                var coreRecord = new AppContentRecord(
-                    readerResult.ContentMarkdown,
-                    readerResult.ContextLabel,
-                    readerResult.ContextKind,
-                    readerResult.ReaderName,
-                    readerResult.ReaderVersion,
-                    readerResult.Extra);
-                CaptureWriter.WriteContent(coreRecord, window, item.Timestamp, _config.Capture.RootPath, readerResult.ContextLabel);
-            }
+            readerResult = _appReaderRegistry.TryRead(window, context);
+        }
+
+        // 11. Pending-MD schreiben (mit App-Reader-Metadaten wenn vorhanden)
+        string? appFilePath = null;
+        string? appUiaContent = null;
+        if (readerResult?.Extra is not null)
+        {
+            if (readerResult.Extra.TryGetValue("filePath", out var fp) && !string.IsNullOrEmpty(fp))
+                appFilePath = fp;
+            if (readerResult.Extra.TryGetValue("uiaContent", out var uia) && !string.IsNullOrEmpty(uia))
+                appUiaContent = uia;
+        }
+
+        var item = CaptureWriter.WritePending(
+            window, pngBytes, hash, _config.Capture.RootPath,
+            parentWindow: parentWindow,
+            filePath: appFilePath,
+            uiaContent: appUiaContent);
+
+        // 12. Content-MD synchron (nur fuer NICHT-duenne Reader).
+        //     Duenne Reader (Word/Excel/PowerPoint) liefern nur Metadaten;
+        //     ihr Content-Markdown ist der Platzhalter — der echte Content
+        //     kommt async aus dem ConversionWorker.
+        if (readerResult is not null && !readerResult.IsThinReader)
+        {
+            var coreRecord = new AppContentRecord(
+                readerResult.ContentMarkdown,
+                readerResult.ContextLabel,
+                readerResult.ContextKind,
+                readerResult.ReaderName,
+                readerResult.ReaderVersion,
+                readerResult.Extra);
+            CaptureWriter.WriteContent(coreRecord, window, item.Timestamp, _config.Capture.RootPath, readerResult.ContextLabel);
         }
 
         // 12. Async Conversion-Worker (Spec 0007) — enqueue der MD-Pfad

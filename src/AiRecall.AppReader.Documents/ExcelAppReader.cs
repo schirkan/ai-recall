@@ -1,4 +1,3 @@
-using System.Text;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Models;
 
@@ -7,106 +6,79 @@ namespace AiRecall.AppReader.Documents;
 /// <summary>
 /// Excel-App-Reader (Process <c>EXCEL</c>).
 ///
-/// Strategie (Spec 0004 Iter. Documents Schritt 2, Martin 2026-07-04):
-///   1. COM-Lookup → <c>FullName</c> + <c>UsedRange</c> als Markdown-Tabelle.
-///   2. Bei COM-Erfolg: <c>filePath</c> im Frontmatter + Tabelle in
-///      <c>content.md</c> unter <c>## Document content (via COM)</c>.
-///   3. Fallback: Title-Parsing + UIA-Text (sichtbare Zellen).
+/// Strategie (Spec 0004 Iter. Documents + Spec 0007 Schritt 7):
+///   1. <b>Dünn</b>: liefert nur Title + FilePath + ggf. UIA-Rohcontent
+///      (kein eigener Content-Markdown-Body, keine Tabellen).
+///   2. COM-Lookup → <c>FullName</c> (Sheet-Name + Tabellen werden NICHT
+///      mehr gelesen, weil <c>ConversionWorker</c> via OpenXml die ganze
+///      Tabelle zuverlässig und asynchron extrahiert).
+///   3. COM-Fehler: Fallback auf Title-Parsing + UIA.
+///   4. <see cref="AppReaderResult.IsThinReader"/> = <c>true</c>.
 ///
 /// Hinweis: Sheet-Name (z. B. "Tabelle1") ist im Fenster-Titel NICHT
-/// enthalten — nur via COM <c>ActiveSheet.Name</c> lesbar. COM-Pfad
-/// liefert diesen mit.
+/// enthalten — nur via COM <c>ActiveSheet.Name</c> lesbar. Der
+/// <c>ConversionWorker</c> kann den Sheet-Namen aus OpenXml
+/// rekonstruieren, sofern die Datei lesbar ist.
 /// </summary>
 public sealed class ExcelAppReader : AppReaderBase
 {
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { "EXCEL" };
-    public override string DisplayName => "Excel (COM + Title + UIA)";
+    public override string DisplayName => "Excel (file detection + UIA)";
 
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
         {
-            // 1) COM-Pfad (bevorzugt). Filename aus ParseTitle als Erwartung an COM uebergeben.
+            var extra = new Dictionary<string, string>();
+            string? filePath = null;
+            string source;
+
+            // 1) COM-Pfad
             var (expectedFileName, _, _) = ParseTitle(window.Title);
             var comInfo = OfficeComInterop.TryGetExcelInfo(
                 expectedFilename: IsLikelyARealFilename(expectedFileName) ? expectedFileName : null);
             if (comInfo is not null)
             {
-                var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
-                var md = new StringBuilder();
-                md.AppendLine($"**File:** `{comInfo.FullPath}`");
-
-                if (!string.IsNullOrEmpty(comInfo.Text))
-                {
-                    md.AppendLine();
-                    md.AppendLine("## Document content (via COM)");
-                    md.AppendLine();
-                    md.AppendLine(Truncate(comInfo.Text, maxChars));
-                }
-                else if (!string.IsNullOrEmpty(comInfo.Error))
-                {
-                    md.AppendLine();
-                    md.AppendLine($"_(COM-Text-Lese-Fehler: {comInfo.Error})_");
-                }
-
-                return new AppReaderResult(
-                    ContentMarkdown: md.ToString(),
-                    ContextLabel: System.IO.Path.GetFileName(comInfo.FullPath),
-                    ContextKind: "spreadsheet",
-                    ReaderName: DisplayName,
-                    ReaderVersion: typeof(ExcelAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                    Extra: new Dictionary<string, string>
-                    {
-                        ["filePath"] = comInfo.FullPath,
-                        ["fileName"] = System.IO.Path.GetFileName(comInfo.FullPath),
-                        ["source"] = "com",
-                        ["hasContent"] = (!string.IsNullOrEmpty(comInfo.Text)).ToString(),
-                        ["contentLength"] = (comInfo.Text?.Length ?? 0).ToString()
-                    });
-            }
-
-            // 2) Fallback: Title + UIA
-            var (fileName, isUntitled, isReadOnly) = ParseTitle(window.Title);
-            var fallbackMaxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
-            var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
-            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, fallbackMaxChars) : null;
-
-            var md2 = new StringBuilder();
-            if (isUntitled)
-            {
-                md2.AppendLine("**File:** _(untitled)_");
+                filePath = comInfo.FullPath;
+                source = "com";
             }
             else
             {
-                md2.AppendLine($"**File (from title):** `{fileName}`");
+                source = "title-uia";
             }
-            if (isReadOnly) md2.AppendLine("**Mode:** Read-Only");
 
-            if (!string.IsNullOrEmpty(bodyText))
+            // 2) UIA-Rohcontent
+            var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+            var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
+            string? uiaContent = useUia ? UiaTextExtractor.TryExtract(window.Handle, maxChars) : null;
+
+            // 3) Extra aufbauen
+            if (!string.IsNullOrEmpty(filePath))
             {
-                md2.AppendLine();
-                md2.AppendLine("```");
-                md2.AppendLine(Truncate(bodyText, fallbackMaxChars));
-                md2.AppendLine("```");
-                md2.AppendLine();
-                md2.AppendLine("_Hinweis: UIA liefert nur sichtbare Zellen. Vollstaendiger Inhalt nur via COM-Interop (Office erforderlich)._");
+                extra["filePath"] = filePath;
+                extra["fileName"] = System.IO.Path.GetFileName(filePath);
             }
+            if (!string.IsNullOrEmpty(uiaContent))
+            {
+                extra["uiaContent"] = uiaContent;
+            }
+            extra["source"] = source;
+            extra["hasContent"] = (!string.IsNullOrEmpty(uiaContent) || !string.IsNullOrEmpty(filePath)).ToString();
 
-            var label = isUntitled ? "(untitled)" : fileName;
+            // 4) ContextLabel
+            var (fallbackFileName, isUntitled, isReadOnly) = ParseTitle(window.Title);
+            var label = !string.IsNullOrEmpty(filePath)
+                ? System.IO.Path.GetFileName(filePath)
+                : (isUntitled ? "(untitled)" : fallbackFileName);
+
             return new AppReaderResult(
-                ContentMarkdown: md2.ToString(),
+                ContentMarkdown: PLACEHOLDER,
                 ContextLabel: label,
                 ContextKind: "spreadsheet",
                 ReaderName: DisplayName,
                 ReaderVersion: typeof(ExcelAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                Extra: new Dictionary<string, string>
-                {
-                    ["fileName"] = fileName,
-                    ["isUntitled"] = isUntitled.ToString(),
-                    ["isReadOnly"] = isReadOnly.ToString(),
-                    ["source"] = "title-uia",
-                    ["hasContent"] = (!string.IsNullOrEmpty(bodyText)).ToString()
-                });
+                Extra: extra,
+                IsThinReader: true);
         }
         catch (Exception ex)
         {
@@ -114,6 +86,9 @@ public sealed class ExcelAppReader : AppReaderBase
             return null;
         }
     }
+
+    /// <summary>Platzhalter fuer duenne Reader (Spec 0007 Schritt 7).</summary>
+    internal const string PLACEHOLDER = "_(siehe .content.md)_";
 
     /// <summary>
     /// Parst einen Excel-Fenster-Titel (Fallback-Pfad).
@@ -144,12 +119,6 @@ public sealed class ExcelAppReader : AppReaderBase
             return ("(untitled)", true, isReadOnly);
 
         return (name, false, isReadOnly);
-    }
-
-    private static string Truncate(string s, int maxChars)
-    {
-        if (s.Length <= maxChars) return s.TrimEnd();
-        return s[..maxChars].TrimEnd() + "\n… (truncated)";
     }
 
     /// <summary>

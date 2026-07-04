@@ -196,6 +196,16 @@ public sealed class ConversionWorker : IDisposable
             steps.Add("doc=skip,no-filePath");
         }
 
+        // 1b) App-Reader-UIA-Content (Schritt 7) — wird vom duennen Reader
+        //     (Word/Excel/PowerPoint) als Frontmatter-Feld uebergeben und hier
+        //     als eigene Sektion ins *.conversion.md assemblet.
+        if (!string.IsNullOrWhiteSpace(uiaContent))
+        {
+            sections.Add($"## App Reader Content (UIA)\n\n```\n{uiaContent.Trim()}\n```");
+            steps.Add("appreader=ok,uia");
+            anyStep = true;
+        }
+
         // 2) OCR (Schritt 4 — Tesseract-Adapter)
         if (!string.IsNullOrWhiteSpace(screenshotFile))
         {

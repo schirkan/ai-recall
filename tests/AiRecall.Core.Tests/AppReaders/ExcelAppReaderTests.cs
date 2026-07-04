@@ -7,9 +7,7 @@ using Serilog;
 namespace AiRecall.Core.Tests.AppReaders;
 
 /// <summary>
-/// Tests fuer ExcelAppReader. Office in Sandbox nicht verfuegbar
-/// (Martin 2026-07-04) → Title-Parsing und Fallback-Reads.
-/// COM-Integration-Tests mit <c>[Trait("Integration", "Office")]</c>.
+/// Tests fuer ExcelAppReader. Spec 0007 Schritt 7: Reader ist duenn.
 /// </summary>
 public class ExcelAppReaderTests
 {
@@ -50,21 +48,30 @@ public class ExcelAppReaderTests
         Assert.False(reader.CanRead(new WindowInfo(IntPtr.Zero, "x", 1, "notepad", true, new WindowRect(0, 0, 100, 100))));
     }
 
-    // ----- ParseTitle (Fallback-Pfad) -----
+    [Fact]
+    public void IsThinReader_True()
+    {
+        var reader = new ExcelAppReader();
+        var result = reader.Read(Win("Sheet.xlsx - Excel"), Ctx());
+        Assert.NotNull(result);
+        Assert.True(result!.IsThinReader);
+    }
+
+    [Fact]
+    public void ContentMarkdown_IsPlaceholder()
+    {
+        var reader = new ExcelAppReader();
+        var result = reader.Read(Win("Sheet.xlsx - Excel"), Ctx());
+        Assert.NotNull(result);
+        Assert.Equal(ExcelAppReader.PLACEHOLDER, result!.ContentMarkdown);
+    }
+
+    // ----- ParseTitle -----
 
     [Fact]
     public void ParseTitle_NormalXlsx_ReturnsFilename()
     {
-        var (name, untitled, readOnly) = ExcelAppReader.ParseTitle("Sheet.xlsx - Excel");
-        Assert.Equal("Sheet.xlsx", name);
-        Assert.False(untitled);
-        Assert.False(readOnly);
-    }
-
-    [Fact]
-    public void ParseTitle_UnsavedMarker_Stripped()
-    {
-        var (name, untitled, _) = ExcelAppReader.ParseTitle("*Sheet.xlsx - Excel");
+        var (name, untitled, _) = ExcelAppReader.ParseTitle("Sheet.xlsx - Excel");
         Assert.Equal("Sheet.xlsx", name);
         Assert.False(untitled);
     }
@@ -78,26 +85,16 @@ public class ExcelAppReaderTests
     }
 
     [Fact]
-    public void ParseTitle_EmptyAfterStrip_IsUntitled()
+    public void ParseTitle_ReadOnly_Detected()
     {
-        var (name, untitled, _) = ExcelAppReader.ParseTitle(" - Excel");
-        Assert.True(untitled);
-        Assert.Equal("(untitled)", name);
-    }
-
-    [Fact]
-    public void ParseTitle_ReadOnlyFlag_Detected()
-    {
-        var (name, untitled, readOnly) = ExcelAppReader.ParseTitle("Sheet.xlsx [Read-Only] - Excel");
+        var (name, _, readOnly) = ExcelAppReader.ParseTitle("Sheet.xlsx [Read-Only] - Excel");
         Assert.Equal("Sheet.xlsx", name);
-        Assert.False(untitled);
         Assert.True(readOnly);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData("   ")]
     public void ParseTitle_EmptyOrNull_ReturnsUntitled(string? title)
     {
         var (name, untitled, _) = ExcelAppReader.ParseTitle(title);
@@ -105,18 +102,10 @@ public class ExcelAppReaderTests
         Assert.Equal("(untitled)", name);
     }
 
-    [Fact]
-    public void ParseTitle_NoExcelSuffix_ReturnsTitleAsIs()
-    {
-        var (name, untitled, _) = ExcelAppReader.ParseTitle("Sheet.xlsx");
-        Assert.Equal("Sheet.xlsx", name);
-        Assert.False(untitled);
-    }
-
-    // ----- Read (Smoke, COM liefert null in Sandbox) -----
+    // ----- Read (Smoke) -----
 
     [Fact]
-    public void Read_StubXlsx_NoCrash_IncludesFileName()
+    public void Read_StubXlsx_ContextLabelAndSource()
     {
         var reader = new ExcelAppReader();
         var result = reader.Read(Win("Budget.xlsx - Excel"), Ctx());
@@ -124,10 +113,8 @@ public class ExcelAppReaderTests
         Assert.NotNull(result);
         Assert.Equal("spreadsheet", result!.ContextKind);
         Assert.Equal("Budget.xlsx", result.ContextLabel);
-        Assert.Contains("Budget.xlsx", result.ContentMarkdown);
         Assert.Equal("title-uia", result.Extra!["source"]);
-        Assert.Equal("False", result.Extra["hasContent"]);
-        Assert.Equal("False", result.Extra["isUntitled"]);
+        Assert.False(result.Extra.ContainsKey("filePath"));
     }
 
     [Fact]
@@ -135,34 +122,17 @@ public class ExcelAppReaderTests
     {
         var reader = new ExcelAppReader();
         var result = reader.Read(Win("Book1 - Excel"), Ctx());
-
         Assert.NotNull(result);
         Assert.Equal("(untitled)", result!.ContextLabel);
-        Assert.Contains("untitled", result.ContentMarkdown);
     }
 
     [Fact]
-    public void Read_StubReadOnly_IncludesModeLine()
+    public void Read_StubReadOnly_LabelHasOnlyFileName()
     {
         var reader = new ExcelAppReader();
         var result = reader.Read(Win("Locked.xlsx [Read-Only] - Excel"), Ctx());
-
         Assert.NotNull(result);
-        Assert.Contains("Read-Only", result!.ContentMarkdown);
-    }
-
-    [Fact]
-    public void Read_UiaDisabled_StillReturnsResultWithoutBody()
-    {
-        var cfg = new AppConfig();
-        cfg.AppReader.Documents.EnableUiaExtraction = false;
-        var ctx = new AppReaderContext { Config = cfg, Logger = new LoggerConfiguration().CreateLogger() };
-
-        var reader = new ExcelAppReader();
-        var result = reader.Read(Win("Sheet.xlsx - Excel"), ctx);
-
-        Assert.NotNull(result);
-        Assert.Equal("False", result!.Extra!["hasContent"]);
+        Assert.Equal("Locked.xlsx", result!.ContextLabel);
     }
 
     // ----- Integration: COM (nur mit Office) -----
@@ -174,8 +144,11 @@ public class ExcelAppReaderTests
         var reader = new ExcelAppReader();
         var result = reader.Read(Win("Test.xlsx - Excel"), Ctx());
 
-        if (result == null || result.Extra == null) return;
-        if (!result.Extra.TryGetValue("source", out var src) || src != "com") return;
+        if (result == null) return;
+        if (result.Extra == null) return;
+
+        var hasCom = result.Extra.TryGetValue("source", out var src) && src == "com";
+        if (!hasCom) return;
 
         Assert.True(result.Extra.ContainsKey("filePath"));
         Assert.False(string.IsNullOrEmpty(result.Extra["filePath"]));

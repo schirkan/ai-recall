@@ -169,6 +169,32 @@ public class ConversionWorkerOcrTests : IDisposable
         Assert.DoesNotContain("## OCR Content", content);
         Assert.Contains("## Document content", content);
     }
+
+    // ----- App-Reader-UIA-Content (Spec 0007 Schritt 7) -----
+
+    [Fact]
+    public async Task EnqueueAsync_WithUiaContentInFrontmatter_WritesAppReaderSection()
+    {
+        // duenner Reader (Word/Excel/PowerPoint) liefert uiaContent im Frontmatter
+        var (mdPath, _) = CreatePendingCapture("word.docx - Word", filePath: null);
+        var uiaText = "Visible text from Word window";
+        var content = File.ReadAllText(mdPath);
+        content = content.Replace("conversion: \"pending\"",
+            $"uiaContent: \"{uiaText}\"\nconversion: \"pending\"");
+        File.WriteAllText(mdPath, content);
+
+        using var worker = new ConversionWorker(Cfg(), Logger(), new NullOcrEngine());
+        await worker.EnqueueAsync(mdPath);
+        await WaitForPending(worker);
+
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
+        var convContent = File.ReadAllText(contentPath);
+        Assert.Contains("## App Reader Content (UIA)", convContent);
+        Assert.Contains(uiaText, convContent);
+
+        var updatedMd = File.ReadAllText(mdPath);
+        Assert.Contains("appreader=ok,uia", updatedMd);
+    }
 }
 
 /// <summary>Fake-OCR-Engine fuer Tests. Liefert festen Text oder leeren String.</summary>

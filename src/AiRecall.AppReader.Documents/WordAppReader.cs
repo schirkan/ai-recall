@@ -1,4 +1,3 @@
-using System.Text;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Models;
 
@@ -7,111 +6,84 @@ namespace AiRecall.AppReader.Documents;
 /// <summary>
 /// Word-App-Reader (Process <c>WINWORD</c>).
 ///
-/// Strategie (Spec 0004 Iter. Documents Schritt 2, Martin 2026-07-04):
-///   1. COM-Lookup via <see cref="OfficeComInterop"/> → <c>FullName</c>
-///      (echter Pfad) + <c>Range.Text</c> (Plain-Inhalt).
-///   2. Bei COM-Erfolg: <c>filePath</c> im Frontmatter + Inhalt unter
-///      <c>## Document content (via COM)</c> in <c>content.md</c>.
-///   3. COM-Fehler (kein Office installiert, kein ProgID, andere Instanz
-///      aktiv): Fallback auf Title-Parsing + optional UIA-Text.
+/// Strategie (Spec 0004 Iter. Documents + Spec 0007 Schritt 7):
+///   1. <b>Dünn</b>: liefert nur Title + FilePath + ggf. UIA-Rohcontent
+///      (kein eigener Content-Markdown-Body).
+///   2. COM-Lookup via <see cref="OfficeComInterop"/> → <c>FullName</c>
+///      (echter Pfad). COM-Text-Range wird NICHT mehr gelesen, weil
+///      <c>ConversionWorker</c> (OpenXml) den vollen Datei-Inhalt
+///      zuverlässiger und asynchron liefert (Spec 0007).
+///   3. COM-Fehler (kein Office / falsche Instanz / COM-Wrapper leer):
+///      Fallback auf Title-Parsing + UIA-Text. Kein <c>filePath</c>, der
+///      <c>ConversionWorker</c> bekommt dann nur OCR + UIA-Section.
+///   4. <see cref="AppReaderResult.IsThinReader"/> = <c>true</c>: der
+///      <c>TriggerWorker</c> schreibt KEIN <c>*.content.md</c> mehr
+///      synchron, sondern reicht <c>filePath</c> + <c>uiaContent</c> im
+///      Pending-MD-Frontmatter an den <c>ConversionWorker</c> weiter.
 ///
-/// e2e-Smoke-Tests entfallen in der Sandbox (Martin 2026-07-04, Office
-/// nicht installiert). COM-Pfad laeuft nur auf Maschinen mit Office, dort
-/// aber ohne weitere Konfiguration.
+/// e2e-Smoke-Tests entfallen in der Sandbox (Office nicht installiert).
+/// COM-Pfad läuft nur auf Maschinen mit Office, dort ohne weitere
+/// Konfiguration.
 /// </summary>
 public sealed class WordAppReader : AppReaderBase
 {
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { "WINWORD" };
-    public override string DisplayName => "Word (COM + Title + UIA)";
+    public override string DisplayName => "Word (file detection + UIA)";
 
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
         {
-            // 1) COM-Pfad (bevorzugt). Filename aus ParseTitle als Erwartung an COM
-            // uebergeben: bei mehreren Word-Instanzen liefert COM sonst die falsche.
+            var extra = new Dictionary<string, string>();
+            string? filePath = null;
+            string source;
+
+            // 1) COM-Pfad (bevorzugt fuer den vollstaendigen Pfad)
             var (expectedFileName, _, _, _) = ParseTitle(window.Title);
             var comInfo = OfficeComInterop.TryGetWordInfo(
                 expectedFilename: IsLikelyARealFilename(expectedFileName) ? expectedFileName : null);
             if (comInfo is not null)
             {
-                var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
-                var md = new StringBuilder();
-                md.AppendLine($"**File:** `{comInfo.FullPath}`");
-
-                if (!string.IsNullOrEmpty(comInfo.Text))
-                {
-                    md.AppendLine();
-                    md.AppendLine("## Document content (via COM)");
-                    md.AppendLine();
-                    md.AppendLine("```");
-                    md.AppendLine(Truncate(comInfo.Text, maxChars));
-                    md.AppendLine("```");
-                }
-                else if (!string.IsNullOrEmpty(comInfo.Error))
-                {
-                    md.AppendLine();
-                    md.AppendLine($"_(COM-Text-Lese-Fehler: {comInfo.Error})_");
-                }
-
-                return new AppReaderResult(
-                    ContentMarkdown: md.ToString(),
-                    ContextLabel: System.IO.Path.GetFileName(comInfo.FullPath),
-                    ContextKind: "document",
-                    ReaderName: DisplayName,
-                    ReaderVersion: typeof(WordAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                    Extra: new Dictionary<string, string>
-                    {
-                        ["filePath"] = comInfo.FullPath,
-                        ["fileName"] = System.IO.Path.GetFileName(comInfo.FullPath),
-                        ["source"] = "com",
-                        ["hasContent"] = (!string.IsNullOrEmpty(comInfo.Text)).ToString(),
-                        ["contentLength"] = (comInfo.Text?.Length ?? 0).ToString()
-                    });
-            }
-
-            // 2) Fallback: Title + UIA
-            var (fileName, isUntitled, isReadOnly, isSafeMode) = ParseTitle(window.Title);
-            var fallbackMaxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
-            var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
-            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, fallbackMaxChars) : null;
-
-            var md2 = new StringBuilder();
-            if (isUntitled)
-            {
-                md2.AppendLine("**File:** _(untitled)_");
+                filePath = comInfo.FullPath;
+                source = "com";
             }
             else
             {
-                md2.AppendLine($"**File (from title):** `{fileName}`");
+                source = "title-uia";
             }
-            if (isReadOnly) md2.AppendLine("**Mode:** Read-Only");
-            if (isSafeMode) md2.AppendLine("**Mode:** Safe Mode");
 
-            if (!string.IsNullOrEmpty(bodyText))
+            // 2) UIA-Rohcontent (immer, auch bei COM-Erfolg — Title-Text)
+            var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+            var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
+            string? uiaContent = useUia ? UiaTextExtractor.TryExtract(window.Handle, maxChars) : null;
+
+            // 3) Extra aufbauen
+            if (!string.IsNullOrEmpty(filePath))
             {
-                md2.AppendLine();
-                md2.AppendLine("```");
-                md2.AppendLine(Truncate(bodyText, fallbackMaxChars));
-                md2.AppendLine("```");
+                extra["filePath"] = filePath;
+                extra["fileName"] = System.IO.Path.GetFileName(filePath);
             }
+            if (!string.IsNullOrEmpty(uiaContent))
+            {
+                extra["uiaContent"] = uiaContent;
+            }
+            extra["source"] = source;
+            extra["hasContent"] = (!string.IsNullOrEmpty(uiaContent) || !string.IsNullOrEmpty(filePath)).ToString();
 
-            var label = isUntitled ? "(untitled)" : fileName;
+            // 4) ContextLabel + ContentMarkdown
+            var (fallbackFileName, isUntitled, isReadOnly, isSafeMode) = ParseTitle(window.Title);
+            var label = !string.IsNullOrEmpty(filePath)
+                ? System.IO.Path.GetFileName(filePath)
+                : (isUntitled ? "(untitled)" : fallbackFileName);
+
             return new AppReaderResult(
-                ContentMarkdown: md2.ToString(),
+                ContentMarkdown: PLACEHOLDER,
                 ContextLabel: label,
                 ContextKind: "document",
                 ReaderName: DisplayName,
                 ReaderVersion: typeof(WordAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-                Extra: new Dictionary<string, string>
-                {
-                    ["fileName"] = fileName,
-                    ["isUntitled"] = isUntitled.ToString(),
-                    ["isReadOnly"] = isReadOnly.ToString(),
-                    ["isSafeMode"] = isSafeMode.ToString(),
-                    ["source"] = "title-uia",
-                    ["hasContent"] = (!string.IsNullOrEmpty(bodyText)).ToString()
-                });
+                Extra: extra,
+                IsThinReader: true);
         }
         catch (Exception ex)
         {
@@ -119,6 +91,9 @@ public sealed class WordAppReader : AppReaderBase
             return null;
         }
     }
+
+    /// <summary>Platzhalter fuer duenne Reader (Spec 0007 Schritt 7).</summary>
+    internal const string PLACEHOLDER = "_(siehe .content.md)_";
 
     /// <summary>
     /// Parst einen Word-Fenster-Titel (Fallback-Pfad).
@@ -166,18 +141,9 @@ public sealed class WordAppReader : AppReaderBase
         return (name, false, isReadOnly, isSafeMode);
     }
 
-    private static string Truncate(string s, int maxChars)
-    {
-        if (s.Length <= maxChars) return s.TrimEnd();
-        return s[..maxChars].TrimEnd() + "\n… (truncated)";
-    }
-
     /// <summary>
     /// Heuristik: ist der aus dem Titel geparste Filename ein echter Dateiname
     /// (kein Placeholder wie "(untitled)" oder leer)?
-    /// COM-Lesart: bei Mismatch wuerde der Match-Check in TryGet null liefern
-    /// und der Reader auf UIA+Title zurueckfallen — das soll nicht passieren,
-    /// wenn der Titel gar keinen verwertbaren Filename enthaelt.
     /// </summary>
     private static bool IsLikelyARealFilename(string fileName) =>
         !string.IsNullOrEmpty(fileName)
