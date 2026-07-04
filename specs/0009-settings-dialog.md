@@ -1,6 +1,6 @@
 # 0009 — Settings-Dialog (JSON Config Editor)
 
-> **Status:** 📝 Draft v0.2 (2026-07-04 22:30) — Hot-Reload vereinfacht durch in-process-Architektur
+> **Status:** ✅ **v1.0 ABGESCHLOSSEN (2026-07-04 22:30)** — Implementiert in Spec 0006 Schritt 6
 > **Owner:** Martin
 > **Abhängig von:** Spec 0006 (Tray-EXE Foundation), Spec 0002 (MVP1-Config-Schema)
 

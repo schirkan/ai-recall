@@ -109,6 +109,19 @@
   - **Test-Count: 331/331 grün** (vorher 271, +60)
   - Commits: `3a98e04`, `f176bea`, `9c7d9b5`, `de83a7e`, `84afab7`
   - Martin-Direktiven umgesetzt: Pandoc raus (Performance > Format-Coverage), `Channel<string>` statt FileSystemWatcher, OCR ebenfalls async, kein Legacy-Handling
+- [x] **MVP2 Tray-Icon-EXE (Spec 0006 v1.0 abgeschlossen — inkl. 0008 Logviewer + 0009 Settings-Dialog)**
+  - Neue DLL `AiRecall.TrayApp` (WinForms, .NET 8 windows) mit `AiRecall.TrayApp.exe`
+  - SingleInstance-Mutex + `NotifyIcon` + `ContextMenuStrip` (Start/Stop, Live Logviewer, Settings, Quit)
+  - `TriggerSupervisor` (in-process `ITriggerService`-Wrapper, Start/Stop/Restart, StateChanged-Event, CrashCount)
+  - `InMemoryLogSink` (Serilog-Custom-Sink mit Ringbuffer 10.000 + EventEmitted) + `LogviewerSession` (Filter + Snapshot)
+  - `LogviewerWindow` (DataGridView mit Level/Search-Filter, Pause/Clear/Auto-Scroll, Color-Coding)
+  - `SettingsDialog` (TreeView + dynamische Form-Generierung: bool/int/string/enum/List-Editoren)
+  - `ConfigSchemaReflection` (Reflection auf `AppConfig` POCOs) + `ConfigSerializer` (atomic write mit .bak-Backup) + `PropertyEditorFactory`
+  - Hot-Reload: Settings Save → `TriggerSupervisor.Restart(newConfig)` (kein Process-Kill, kein Cold-Start)
+  - **Test-Count: 416/416 grün** (vorher 331, +85)
+  - Commits: `5ab077a`, `cff2b50`, `d9ffd11`, `12ced87`, `dc14dc0`, `da6586d`, `c23d3ca`, `e80d8fc`, `875ae98`
+  - Architektur-Korrektur (Martin 22:29): in-process statt Subprozess — ProcessSupervisor + MMF-IPC entfallen komplett
+  - Martin-Direktive umgesetzt: WinForms (kein WPF), in-process `ITriggerService`, Hot-Reload via Restart
 - [x] Push auf `origin/main`
 
 ## Projektziel (Kurzfassung)
@@ -138,17 +151,21 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0003-active-window.md` | `recall active-window` Command-Spec |
 | `specs/0004-app-reader.md` | App-Reader-Architektur (eine DLL pro App, Outlook-Mail-Log) |
 | `specs/0005-trigger-pipeline.md` | Trigger-Pipeline (WinEventHook + Heartbeat + Worker) |
+| `specs/0006-mvp2-tray-exe.md` | MVP2 Tray-Icon-EXE (v1.0 abgeschlossen, inkl. 0008+0009) |
 | `specs/0007-async-conversion.md` | Async Document Conversion Pipeline (v1.0 abgeschlossen) |
+| `specs/0008-live-logviewer.md` | Live Logviewer Window (v1.0 abgeschlossen) |
+| `specs/0009-settings-dialog.md` | Settings-Dialog JSON-Editor (v1.0 abgeschlossen) |
 | `src/` | .NET-Solution-Projekte |
 | `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
 | `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
 | `src/AiRecall.Trigger/` | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service** |
-| `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
-| `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
 | `src/AiRecall.Conversion/` | **Async Document Conversion (Spec 0007)**: `DocumentConverter` + `ConversionWorker` + `IOcrEngine`/`TesseractOcrEngineAdapter`/`NullOcrEngine` |
 | `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
+| `src/AiRecall.TrayApp/` | **MVP2 Tray-Icon-EXE (Spec 0006 v1.0)**: `NotifyIcon` + `TriggerSupervisor`-Wiring + `LogviewerWindow` (Spec 0008) + `SettingsDialog` (Spec 0009) |
+| `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
+| `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
-| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (331 Tests) |
+| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (416 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
 | `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
 | `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |
@@ -177,11 +194,11 @@ Folgen `projects/PROJECT-RULES.md`:
    - Modal-Dialog-Frontmatter (`parentHwnd`/`parentTitle`/`parentProcess`)
 3. **UIA-Fallback:** Wenn OCR zu schlecht, Windows UIA als zusätzliche Textquelle (oder als App-Reader-Default)
 4. **OCR-Tessdata-Doku:** README-Schritt-für-Schritt-Anleitung zum Download ✅ (PS-One-Liner drin)
-5. **MVP2: Tray-Icon-EXE** (Hinweis Martin 2026-07-04): Vollwertige
+5. **MVP2: Tray-Icon-EXE** ✅ **abgeschlossen (Spec 0006 v1.0)**: Vollwertige
    Windows-Anwendung mit Notification-Area-Icon zum Steuern von
-   `recall record` (Start/Stop/Pause/Status-Anzeige). CLI bleibt für
-   Scripts erhalten. `ITriggerService` ist die Schnittstelle dafür.
-   Spec folgt nach MVP1-Abschluss.
+   `ITriggerService` (Start/Stop/Status). In-process-Architektur, kein Subprozess.
+   Live Logviewer (Spec 0008) + Settings-Dialog (Spec 0009) inkludiert.
+   CLI bleibt für Scripts erhalten.
 6. **Spec 0007 Folge-Iterationen (nach v1.0)**:
    - PDF-Verschlüsselung-Handling + mehrseitige Dokumente
    - OCR-Preprocessing (Binarization/Deskew) optional

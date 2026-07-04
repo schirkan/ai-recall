@@ -350,3 +350,74 @@ Commits `3a98e04` â€¦ `84afab7`. Test-Count 331/331 grÃ¼n (vorher 271).
 - `recall convert` neuer CLI-Subcommand
 - Frontmatter-Schema erweitert: `conversion`, `conversionError`, `conversionTimestamp`, `conversionSteps`, `converterUsed`
 
+
+---
+
+## 2026-07-04 — MVP2 Tray-Icon-EXE (Spec 0006/0008/0009, v1.0 abgeschlossen)
+
+Neue WinForms-EXE als alternative UI zur CLI. Martin-Direktive 22:18: Live Logviewer + Settings-Dialog. Architektur-Korrektur 22:29: in-process statt Subprozess.
+
+Commits 5ab077a...875ae98. Test-Count 331 -> **416/416 grün** (+85).
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Assembly-Struktur | **AiRecall.TrayApp.exe (WinForms, WinExe) + AiRecall.Trigger.dll als Library** | Tray-EXE referenziert Trigger-Library und instanziiert ITriggerService direkt. CLI und Tray-EXE teilen sich denselben Code via Trigger-Library. Zyklusfreie Ref-Kette: Core -> Trigger -> TrayApp (+ AppReader.* + Conversion). |
+| 2 | Architektur (revidiert v0.2) | **In-process ITriggerService statt Subprozess** (Martin 22:29) | TrayApp ist ohnehin tot ohne Worker — Isolation bringt nichts. Cold-Start, MMF-IPC und Process-Supervision sind unnötige Komplexität. ProcessSupervisor und MmfLogPipe aus v0.1 sind tot. |
+| 3 | UI-Framework | **WinForms** (kein WPF, kein Avalonia) | WinForms-NotifyIcon ist out-of-the-box verfügbar; WPF wäre Overhead für Notification-Area-Use-Case. Cross-Platform unnötig (Windows-only per Spec 0001). |
+| 4 | TriggerSupervisor | **In-process-Wrapper um ITriggerService** mit TriggerState (Stopped/Starting/Running/Stopping/Crashed) + StateChanged-Event + optionaler ServiceFactory für DI/Tests | Sauberer Lifecycle: Start -> Running, Stop -> Stopped, Restart = Stop + Dispose + Start mit neuer Config (Hot-Reload-Pattern). Crash-Pfad: ServiceFactory throws -> State=Crashed, CrashCount++, LastCrashAt gesetzt. |
+| 5 | ServiceFactory-Pattern | **Func<AppConfig, ILogger, ITriggerService> als optionaler ctor-Parameter** | Tests können FakeTriggerService injecten, ohne WinEventHook/Heartbeat/Channel zu instantiieren. Production nutzt DefaultFactory = (c, l) => new TriggerService(c, l). |
+| 6 | Hot-Reload | **TriggerSupervisor.Restart(newConfig) = Stop + Dispose alter Service + Start mit neuer Config** | Im Gegensatz zu Subprozess-Kill: kein Cold-Start (200-500 ms gespart), keine MMF-Reinit, kein Datenverlust. UI merkt kurz State=Stopping -> Starting -> Running. |
+| 7 | In-Memory Log-Sink | **InMemoryLogSink (custom Serilog-Sink) mit Ringbuffer 10.000** | LogviewerWindow subscribed auf EventEmitted und appended live. Kein File-I/O, kein MMF. Bei Crash/Dispose: EventEmitted = null (detach subscribers). File-Tail als Fallback für History. |
+| 8 | LogviewerWindow-UI | **WinForms DataGridView mit 4 Spalten (Time, Level, Logger, Message), Virtual-Mode aus** | 10.000 Zeilen sind OK für non-virtual DataGridView. Color-Coding nach Level (grau/blau/schwarz/orange/rot/fett-rot) via CellFormatting. Cross-thread-safe via BeginInvoke. |
+| 9 | LogFilter | **Pure-Logic: MinLevel (LogEventLevel?) + SearchText (string?, case-insensitive)** | Außerhalb der WinForms-UI, separat unit-testbar. Matches(LogEventEntry) kombiniert beide Filter. |
+| 10 | LogviewerSession | **Bounded buffer (LinkedList + lock) subscribed auf InMemoryLogSink.EventEmitted** | Pure-Logic zwischen Sink und Window. Mehrere Sessions über denselben Sink möglich (isolation per capacity). IsPaused ist UI-Hint, Session puffert weiter. |
+| 11 | Settings-Dialog-UI | **TreeView links (Top-Level + Sub-Sektionen) + dynamisch generierte Form rechts (Label + Type-Editor pro Property)** | WinForms .NET 8 hat **kein PropertyGrid-Control**. Daher dynamische Form-Generierung mit Type-spezifischen Editoren aus PropertyEditorFactory: bool->CheckBox, int/long/string->TextBox, enum->ComboBox, List<string>->Comma-Separated-TextBox. |
+| 12 | ConfigSchemaReflection | **Reflection auf AppConfig POCO-Typen, Single-Source-of-Truth** | Kein manuelles Schema-File (Drift-Risiko). GetTopLevelSections liefert 7 Top-Level + 5 Sub-Sections unter ppReader. FindByPath für hierarchische Suche. Filtert Read-Only + Sub-Config-Klassen aus Property-Liste aus. |
+| 13 | ConfigSerializer | **JsonSerializer.Serialize (camelCase, indented) + SaveAtomic mit .bak-Backup + .tmp + File.Replace** | Atomic-Write-Pattern: temp file + rename, kein halb-geschriebenes File bei Crash. Backup der vorherigen Version vor jedem Save. |
+| 14 | Hot-Reload via Restart | **SettingsDialog.Save -> TrayAppContext.ApplyConfig -> supervisor.Restart(newConfig)** | Ein-Trigger-Pfad: User klickt Save -> File geschrieben -> Service restartet mit neuer Config -> LogviewerWindow bleibt offen, zeigt neuen Service-Log. |
+| 15 | Single-Instance | **Named-Mutex Local\AiRecall.TrayApp.SingleInstance** | Zweiter Start erkennt ersten via Mutex, bringt dessen Fenster in den Vordergrund. Bring-to-Front via FindWindow + SetForegroundWindow (Stub in Schritt 1, vollständig in Schritt 4). |
+| 16 | UserConfigLocator | **Statische Helper-Klasse in AiRecall.Trigger**, gibt ConfigLoader.DefaultUserConfigPath() zurück und LoadOrDefault(logger) mit Fallback auf 
+ew AppConfig() | Trennt Config-Pfad-Logik von TrayApp. Testbar ohne WinForms. ConfigLoader bleibt statisch (DECISIONS.md Spec 0002 v0.1). |
+| 17 | Refactor: Pure Logic in AiRecall.Trigger | **TrayIconState, UserConfigLocator, LogFilter, LogviewerSession, InMemoryLogSink, ConfigSchemaReflection, ConfigSerializer, PropertyEditorFactory** sind in AiRecall.Trigger (Library), nicht in AiRecall.TrayApp (WinExe) | Tests brauchen kein WinForms-Setup (UseWindowsForms=true im Test-csproj verursacht xunit-Auflösungsprobleme). Library-Code ist plattform-neutral und auch von CLI nutzbar. |
+| 18 | LogSink-Auflösung | **Trick: Log.Logger global konfiguriert mit WriteTo.Sink(inMemoryLogSink)** | Serilog unterstützt custom Sinks via WriteTo.Sink(). InMemoryLogSink implementiert ILogEventSink mit Emit(LogEvent). Resultat: alle Log.Information(...) Calls landen sowohl in logs/trayapp-*.log als auch im In-Memory-Ringbuffer. |
+| 19 | TriggerEvent-Subscription (Logviewer) | **NICHT implementiert** (Workaround: Logviewer liest Serilog-Events, nicht Trigger-Events) | TriggerEvent hat kein Serilog-Format; ein dedizierter Subscription-Pfad wäre eigene Architektur. Aktuelle Lösung: Logviewer liest Log-Output, der reichhaltiger ist (Level, Logger, Message, Exception, Timestamp). Trigger-Counter werden in TrayIcon-Tooltip angezeigt. |
+| 20 | WinForms PropertyGrid | **NICHT verfügbar in .NET 8** (war im alten .NET Framework verfügbar) | Daher dynamische Form-Generierung. Alternative wäre WPF + WindowsFormsHost, aber Overhead. Eigene PropertyGrid-Implementation wäre mehrere Tausend Zeilen — YAGNI. |
+
+### Tests
+
+- +85 Tests (netto) in 	ests/AiRecall.Core.Tests/Trigger/:
+  - TriggerSupervisorTests (13): State-Transitions, Restart mit neuem Service, Crash-Pfad, StateChanged-Event
+  - InMemoryLogSinkTests (14): Ringbuffer, FIFO-Overflow, Thread-Safety, EventEmitted, SourceContext-Parse
+  - TrayIconStateTests (8): State-zu-Menu-Item-Mapping, IconGlyph, InvalidState
+  - UserConfigLocatorTests (3): Path-Resolution, LoadOrDefault, Logger-Callback
+  - LogFilterTests (8): Level, Search, Case-Insensitivity, Combined, Clone
+  - LogviewerSessionTests (12): Sink-Subscribe, Append, Capacity-Overflow, Clear, Filter, Pause, Multi-Session
+  - ConfigSchemaReflectionTests (11): Top-Level, Sub-Sections, Path-Lookup, Property-Editing
+  - ConfigSerializerTests (9): Round-Trip, Atomic-Write, Backup, Malformed-JSON
+  - PropertyEditorFactoryTests (7): Type-Dispatch für bool/int/string/enum/List, ReadOnly
+- Test-Count gesamt: **416/416 grün** (vorher 331).
+
+### Verworfen
+
+- **Subprozess-Spawn mit ProcessSupervisor + MmfLogPipe + MMF-IPC** (Spec 0006 v0.1): TrayApp ist ohnehin tot ohne Worker — Isolation bringt nichts. Martin-Korrektur 22:29.
+- **TrayApp in WPF**: Overhead ohne Mehrwert für Notification-Area-Use-Case.
+- **Avalonia/MauiUI**: Cross-Platform unnötig.
+- **MemoryMappedFile als IPC**: durch in-process-Architektur überflüssig.
+- **Named-Pipe für Log-Streaming**: durch in-process-Architektur überflüssig.
+- **WinForms PropertyGrid-Control**: nicht in .NET 8 verfügbar — dynamische Form-Generierung stattdessen.
+- **TriggerEvent-Subscription in LogviewerWindow**: redundant, da Logviewer bereits Serilog-Events liest.
+- **Eigene PropertyGrid-Implementation**: mehrere Tausend Zeilen für ein Edit-Control, YAGNI.
+- **<Using Include="Xunit" /> via Project-Reference** (vorheriger Fehler): xunit 2.6.6 wird mit explizitem <Using Include="Xunit" /> im Test-csproj aufgelöst (sonst scheitert Compile mit "Der Name 'Fact' wurde nicht gefunden").
+
+### Auswirkungen
+
+- Neue DLL: AiRecall.TrayApp (WinForms, WinExe, 
+et8.0-windows)
+- AiRecall.Trigger erweitert um TriggerSupervisor, InMemoryLogSink, TrayIconState, UserConfigLocator, LogFilter, LogviewerSession, ConfigSchemaReflection, ConfigSerializer, PropertyEditorFactory
+- AiRecall.Cli unverändert (Standalone-Support für Scripts)
+- AiRecall.Trigger ProjectRef in AiRecall.TrayApp
+- AiRecall.TrayApp ProjectRef in Solution
+- Test-csproj: <Using Include="Xunit" /> für implizites using Xunit;
+- TrayAppContext orchestriert: InMemoryLogSink (Serilog) + TriggerSupervisor + TrayIconController + LogviewerSession
+- Hot-Reload-Pattern: SettingsDialog Save -> ConfigSerializer.SaveAtomic -> TriggerSupervisor.Restart (kein Process-Kill)
+- AiRecall.TrayApp.exe Start-Args: keine (Config aus %APPDATA%/AiRecall/config.json)

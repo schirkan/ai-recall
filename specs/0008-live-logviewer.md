@@ -1,6 +1,6 @@
 # 0008 — Live Logviewer Window
 
-> **Status:** 📝 Draft v0.2 (2026-07-04 22:30) — Architektur-Korrektur: in-process Log-Stream
+> **Status:** ✅ **v1.0 ABGESCHLOSSEN (2026-07-04 22:30)** — Implementiert in Spec 0006 Schritt 5
 > **Owner:** Martin
 > **Abhängig von:** Spec 0006 (Tray-EXE Foundation)
 
