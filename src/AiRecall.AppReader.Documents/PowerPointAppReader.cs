@@ -7,56 +7,92 @@ namespace AiRecall.AppReader.Documents;
 /// <summary>
 /// PowerPoint-App-Reader (Process <c>POWERPNT</c>).
 ///
-/// Strategie (Spec 0004 Iter. Documents):
-///   1. Fenster-Titel parsen — Filename + Read-Only-Marker.
-///   2. Optional: UIA-Text-Extraktion (best effort; bei Praesentations-
-///      Modus liefert UIA den sichtbaren Slide-Inhalt, im Edit-Modus
-///      den Outline-Bereich).
-///   3. Bei UIA-Fehler: Title-only-Markdown.
+/// Strategie (Spec 0004 Iter. Documents Schritt 2, Martin 2026-07-04):
+///   1. COM-Lookup → <c>FullName</c> + alle <c>Slides</c> mit Text-Frames
+///      als Markdown-Liste mit <c>### Slide N</c>-Headern.
+///   2. Bei COM-Erfolg: <c>filePath</c> im Frontmatter + Slides in
+///      <c>content.md</c> unter <c>## Document content (via COM)</c>.
+///   3. Fallback: Title-Parsing + UIA-Text (sichtbarer Slide/Outline).
 ///
-/// Hinweis: Folie-Nummer / Notizen lassen sich nur via COM-Interop
-/// (PowerPoint.Application.ActivePresentation) zuverlaessig lesen.
-/// Das ist nicht Teil dieses Readers.
+/// Hinweis: Folie-Nr, Notizen und Layouts sind nur via COM-Interop
+/// zuverlaessig lesbar — der COM-Pfad liefert diese als Bonus.
 /// </summary>
 public sealed class PowerPointAppReader : AppReaderBase
 {
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { "POWERPNT" };
-    public override string DisplayName => "PowerPoint (Title + UIA)";
+    public override string DisplayName => "PowerPoint (COM + Title + UIA)";
 
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
         {
+            // 1) COM-Pfad (bevorzugt)
+            var comInfo = OfficeComInterop.TryGetPowerPointInfo();
+            if (comInfo is not null)
+            {
+                var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+                var md = new StringBuilder();
+                md.AppendLine($"**File:** `{comInfo.FullPath}`");
+
+                if (!string.IsNullOrEmpty(comInfo.Text))
+                {
+                    md.AppendLine();
+                    md.AppendLine("## Document content (via COM)");
+                    md.AppendLine();
+                    md.AppendLine(Truncate(comInfo.Text, maxChars));
+                }
+                else if (!string.IsNullOrEmpty(comInfo.Error))
+                {
+                    md.AppendLine();
+                    md.AppendLine($"_(COM-Text-Lese-Fehler: {comInfo.Error})_");
+                }
+
+                return new AppReaderResult(
+                    ContentMarkdown: md.ToString(),
+                    ContextLabel: System.IO.Path.GetFileName(comInfo.FullPath),
+                    ContextKind: "presentation",
+                    ReaderName: DisplayName,
+                    ReaderVersion: typeof(PowerPointAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                    Extra: new Dictionary<string, string>
+                    {
+                        ["filePath"] = comInfo.FullPath,
+                        ["fileName"] = System.IO.Path.GetFileName(comInfo.FullPath),
+                        ["source"] = "com",
+                        ["hasContent"] = (!string.IsNullOrEmpty(comInfo.Text)).ToString(),
+                        ["contentLength"] = (comInfo.Text?.Length ?? 0).ToString()
+                    });
+            }
+
+            // 2) Fallback: Title + UIA
             var (fileName, isUntitled, isReadOnly) = ParseTitle(window.Title);
-            var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+            var fallbackMaxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
             var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
+            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, fallbackMaxChars) : null;
 
-            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, maxChars) : null;
-
-            var md = new StringBuilder();
+            var md2 = new StringBuilder();
             if (isUntitled)
             {
-                md.AppendLine("**File:** _(untitled)_");
+                md2.AppendLine("**File:** _(untitled)_");
             }
             else
             {
-                md.AppendLine($"**File:** `{fileName}`");
+                md2.AppendLine($"**File (from title):** `{fileName}`");
             }
-            if (isReadOnly) md.AppendLine("**Mode:** Read-Only");
+            if (isReadOnly) md2.AppendLine("**Mode:** Read-Only");
 
             if (!string.IsNullOrEmpty(bodyText))
             {
-                md.AppendLine();
-                md.AppendLine("```");
-                md.AppendLine(Truncate(bodyText, maxChars));
-                md.AppendLine("```");
-                md.AppendLine();
-                md.AppendLine("_Hinweis: UIA liefert sichtbaren Slide- / Outline-Inhalt. Folien-Nummern, Notizen und Layout nur via COM-Interop._");
+                md2.AppendLine();
+                md2.AppendLine("```");
+                md2.AppendLine(Truncate(bodyText, fallbackMaxChars));
+                md2.AppendLine("```");
+                md2.AppendLine();
+                md2.AppendLine("_Hinweis: UIA liefert sichtbaren Slide- / Outline-Inhalt. Folien-Nummern, Notizen und Layout nur via COM-Interop._");
             }
 
             var label = isUntitled ? "(untitled)" : fileName;
             return new AppReaderResult(
-                ContentMarkdown: md.ToString(),
+                ContentMarkdown: md2.ToString(),
                 ContextLabel: label,
                 ContextKind: "presentation",
                 ReaderName: DisplayName,
@@ -66,7 +102,8 @@ public sealed class PowerPointAppReader : AppReaderBase
                     ["fileName"] = fileName,
                     ["isUntitled"] = isUntitled.ToString(),
                     ["isReadOnly"] = isReadOnly.ToString(),
-                    ["hasUiaText"] = (!string.IsNullOrEmpty(bodyText)).ToString()
+                    ["source"] = "title-uia",
+                    ["hasContent"] = (!string.IsNullOrEmpty(bodyText)).ToString()
                 });
         }
         catch (Exception ex)
@@ -77,8 +114,7 @@ public sealed class PowerPointAppReader : AppReaderBase
     }
 
     /// <summary>
-    /// Parst einen PowerPoint-Fenster-Titel.
-    /// Internal fuer Unit-Tests.
+    /// Parst einen PowerPoint-Fenster-Titel (Fallback-Pfad).
     /// Reihenfolge: erst App-Suffix, dann [Read-Only]-Flag, dann Unsaved-Marker.
     /// </summary>
     internal static (string FileName, bool IsUntitled, bool IsReadOnly) ParseTitle(string? title)

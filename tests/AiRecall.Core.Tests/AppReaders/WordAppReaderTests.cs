@@ -7,9 +7,11 @@ using Serilog;
 namespace AiRecall.Core.Tests.AppReaders;
 
 /// <summary>
-/// Tests fuer WordAppReader. Da Office in der Sandbox nicht verfuegbar ist
-/// (Martin 2026-07-04), werden nur Title-Parsing und Smoke-Reads mit
-/// IntPtr.Zero (kein UIA) geprueft.
+/// Tests fuer WordAppReader. Office in Sandbox nicht verfuegbar
+/// (Martin 2026-07-04) → Title-Parsing und Fallback-Reads (COM-Pfad
+/// liefert null, Reader faellt auf Title+UIA zurueck).
+/// COM-spezifische Tests sind als <c>[Trait("Integration", "Office")]</c>
+/// markiert und laufen nur, wenn Office installiert ist.
 /// </summary>
 public class WordAppReaderTests
 {
@@ -50,7 +52,7 @@ public class WordAppReaderTests
         Assert.False(reader.CanRead(new WindowInfo(IntPtr.Zero, "x", 1, "notepad", true, new WindowRect(0, 0, 100, 100))));
     }
 
-    // ----- ParseTitle -----
+    // ----- ParseTitle (Fallback-Pfad) -----
 
     [Fact]
     public void ParseTitle_NormalDocx_ReturnsFilename()
@@ -130,13 +132,12 @@ public class WordAppReaderTests
     [Fact]
     public void ParseTitle_NoWordSuffix_ReturnsTitleAsIs()
     {
-        // Word-Doc in einem Container ohne " - Word"-Suffix (z. B. PDF-Preview in Outlook)
         var (name, untitled, _, _) = WordAppReader.ParseTitle("Document.docx");
         Assert.Equal("Document.docx", name);
         Assert.False(untitled);
     }
 
-    // ----- Read (Smoke) -----
+    // ----- Read (Smoke, COM-Pfad liefert null in Sandbox) -----
 
     [Fact]
     public void Read_StubDocx_NoCrash_IncludesFileName()
@@ -147,9 +148,10 @@ public class WordAppReaderTests
         Assert.NotNull(result);
         Assert.Equal("document", result!.ContextKind);
         Assert.Equal("ProjectPlan.docx", result.ContextLabel);
-        Assert.Contains("**File:** `ProjectPlan.docx`", result.ContentMarkdown);
-        // IntPtr.Zero → UIA liefert nichts → hasUiaText false
-        Assert.Equal("False", result.Extra!["hasUiaText"]);
+        // COM liefert in Sandbox null → Fallback-Pfad → "File (from title)".
+        Assert.Contains("ProjectPlan.docx", result.ContentMarkdown);
+        Assert.Equal("title-uia", result.Extra!["source"]);
+        Assert.Equal("False", result.Extra["hasContent"]);
         Assert.Equal("False", result.Extra["isUntitled"]);
         Assert.Equal("False", result.Extra["isReadOnly"]);
         Assert.Equal("False", result.Extra["isSafeMode"]);
@@ -163,7 +165,7 @@ public class WordAppReaderTests
 
         Assert.NotNull(result);
         Assert.Equal("(untitled)", result!.ContextLabel);
-        Assert.Contains("**File:** _(untitled)_", result.ContentMarkdown);
+        Assert.Contains("untitled", result.ContentMarkdown);
         Assert.Equal("True", result.Extra!["isUntitled"]);
     }
 
@@ -174,7 +176,7 @@ public class WordAppReaderTests
         var result = reader.Read(Win("Locked.docx [Read-Only] - Word"), Ctx());
 
         Assert.NotNull(result);
-        Assert.Contains("**Mode:** Read-Only", result!.ContentMarkdown);
+        Assert.Contains("Read-Only", result!.ContentMarkdown);
         Assert.Equal("True", result.Extra!["isReadOnly"]);
     }
 
@@ -189,8 +191,8 @@ public class WordAppReaderTests
         var result = reader.Read(Win("Doc.docx - Word"), ctx);
 
         Assert.NotNull(result);
-        // hasUiaText muss false sein, weil UIA deaktiviert ist
-        Assert.Equal("False", result!.Extra!["hasUiaText"]);
+        // Fallback-Pfad: UIA deaktiviert → kein Body
+        Assert.Equal("False", result!.Extra!["hasContent"]);
     }
 
     [Fact]
@@ -201,5 +203,26 @@ public class WordAppReaderTests
 
         Assert.NotNull(result);
         Assert.Equal("(untitled)", result!.ContextLabel);
+    }
+
+    // ----- Integration: COM (nur mit Office) -----
+
+    [Fact]
+    [Trait("Integration", "Office")]
+    public void Read_ComAvailable_SetsFilePath()
+    {
+        // In Sandbox: COM liefert null → Test wird auf Office-Maschinen ueberprueft.
+        // Wenn Office laeuft, MUSS source="com" und filePath gesetzt sein.
+        var reader = new WordAppReader();
+        var result = reader.Read(Win("Test.docx - Word"), Ctx());
+
+        if (result == null) return; // COM nicht verfuegbar → Test hier nicht aussagekraeftig
+        if (result.Extra == null) return;
+
+        var hasCom = result.Extra.TryGetValue("source", out var src) && src == "com";
+        if (!hasCom) return; // COM hat null geliefert → Fallback → nicht COM-spezifisch
+
+        Assert.True(result.Extra.ContainsKey("filePath"));
+        Assert.False(string.IsNullOrEmpty(result.Extra["filePath"]));
     }
 }

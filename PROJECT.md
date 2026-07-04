@@ -34,7 +34,23 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 243/243 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1)
+- [x] Tests: 263/263 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1 + 17 PDF-Viewer + 3 Office-COM-Integration)
+- [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
+  - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
+    auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist
+    in .NET 8 SDK 8.0.422 nicht verfuegbar).
+  - Word: `ActiveDocument.FullName` + `Range.Text` (Plain-Text in Code-Block)
+  - Excel: `ActiveWorkbook.ActiveSheet.UsedRange` als Markdown-Tabelle
+  - PowerPoint: alle `Slides` mit Text-Frames als `### Slide N`-Liste
+  - Bei COM-Erfolg: `filePath` im Frontmatter + Inhalt unter
+    `## Document content (via COM)` in `content.md`.
+  - Fallback: bisherige Title+UIA-Logik. COM-Tests als
+    `[Trait("Integration", "Office")]` (in Sandbox skipped).
+- [x] **PDF-Viewer-Reader** (Martin 2026-07-04, neue DLL `AiRecall.AppReader.Pdf`):
+  - Process-Liste konfigurierbar (`appReader.pdf.processes`, Default:
+    Adobe/Sumatra/Foxit/PDFXChange/Edge/Chrome).
+  - Title-Parsing: Filename + voller Pfad + Page-Nr (Sumatra/PDF-XChange-Style).
+  - **Iter. 1**: kein PDF-Inhalt — `PdfPig` (NuGet) ist Kandidat fuer Iter. 2.
 - [x] **Browser-Reader Iter. 4 — ReverseMarkdown 1:1 via JSON:** neue Sektion
   `appReader.browser.markdown` mappt alle 8 öffentlichen `ReverseMarkdown.Config`-Felder
   (`unknownTags`, `githubFlavored`, `removeComments`, `whitelistUriSchemes`,

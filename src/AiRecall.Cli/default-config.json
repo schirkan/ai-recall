@@ -63,6 +63,9 @@
       "maxTextKB": 64,
       "enableUiaExtraction": true
     },
+    "pdf": {
+      "processes": ["AcroRd32", "Acrobat", "SumatraPDF", "FoxitReader", "PDFXEdit", "msedge", "chrome"]
+    },
     "outlook": {
       "folders": ["Inbox", "Sent Items"],
       "pollIntervalSeconds": 60,

@@ -7,57 +7,92 @@ namespace AiRecall.AppReader.Documents;
 /// <summary>
 /// Excel-App-Reader (Process <c>EXCEL</c>).
 ///
-/// Strategie (Spec 0004 Iter. Documents):
-///   1. Fenster-Titel parsen — Filename + evtl. Read-Only-Marker.
-///   2. Optional: UIA-Text-Extraktion (best effort; bei grossen Sheets
-///      liefert UIA nur die aktuell sichtbaren Zellen, kein vollstaendiger
-///      Inhalt — Begrenzung wird im MD dokumentiert).
-///   3. Bei UIA-Fehler: Title-only-Markdown.
+/// Strategie (Spec 0004 Iter. Documents Schritt 2, Martin 2026-07-04):
+///   1. COM-Lookup → <c>FullName</c> + <c>UsedRange</c> als Markdown-Tabelle.
+///   2. Bei COM-Erfolg: <c>filePath</c> im Frontmatter + Tabelle in
+///      <c>content.md</c> unter <c>## Document content (via COM)</c>.
+///   3. Fallback: Title-Parsing + UIA-Text (sichtbare Zellen).
 ///
-/// Hinweis Sheet-Name: Excel-Fenster-Titel enthaelt KEINEN Sheet-Namen
-/// (im Gegensatz zu z. B. "Tabelle1 - Excel"). Sheet-Namen muessten via
-/// COM-Interop (IWorkbook.Worksheets) gelesen werden — das wuerde Office
-/// voraussetzen und ist daher nicht Teil dieses Readers.
+/// Hinweis: Sheet-Name (z. B. "Tabelle1") ist im Fenster-Titel NICHT
+/// enthalten — nur via COM <c>ActiveSheet.Name</c> lesbar. COM-Pfad
+/// liefert diesen mit.
 /// </summary>
 public sealed class ExcelAppReader : AppReaderBase
 {
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { "EXCEL" };
-    public override string DisplayName => "Excel (Title + UIA)";
+    public override string DisplayName => "Excel (COM + Title + UIA)";
 
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
         {
+            // 1) COM-Pfad (bevorzugt)
+            var comInfo = OfficeComInterop.TryGetExcelInfo();
+            if (comInfo is not null)
+            {
+                var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+                var md = new StringBuilder();
+                md.AppendLine($"**File:** `{comInfo.FullPath}`");
+
+                if (!string.IsNullOrEmpty(comInfo.Text))
+                {
+                    md.AppendLine();
+                    md.AppendLine("## Document content (via COM)");
+                    md.AppendLine();
+                    md.AppendLine(Truncate(comInfo.Text, maxChars));
+                }
+                else if (!string.IsNullOrEmpty(comInfo.Error))
+                {
+                    md.AppendLine();
+                    md.AppendLine($"_(COM-Text-Lese-Fehler: {comInfo.Error})_");
+                }
+
+                return new AppReaderResult(
+                    ContentMarkdown: md.ToString(),
+                    ContextLabel: System.IO.Path.GetFileName(comInfo.FullPath),
+                    ContextKind: "spreadsheet",
+                    ReaderName: DisplayName,
+                    ReaderVersion: typeof(ExcelAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                    Extra: new Dictionary<string, string>
+                    {
+                        ["filePath"] = comInfo.FullPath,
+                        ["fileName"] = System.IO.Path.GetFileName(comInfo.FullPath),
+                        ["source"] = "com",
+                        ["hasContent"] = (!string.IsNullOrEmpty(comInfo.Text)).ToString(),
+                        ["contentLength"] = (comInfo.Text?.Length ?? 0).ToString()
+                    });
+            }
+
+            // 2) Fallback: Title + UIA
             var (fileName, isUntitled, isReadOnly) = ParseTitle(window.Title);
-            var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+            var fallbackMaxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
             var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
+            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, fallbackMaxChars) : null;
 
-            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, maxChars) : null;
-
-            var md = new StringBuilder();
+            var md2 = new StringBuilder();
             if (isUntitled)
             {
-                md.AppendLine("**File:** _(untitled)_");
+                md2.AppendLine("**File:** _(untitled)_");
             }
             else
             {
-                md.AppendLine($"**File:** `{fileName}`");
+                md2.AppendLine($"**File (from title):** `{fileName}`");
             }
-            if (isReadOnly) md.AppendLine("**Mode:** Read-Only");
+            if (isReadOnly) md2.AppendLine("**Mode:** Read-Only");
 
             if (!string.IsNullOrEmpty(bodyText))
             {
-                md.AppendLine();
-                md.AppendLine("```");
-                md.AppendLine(Truncate(bodyText, maxChars));
-                md.AppendLine("```");
-                md.AppendLine();
-                md.AppendLine("_Hinweis: UIA liefert nur sichtbare Zellen. Vollstaendiger Inhalt nur via COM-Interop (Office erforderlich)._");
+                md2.AppendLine();
+                md2.AppendLine("```");
+                md2.AppendLine(Truncate(bodyText, fallbackMaxChars));
+                md2.AppendLine("```");
+                md2.AppendLine();
+                md2.AppendLine("_Hinweis: UIA liefert nur sichtbare Zellen. Vollstaendiger Inhalt nur via COM-Interop (Office erforderlich)._");
             }
 
             var label = isUntitled ? "(untitled)" : fileName;
             return new AppReaderResult(
-                ContentMarkdown: md.ToString(),
+                ContentMarkdown: md2.ToString(),
                 ContextLabel: label,
                 ContextKind: "spreadsheet",
                 ReaderName: DisplayName,
@@ -67,7 +102,8 @@ public sealed class ExcelAppReader : AppReaderBase
                     ["fileName"] = fileName,
                     ["isUntitled"] = isUntitled.ToString(),
                     ["isReadOnly"] = isReadOnly.ToString(),
-                    ["hasUiaText"] = (!string.IsNullOrEmpty(bodyText)).ToString()
+                    ["source"] = "title-uia",
+                    ["hasContent"] = (!string.IsNullOrEmpty(bodyText)).ToString()
                 });
         }
         catch (Exception ex)
@@ -78,8 +114,7 @@ public sealed class ExcelAppReader : AppReaderBase
     }
 
     /// <summary>
-    /// Parst einen Excel-Fenster-Titel.
-    /// Internal fuer Unit-Tests.
+    /// Parst einen Excel-Fenster-Titel (Fallback-Pfad).
     /// Reihenfolge: erst App-Suffix, dann [Read-Only]-Flag, dann Unsaved-Marker.
     /// </summary>
     internal static (string FileName, bool IsUntitled, bool IsReadOnly) ParseTitle(string? title)

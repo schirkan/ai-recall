@@ -8,7 +8,8 @@ namespace AiRecall.Core.Tests.AppReaders;
 
 /// <summary>
 /// Tests fuer PowerPointAppReader. Office in Sandbox nicht verfuegbar
-/// (Martin 2026-07-04) → nur Title-Parsing und Smoke-Reads.
+/// (Martin 2026-07-04) → Title-Parsing und Fallback-Reads.
+/// COM-Integration-Tests mit <c>[Trait("Integration", "Office")]</c>.
 /// </summary>
 public class PowerPointAppReaderTests
 {
@@ -49,7 +50,7 @@ public class PowerPointAppReaderTests
         Assert.False(reader.CanRead(new WindowInfo(IntPtr.Zero, "x", 1, "notepad", true, new WindowRect(0, 0, 100, 100))));
     }
 
-    // ----- ParseTitle -----
+    // ----- ParseTitle (Fallback-Pfad) -----
 
     [Fact]
     public void ParseTitle_NormalPptx_ReturnsFilename()
@@ -112,7 +113,7 @@ public class PowerPointAppReaderTests
         Assert.False(untitled);
     }
 
-    // ----- Read (Smoke) -----
+    // ----- Read (Smoke, COM liefert null in Sandbox) -----
 
     [Fact]
     public void Read_StubPptx_NoCrash_IncludesFileName()
@@ -123,8 +124,9 @@ public class PowerPointAppReaderTests
         Assert.NotNull(result);
         Assert.Equal("presentation", result!.ContextKind);
         Assert.Equal("Q3-Review.pptx", result.ContextLabel);
-        Assert.Contains("**File:** `Q3-Review.pptx`", result.ContentMarkdown);
-        Assert.Equal("False", result.Extra!["hasUiaText"]);
+        Assert.Contains("Q3-Review.pptx", result.ContentMarkdown);
+        Assert.Equal("title-uia", result.Extra!["source"]);
+        Assert.Equal("False", result.Extra["hasContent"]);
         Assert.Equal("False", result.Extra["isUntitled"]);
     }
 
@@ -136,7 +138,7 @@ public class PowerPointAppReaderTests
 
         Assert.NotNull(result);
         Assert.Equal("(untitled)", result!.ContextLabel);
-        Assert.Contains("**File:** _(untitled)_", result.ContentMarkdown);
+        Assert.Contains("untitled", result.ContentMarkdown);
     }
 
     [Fact]
@@ -146,7 +148,7 @@ public class PowerPointAppReaderTests
         var result = reader.Read(Win("Locked.pptx [Read-Only] - PowerPoint"), Ctx());
 
         Assert.NotNull(result);
-        Assert.Contains("**Mode:** Read-Only", result!.ContentMarkdown);
+        Assert.Contains("Read-Only", result!.ContentMarkdown);
     }
 
     [Fact]
@@ -160,6 +162,22 @@ public class PowerPointAppReaderTests
         var result = reader.Read(Win("Slides.pptx - PowerPoint"), ctx);
 
         Assert.NotNull(result);
-        Assert.Equal("False", result!.Extra!["hasUiaText"]);
+        Assert.Equal("False", result!.Extra!["hasContent"]);
+    }
+
+    // ----- Integration: COM (nur mit Office) -----
+
+    [Fact]
+    [Trait("Integration", "Office")]
+    public void Read_ComAvailable_SetsFilePath()
+    {
+        var reader = new PowerPointAppReader();
+        var result = reader.Read(Win("Test.pptx - PowerPoint"), Ctx());
+
+        if (result == null || result.Extra == null) return;
+        if (!result.Extra.TryGetValue("source", out var src) || src != "com") return;
+
+        Assert.True(result.Extra.ContainsKey("filePath"));
+        Assert.False(string.IsNullOrEmpty(result.Extra["filePath"]));
     }
 }

@@ -7,51 +7,95 @@ namespace AiRecall.AppReader.Documents;
 /// <summary>
 /// Word-App-Reader (Process <c>WINWORD</c>).
 ///
-/// Strategie (Spec 0004 Iter. Documents):
-///   1. Fenster-Titel parsen — Filename + Untitled-Marker.
-///   2. Optional: UIA-Text-Extraktion fuer den Dokumentinhalt (best effort).
-///   3. Bei UIA-Fehler oder Deaktivierung: Title-only-Markdown.
+/// Strategie (Spec 0004 Iter. Documents Schritt 2, Martin 2026-07-04):
+///   1. COM-Lookup via <see cref="OfficeComInterop"/> → <c>FullName</c>
+///      (echter Pfad) + <c>Range.Text</c> (Plain-Inhalt).
+///   2. Bei COM-Erfolg: <c>filePath</c> im Frontmatter + Inhalt unter
+///      <c>## Document content (via COM)</c> in <c>content.md</c>.
+///   3. COM-Fehler (kein Office installiert, kein ProgID, andere Instanz
+///      aktiv): Fallback auf Title-Parsing + optional UIA-Text.
 ///
-/// Real-Office-Smoke-Tests entfallen in der Sandbox (Martin 2026-07-04).
+/// e2e-Smoke-Tests entfallen in der Sandbox (Martin 2026-07-04, Office
+/// nicht installiert). COM-Pfad laeuft nur auf Maschinen mit Office, dort
+/// aber ohne weitere Konfiguration.
 /// </summary>
 public sealed class WordAppReader : AppReaderBase
 {
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { "WINWORD" };
-    public override string DisplayName => "Word (Title + UIA)";
+    public override string DisplayName => "Word (COM + Title + UIA)";
 
     public override AppReaderResult? Read(WindowInfo window, AppReaderContext context)
     {
         try
         {
+            // 1) COM-Pfad (bevorzugt)
+            var comInfo = OfficeComInterop.TryGetWordInfo();
+            if (comInfo is not null)
+            {
+                var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+                var md = new StringBuilder();
+                md.AppendLine($"**File:** `{comInfo.FullPath}`");
+
+                if (!string.IsNullOrEmpty(comInfo.Text))
+                {
+                    md.AppendLine();
+                    md.AppendLine("## Document content (via COM)");
+                    md.AppendLine();
+                    md.AppendLine("```");
+                    md.AppendLine(Truncate(comInfo.Text, maxChars));
+                    md.AppendLine("```");
+                }
+                else if (!string.IsNullOrEmpty(comInfo.Error))
+                {
+                    md.AppendLine();
+                    md.AppendLine($"_(COM-Text-Lese-Fehler: {comInfo.Error})_");
+                }
+
+                return new AppReaderResult(
+                    ContentMarkdown: md.ToString(),
+                    ContextLabel: System.IO.Path.GetFileName(comInfo.FullPath),
+                    ContextKind: "document",
+                    ReaderName: DisplayName,
+                    ReaderVersion: typeof(WordAppReader).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                    Extra: new Dictionary<string, string>
+                    {
+                        ["filePath"] = comInfo.FullPath,
+                        ["fileName"] = System.IO.Path.GetFileName(comInfo.FullPath),
+                        ["source"] = "com",
+                        ["hasContent"] = (!string.IsNullOrEmpty(comInfo.Text)).ToString(),
+                        ["contentLength"] = (comInfo.Text?.Length ?? 0).ToString()
+                    });
+            }
+
+            // 2) Fallback: Title + UIA
             var (fileName, isUntitled, isReadOnly, isSafeMode) = ParseTitle(window.Title);
-            var maxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
+            var fallbackMaxChars = context.Config.AppReader.Documents.MaxTextKB * 1024;
             var useUia = context.Config.AppReader.Documents.EnableUiaExtraction;
+            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, fallbackMaxChars) : null;
 
-            string? bodyText = useUia ? UiaTextExtractor.TryExtract(window.Handle, maxChars) : null;
-
-            var md = new StringBuilder();
+            var md2 = new StringBuilder();
             if (isUntitled)
             {
-                md.AppendLine("**File:** _(untitled)_");
+                md2.AppendLine("**File:** _(untitled)_");
             }
             else
             {
-                md.AppendLine($"**File:** `{fileName}`");
+                md2.AppendLine($"**File (from title):** `{fileName}`");
             }
-            if (isReadOnly) md.AppendLine("**Mode:** Read-Only");
-            if (isSafeMode) md.AppendLine("**Mode:** Safe Mode");
+            if (isReadOnly) md2.AppendLine("**Mode:** Read-Only");
+            if (isSafeMode) md2.AppendLine("**Mode:** Safe Mode");
 
             if (!string.IsNullOrEmpty(bodyText))
             {
-                md.AppendLine();
-                md.AppendLine("```");
-                md.AppendLine(Truncate(bodyText, maxChars));
-                md.AppendLine("```");
+                md2.AppendLine();
+                md2.AppendLine("```");
+                md2.AppendLine(Truncate(bodyText, fallbackMaxChars));
+                md2.AppendLine("```");
             }
 
             var label = isUntitled ? "(untitled)" : fileName;
             return new AppReaderResult(
-                ContentMarkdown: md.ToString(),
+                ContentMarkdown: md2.ToString(),
                 ContextLabel: label,
                 ContextKind: "document",
                 ReaderName: DisplayName,
@@ -62,7 +106,8 @@ public sealed class WordAppReader : AppReaderBase
                     ["isUntitled"] = isUntitled.ToString(),
                     ["isReadOnly"] = isReadOnly.ToString(),
                     ["isSafeMode"] = isSafeMode.ToString(),
-                    ["hasUiaText"] = (!string.IsNullOrEmpty(bodyText)).ToString()
+                    ["source"] = "title-uia",
+                    ["hasContent"] = (!string.IsNullOrEmpty(bodyText)).ToString()
                 });
         }
         catch (Exception ex)
@@ -73,10 +118,9 @@ public sealed class WordAppReader : AppReaderBase
     }
 
     /// <summary>
-    /// Parst einen Word-Fenster-Titel.
-    /// Internal fuer Unit-Tests.
-    /// Reihenfolge: erst App-Suffix strippen, dann Flags ([Read-Only], (Safe Mode)),
-    /// dann Unsaved-Marker. So ist die Reihenfolge der Flags im Titel egal.
+    /// Parst einen Word-Fenster-Titel (Fallback-Pfad).
+    /// Reihenfolge: erst App-Suffix, dann Flags in beliebiger Reihenfolge
+    /// ([Read-Only], (Safe Mode)), dann Unsaved-Marker, dann Untitled.
     /// </summary>
     internal static (string FileName, bool IsUntitled, bool IsReadOnly, bool IsSafeMode) ParseTitle(string? title)
     {
@@ -92,8 +136,6 @@ public sealed class WordAppReader : AppReaderBase
         if (title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
             title = title[..^suffix.Length];
 
-        // Flags koennen in beliebiger Reihenfolge vor dem App-Suffix stehen
-        // (z. B. "Doc.docx [Read-Only] (Safe Mode) - Word"), deshalb Schleife.
         bool changed;
         do
         {

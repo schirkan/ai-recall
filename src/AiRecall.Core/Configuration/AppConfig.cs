@@ -57,6 +57,9 @@ public sealed class AppReaderConfig
 
     [JsonPropertyName("documents")]
     public DocumentsConfig Documents { get; set; } = new();
+
+    [JsonPropertyName("pdf")]
+    public PdfConfig Pdf { get; set; } = new();
 }
 
 public sealed class OutlookConfig
@@ -166,6 +169,29 @@ public sealed class NotepadConfig
 {
     [JsonPropertyName("maxBufferKB")]
     public int MaxBufferKB { get; set; } = 256;
+}
+
+/// <summary>
+/// Konfiguration fuer den PDF-Viewer-Reader (Spec 0004 Erweiterung, Martin 2026-07-04).
+/// Iter. 1: nur Title-Parsing + Process-Erkennung. Voller PDF-Inhalt via PdfPig in Iter. 2.
+/// </summary>
+public sealed class PdfConfig
+{
+    /// <summary>
+    /// Liste der PDF-Viewer-Prozesse (case-insensitive). Default enthaelt Adobe Reader,
+    /// Acrobat, SumatraPDF, Foxit Reader, PDF-XChange, Edge und Chrome.
+    /// </summary>
+    [JsonPropertyName("processes")]
+    public List<string> Processes { get; set; } = new()
+    {
+        "AcroRd32",
+        "Acrobat",
+        "SumatraPDF",
+        "FoxitReader",
+        "PDFXEdit",
+        "msedge",
+        "chrome"
+    };
 }
 
 /// <summary>

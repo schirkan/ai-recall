@@ -65,6 +65,43 @@ Strategie: **UIA statt COM**. Begründung + Entscheidungen:
   wäre nur über COM oder Office-Add-Ins sinnvoll. Explizit als „nicht implementiert"
   im Output-Markdown dokumentiert.
 
+---
+
+## 2026-07-04 — Office COM-Erweiterung + PDF-Viewer (Spec 0004 Iter. 2)
+
+Martin 2026-07-04: Office-Reader um COM-Komponenten erweitern (echter Pfad + Inhalt),
+zusätzlich neue App-Familie PDF-Viewer.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | COM-Strategie | **Late binding** via ProgID + `Type.InvokeMember` — keine PIAs / NuGet-Pakete | Office ist nicht auf jeder Maschine installiert. Late binding funktioniert, sobald die COM-Server (Office selbst) vorhanden sind. Keine Build-Zeit-Abhängigkeit von Office-Versionen. |
+| 2 | `GetActiveObject` | **P/Invoke auf `oleaut32.dll!GetActiveObject`** statt `Marshal.GetActiveObject` | `Marshal.GetActiveObject` ist in .NET 8 SDK 8.0.422 nicht (mehr) direkt verfügbar. P/Invoke ist der robuste Weg, der in allen SDK-Versionen funktioniert. |
+| 3 | Inhalt-Speicherung | **In bestehende `*.content.md` integriert** (Sektion `## Document content (via COM)`) — **kein** separates File | Capture hat schon Screenshot + Pfad zur Quelldatei → alles in einer Datei verlinkt. Separate MD-Datei wäre Duplikation ohne Mehrwert. Martin-Default. |
+| 4 | `FullPath` im Output | **`filePath` im Extra-Dict** → CaptureWriter rendert es als YAML-Frontmatter-Feld | Bestehende Mechanik: `AppReaderResult.Extra` → `CaptureWriter.RenderContentMarkdown` schreibt jedes KV-Pair als YAML-Zeile. Kein neuer Code noetig. |
+| 5 | Excel-Inhalt | **UsedRange als Markdown-Tabelle** (object[,] → Pipe-Syntax) | COM `UsedRange.Value` ist 2D-Array; native Markdown-Tabelle ist die natürlichste Darstellung. Cell-Pipe-Escaping + Length-Truncate bei >60 Zeichen pro Zelle. |
+| 6 | PowerPoint-Inhalt | **Slides als `### Slide N`-Liste** mit Text-Frames | COM hat keine „Inhalt"-Property für eine ganze Präsentation; pro Slide die Shapes durchlaufen und `HasTextFrame` + `TextRange.Text` sammeln. SmartArt/Tabellen fehlen in Iter. 2. |
+| 7 | Word-Inhalt | **Range.Text (Plain-Text in Code-Block)** | Einfachster Word-Output; Markdown-Konvertierung in Iter. 3 via OOXML oder ReverseMarkdown-Word-Adapter. |
+| 8 | COM-Fallback | **Bei jedem COM-Fehler (kein Office, andere Instanz, Exception) → null → Reader fällt auf UIA+Title zurück** | Nie crashen. UIA ist eh schon da; Office ist nur ein Bonus. Reader-Logik: erst COM versuchen, wenn null → Fallback. |
+| 9 | COM-Prozess-Disambiguierung | **Nur erste Instanz** (für Iter. 2) | 99% der Fälle ist nur eine Office-Instanz offen. Pro-Prozess-Filterung (PID-Match) ist Iter. 3, YAGNI jetzt. |
+| 10 | PDF-Viewer-DLL | **Neue DLL `AiRecall.AppReader.Pdf`** mit `PdfViewerAppReader` | Eine DLL pro App-Familie (analog zu Documents). Process-Liste konfigurierbar (`appReader.pdf.processes`), Default: Adobe/Sumatra/Foxit/PDFXChange/Edge/Chrome. |
+| 11 | PDF-Viewer-Inhalt (Iter. 1) | **Nur Title-Parsing** (Filename + voller Pfad + Page-Nr) | PDF-Inhalt-Extraktion braucht eine PDF-Parser-Library (`PdfPig` ist Kandidat). In Iter. 2 mit NuGet-Package. Iter. 1 liefert Pfad-Hinweis im MD, damit der Capture zuordenbar ist. |
+| 12 | PDF-Page-Info | **SumatraPDF-Style: `"file.pdf - Page N of M - SumatraPDF"`** | Andere PDF-Viewer zeigen Page-Nr nicht im Titel. Parsing ist robust: Page-Sep erst, dann Pfad-/Filename-Extraktion. |
+| 13 | Office-COM-Tests | **`[Trait("Integration", "Office")]`** für COM-spezifische Tests | Sandbox hat kein Office → e2e-Smoke-Tests entfallen. Tests prüfen Struktur (Extra-Dict hat `source: com`, `filePath` gesetzt), laufen aber nur bei installiertem Office. |
+
+### Tests
+
+- 17 neue Unit-Tests in `PdfViewerAppReaderTests`.
+- 3 neue Office-COM-Integration-Tests in Word/Excel/PowerPointAppReaderTests.
+- Bestehende Office-Tests an COM-Pfad angepasst (Filename statt Markdown-Prefix).
+- Test-Count gesamt: **263 / 263 grün** (vorher 243).
+
+### Verworfen
+
+- **Microsoft.Office.Interop.* NuGet-Pakete (PIAs)**: wuerde Office-Versionen ans Build-System binden. Late binding ist version-agnostisch.
+- **Separate `*.document.md` pro Capture**: Martin bestaetigt Default „integriert". Falls er doch separate Datei will, ist die Aenderung klein (`CaptureWriter.WriteContent` + Reader rueckgabe).
+- **PDF-Inhalt in Iter. 1**: wuerde NuGet-Abhaengigkeit (PdfPig ~5 MB) bedeuten und neue Fehlerquellen. YAGNI; iter. 2 mit NuGet-Evaluierung.
+- **COM-Pro-Prozess-Disambiguierung (PID-Match)**: zu 99% nicht noetig; iter. 3 wenn Martin es wirklich braucht.
+
 ### Verworfen
 
 - **`EVENT_OBJECT_SELECTION` als Trigger-Quelle**: würde bei Caret-Wechsel

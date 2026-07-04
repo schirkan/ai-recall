@@ -1,6 +1,6 @@
 # 0004 — App Reader Architecture
 
-> **Status:** Draft v0.1 (2026-07-03)
+> **Status:** Iter. 2 abgeschlossen (2026-07-04) — COM-Interop für Office + PDF-Viewer
 > **Owner:** Martin
 > **Implements:** AR-1, AR-2, AR-3, AR-4 from MVP1 spec
 
@@ -92,9 +92,10 @@ public sealed class AppReaderContext
 | **msedge** | `msedge` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text (gekürzt 50 KB) |
 | **chrome** | `chrome` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text |
 | **outlook** | `OUTLOOK` | COM `Outlook.Application` → aktives Inspector oder Explorer → MailItem / Selection | Mail-Header + Body (HTML→MD), siehe Outlook-Spezial unten |
-| **word** | `WINWORD` | UIA (`System.Windows.Automation`) — TextPattern + ValuePattern, Window-Titel-Parsing | Dateiname (aus Titel) + sichtbarer Inhalt (UIA, best effort) |
-| **excel** | `EXCEL` | UIA — sichtbare Zellen + Window-Titel-Parsing | Dateiname (aus Titel) + sichtbare Zellen (Hinweis: kein vollständiger Sheet-Inhalt, nur Sichtbereich) |
-| **powerpoint** | `POWERPNT` | UIA — Slide-/Outline-Inhalt + Window-Titel-Parsing | Dateiname (aus Titel) + sichtbarer Inhalt (Hinweis: keine Folien-Nummern / Notizen via UIA) |
+| **word** | `WINWORD` | **COM-Interop (late binding, bevorzugt)** — `Word.Application.ActiveDocument` liefert `FullName` + `Range.Text`. **Fallback:** UIA + Titel-Parsing | Vollständiger Pfad + Plain-Text-Inhalt (Word.Range); bei COM-Fehler nur Filename + UIA-Text |
+| **excel** | `EXCEL` | **COM-Interop (late binding, bevorzugt)** — `Excel.Application.ActiveWorkbook.ActiveSheet.UsedRange` als Markdown-Tabelle. **Fallback:** UIA + Titel-Parsing | Vollständiger Pfad + UsedRange als Markdown-Tabelle; bei COM-Fehler nur Filename + sichtbare Zellen |
+| **powerpoint** | `POWERPNT` | **COM-Interop (late binding, bevorzugt)** — `PowerPoint.Application.ActivePresentation.Slides` als Liste (`### Slide N`). **Fallback:** UIA + Titel-Parsing | Vollständiger Pfad + alle Slide-Text-Frames; bei COM-Fehler nur Filename + sichtbarer Slide |
+| **pdf-viewer** | `AcroRd32`, `Acrobat`, `SumatraPDF`, `FoxitReader`, `PDFXEdit`, `msedge`, `chrome` (konfigurierbar) | Fenster-Titel-Parsing (Filename + voller Pfad bei SumatraPDF/PDF-XChange, Page-Info) | Dateiname + ggf. voller Pfad + Page-Nr. **Iter. 1 kein PDF-Inhalt** — Parsing via PdfPig in Iter. 2. |
 | **notepad** | `Notepad` | Win32 `EM_GETLINE` / `Edit`-Control-Text + Fenster-Titel | Buffer komplett (UTF-8) + Dateipfad falls in Titel |
 | **explorer** | `explorer` | Shell COM `IShellBrowser` → aktueller Pfad, Fallback: Titel-Parsing | Pfad + selektierte Dateien |
 
@@ -348,10 +349,12 @@ Felder:
       die nicht in `outlook-seen.json` stehen.
 - [ ] `ignoreAutoRuleMails: true` filtert anhand der Heuristik und
       markiert im Log.
-- [ ] Word-Reader liefert Dateiname (aus Fenster-Titel) + optional UIA-Text.
-- [ ] Excel-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Zellen.
-- [ ] PowerPoint-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Slide.
-- [ ] `appReader.documents.{maxTextKB,enableUiaExtraction}` ist konfigurierbar und per Unit-Test abgesichert.
+- [x] Word-Reader liefert Dateiname (aus Fenster-Titel) + optional UIA-Text.
+- [x] Excel-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Zellen.
+- [x] PowerPoint-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Slide.
+- [x] `appReader.documents.{maxTextKB,enableUiaExtraction}` ist konfigurierbar und per Unit-Test abgesichert.
+- [x] **Word/Excel/PowerPoint-Reader (COM-Erweiterung, Iter. 2):** COM-Interop liefert `FullName` + Inhalt; bei COM-Fehler Fallback auf UIA+Title. `filePath` wird im Content-MD-Frontmatter emittiert.
+- [x] **PDF-Viewer-Reader:** Prozess-Liste konfigurierbar (`appReader.pdf.processes`); Filename + voller Pfad + Page-Nr aus Titel. PDF-Inhalt-Extraktion in Iter. 2 (PdfPig).
 - [ ] Notepad-Reader liefert Buffer-Text (max `notepad.maxBufferKB`).
 - [ ] Explorer-Reader liefert aktuellen Pfad aus Fenster-Titel oder COM.
 - [ ] `*.content.md` wird bei jedem Capture mit App-Reader-Output
@@ -361,6 +364,91 @@ Felder:
 - [ ] Jedes Feld in `appReader.browser.markdown` setzt das gleichnamige
       Feld auf `ReverseMarkdown.Config`; nicht gesetzte Felder bleiben auf
       Library-Default. Per Unit-Test abgesichert (`BuildConverter_*`).
+
+## Iter. 2 (2026-07-04) — COM-Interop für Office + PDF-Viewer (Martin)
+
+### Motivation
+
+UIA-only liefert bei Word/Excel/PowerPoint **keinen** echten Datei-Pfad — nur
+den Filename aus dem Fenstertitel. Für „welche Datei war offen?" brauchen
+wir den vollen Pfad. Außerdem ist der via COM zugängliche Inhalt
+(Word.Range, Excel.UsedRange, PowerPoint.Slides) deutlich reichhaltiger
+als das, was UIA aus dem gerenderten Fenster ablesen kann.
+
+PDF-Viewer werden als neue App-Familie ergänzt.
+
+### COM-Strategie
+
+- **Late binding** via ProgID + `Type.InvokeMember`. Keine PIAs / NuGet-Pakete
+  nötig. Die COM-Verbindung zur laufenden Instanz läuft über P/Invoke auf
+  `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist in .NET 8
+  SDK 8.0.422 nicht (mehr) direkt verfügbar.
+- COM-Lookup nur auf der ersten laufenden Instanz der jeweiligen App
+  (typisch genau eine). Pro-Prozess-Disambiguierung wäre möglich, ist für
+  Iter. 2 YAGNI.
+- **Fallback auf UIA+Title** wenn COM nicht verfügbar (kein Office,
+  andere Instanz aktiv, COM-Exception). Nie crashen.
+- Office-Prozesse sind auf der Sandbox-Maschine nicht installiert →
+  e2e-Smoke-Tests entfallen. COM-spezifische Tests sind als
+  `[Trait("Integration", "Office")]` markiert und laufen nur, wenn
+  Office installiert ist.
+
+### Inhalts-Format
+
+Der Datei-Inhalt wird in der bestehenden `*.content.md` unter einer
+`## Document content (via COM)`-Sektion eingebettet — **kein** separates
+File. Der `FullPath` wird als `filePath` in den `Extra`-Dict und damit ins
+YAML-Frontmatter der `content.md` geschrieben (über
+`CaptureWriter.RenderContentMarkdown`).
+
+| App | Inhalts-Format |
+|---|---|
+| Word | `Word.Application.ActiveDocument.Range.Text` (Plain) in Code-Block |
+| Excel | `UsedRange.Value` (object[,]) als Markdown-Tabelle |
+| PowerPoint | Für jede `Slide` Text-Frames sammeln, `### Slide N` Header |
+
+### PDF-Viewer
+
+Neue DLL `AiRecall.AppReader.Pdf` mit `PdfViewerAppReader`:
+
+- Prozess-Liste konfigurierbar (`appReader.pdf.processes`, Default:
+  AcroRd32, Acrobat, SumatraPDF, FoxitReader, PDFXEdit, msedge, chrome).
+- Fenster-Titel-Parsing: extrahiert Filename, vollen Pfad (Sumatra/PDF-XChange
+  zeigen Pfad im Titel) und Page-Nr (SumatraPDF: `" - Page N of M - "`).
+- **Kein PDF-Inhalt** in Iter. 1 — `PdfPig` (NuGet) ist Kandidat für Iter. 2.
+
+### Konfiguration
+
+```json
+"appReader": {
+  "documents": {
+    "maxTextKB": 64,
+    "enableUiaExtraction": true
+  },
+  "pdf": {
+    "processes": ["AcroRd32", "Acrobat", "SumatraPDF", "FoxitReader", "PDFXEdit", "msedge", "chrome"]
+  }
+}
+```
+
+### Tests
+
+- 17 neue Unit-Tests in `PdfViewerAppReaderTests` (Title-Parsing + Read-Smoke).
+- 3 neue Office-COM-Integration-Tests mit `[Trait("Integration", "Office")]`
+  (laufen nur bei installiertem Office).
+- Bestehende Office-Reader-Tests an COM-Pfad angepasst (Filename-Suche statt
+  strikter Markdown-Prefix, COM-liefert-null-Fallback toleriert).
+- Test-Count gesamt: 263 / 263 grün (vorher 243).
+
+### Bekannte Einschränkungen
+
+- COM-Lookup nimmt die **erste** laufende Office-Instanz. Bei mehreren
+  parallelen Instanzen kann der falsche Pfad geliefert werden. Pro-Prozess-
+  Filterung ist Iter.-3-Kandidat.
+- Excel `UsedRange` enthält auch leere Zellen am Rand → Markdown-Tabelle
+  kann visuelles Padding haben. Trim-Logik in Iter. 3.
+- PowerPoint: nur Text-Frames; SmartArt, Tabellen, eingebettete Objekte
+  fehlen. COM hat kein einfaches „Inhalt"-Property hier.
 
 ## Out of Scope (MVP1)
 

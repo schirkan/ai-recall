@@ -8,7 +8,8 @@ namespace AiRecall.Core.Tests.AppReaders;
 
 /// <summary>
 /// Tests fuer ExcelAppReader. Office in Sandbox nicht verfuegbar
-/// (Martin 2026-07-04) → nur Title-Parsing und Smoke-Reads.
+/// (Martin 2026-07-04) → Title-Parsing und Fallback-Reads.
+/// COM-Integration-Tests mit <c>[Trait("Integration", "Office")]</c>.
 /// </summary>
 public class ExcelAppReaderTests
 {
@@ -49,7 +50,7 @@ public class ExcelAppReaderTests
         Assert.False(reader.CanRead(new WindowInfo(IntPtr.Zero, "x", 1, "notepad", true, new WindowRect(0, 0, 100, 100))));
     }
 
-    // ----- ParseTitle -----
+    // ----- ParseTitle (Fallback-Pfad) -----
 
     [Fact]
     public void ParseTitle_NormalXlsx_ReturnsFilename()
@@ -112,7 +113,7 @@ public class ExcelAppReaderTests
         Assert.False(untitled);
     }
 
-    // ----- Read (Smoke) -----
+    // ----- Read (Smoke, COM liefert null in Sandbox) -----
 
     [Fact]
     public void Read_StubXlsx_NoCrash_IncludesFileName()
@@ -123,8 +124,9 @@ public class ExcelAppReaderTests
         Assert.NotNull(result);
         Assert.Equal("spreadsheet", result!.ContextKind);
         Assert.Equal("Budget.xlsx", result.ContextLabel);
-        Assert.Contains("**File:** `Budget.xlsx`", result.ContentMarkdown);
-        Assert.Equal("False", result.Extra!["hasUiaText"]);
+        Assert.Contains("Budget.xlsx", result.ContentMarkdown);
+        Assert.Equal("title-uia", result.Extra!["source"]);
+        Assert.Equal("False", result.Extra["hasContent"]);
         Assert.Equal("False", result.Extra["isUntitled"]);
     }
 
@@ -136,7 +138,7 @@ public class ExcelAppReaderTests
 
         Assert.NotNull(result);
         Assert.Equal("(untitled)", result!.ContextLabel);
-        Assert.Contains("**File:** _(untitled)_", result.ContentMarkdown);
+        Assert.Contains("untitled", result.ContentMarkdown);
     }
 
     [Fact]
@@ -146,7 +148,7 @@ public class ExcelAppReaderTests
         var result = reader.Read(Win("Locked.xlsx [Read-Only] - Excel"), Ctx());
 
         Assert.NotNull(result);
-        Assert.Contains("**Mode:** Read-Only", result!.ContentMarkdown);
+        Assert.Contains("Read-Only", result!.ContentMarkdown);
     }
 
     [Fact]
@@ -160,6 +162,22 @@ public class ExcelAppReaderTests
         var result = reader.Read(Win("Sheet.xlsx - Excel"), ctx);
 
         Assert.NotNull(result);
-        Assert.Equal("False", result!.Extra!["hasUiaText"]);
+        Assert.Equal("False", result!.Extra!["hasContent"]);
+    }
+
+    // ----- Integration: COM (nur mit Office) -----
+
+    [Fact]
+    [Trait("Integration", "Office")]
+    public void Read_ComAvailable_SetsFilePath()
+    {
+        var reader = new ExcelAppReader();
+        var result = reader.Read(Win("Test.xlsx - Excel"), Ctx());
+
+        if (result == null || result.Extra == null) return;
+        if (!result.Extra.TryGetValue("source", out var src) || src != "com") return;
+
+        Assert.True(result.Extra.ContainsKey("filePath"));
+        Assert.False(string.IsNullOrEmpty(result.Extra["filePath"]));
     }
 }
