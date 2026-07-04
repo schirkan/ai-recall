@@ -92,9 +92,9 @@ public sealed class AppReaderContext
 | **msedge** | `msedge` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text (gekürzt 50 KB) |
 | **chrome** | `chrome` | UIA (Address-Bar `ValuePattern` + Document `TextPattern`); optional CDP (siehe Browser-Sektion) | URL + Title + main-Text |
 | **outlook** | `OUTLOOK` | COM `Outlook.Application` → aktives Inspector oder Explorer → MailItem / Selection | Mail-Header + Body (HTML→MD), siehe Outlook-Spezial unten |
-| **word** | `WINWORD` | COM `Word.Application` → ActiveDocument | Pfad + Sichtbarer Text (Range.Text) + Tabellen vereinfacht |
-| **excel** | `EXCEL` | COM `Excel.Application` → ActiveWorkbook → ActiveSheet | Dateiname + Sheet-Name + UsedRange als Markdown-Tabelle |
-| **powerpoint** | `POWERPNT` | COM `PowerPoint.Application` → ActivePresentation → Slide | Dateiname + Slide-Nr + Notes + Text-Frames |
+| **word** | `WINWORD` | UIA (`System.Windows.Automation`) — TextPattern + ValuePattern, Window-Titel-Parsing | Dateiname (aus Titel) + sichtbarer Inhalt (UIA, best effort) |
+| **excel** | `EXCEL` | UIA — sichtbare Zellen + Window-Titel-Parsing | Dateiname (aus Titel) + sichtbare Zellen (Hinweis: kein vollständiger Sheet-Inhalt, nur Sichtbereich) |
+| **powerpoint** | `POWERPNT` | UIA — Slide-/Outline-Inhalt + Window-Titel-Parsing | Dateiname (aus Titel) + sichtbarer Inhalt (Hinweis: keine Folien-Nummern / Notizen via UIA) |
 | **notepad** | `Notepad` | Win32 `EM_GETLINE` / `Edit`-Control-Text + Fenster-Titel | Buffer komplett (UTF-8) + Dateipfad falls in Titel |
 | **explorer** | `explorer` | Shell COM `IShellBrowser` → aktueller Pfad, Fallback: Titel-Parsing | Pfad + selektierte Dateien |
 
@@ -348,9 +348,10 @@ Felder:
       die nicht in `outlook-seen.json` stehen.
 - [ ] `ignoreAutoRuleMails: true` filtert anhand der Heuristik und
       markiert im Log.
-- [ ] Word-Reader liefert Dateipfad + Text für `ActiveDocument.Range.Text`.
-- [ ] Excel-Reader liefert Dateiname + Sheet + UsedRange als Tabelle.
-- [ ] PowerPoint-Reader liefert aktuelle Slide + Notes.
+- [ ] Word-Reader liefert Dateiname (aus Fenster-Titel) + optional UIA-Text.
+- [ ] Excel-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Zellen.
+- [ ] PowerPoint-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Slide.
+- [ ] `appReader.documents.{maxTextKB,enableUiaExtraction}` ist konfigurierbar und per Unit-Test abgesichert.
 - [ ] Notepad-Reader liefert Buffer-Text (max `notepad.maxBufferKB`).
 - [ ] Explorer-Reader liefert aktuellen Pfad aus Fenster-Titel oder COM.
 - [ ] `*.content.md` wird bei jedem Capture mit App-Reader-Output

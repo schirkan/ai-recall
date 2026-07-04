@@ -8,6 +8,13 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- UseWPF noetig fuer System.Windows.Automation (UIA / UIAutomationClient) -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
+  </ItemGroup>
 
 </Project>

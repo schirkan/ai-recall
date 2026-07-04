@@ -59,6 +59,10 @@
     "notepad": {
       "maxBufferKB": 256
     },
+    "documents": {
+      "maxTextKB": 64,
+      "enableUiaExtraction": true
+    },
     "outlook": {
       "folders": ["Inbox", "Sent Items"],
       "pollIntervalSeconds": 60,

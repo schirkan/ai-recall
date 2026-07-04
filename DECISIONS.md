@@ -32,6 +32,39 @@ technische Notwendigkeiten):
   und `tests/AiRecall.Core.Tests/Persistence/`.
 - Test-Count gesamt: 189 / 189 grün (vorher 98 / 98).
 
+---
+
+## 2026-07-04 — Documents App-Reader (Spec 0004 Iter. Documents)
+
+Word/Excel/PowerPoint-Reader als eigenständige DLL (`AiRecall.AppReader.Documents`).
+Strategie: **UIA statt COM**. Begründung + Entscheidungen:
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Lese-Strategie | **UIA (`System.Windows.Automation`)** statt COM-Interop | COM würde installiertes Office voraussetzen. UIA läuft auch ohne Office, liefert aber nur sichtbaren Inhalt (siehe Punkt 4/5/6). |
+| 2 | Assembly-Struktur | **Neue DLL `AiRecall.AppReader.Documents.dll`** (analog zu Browser/Explorer/Notepad) | Eine DLL pro App-Familie — prozessspezifische Logik isoliert, AppReaderRegistry lädt sie automatisch beim Start neben der Exe. |
+| 3 | Konfiguration | **`DocumentsConfig` mit `maxTextKB` (Default 64) + `enableUiaExtraction` (Default true)** | maxTextKB analog zu `notepad.maxBufferKB`. enableUiaExtraction erlaubt das Abschalten, falls UIA Probleme macht (dann Title-only). |
+| 4 | Word-Spezifika | **Filename-Parsing statt ActiveDocument** | UIA liefert kein `ActiveDocument.Path`. Window-Titel-Format `"Doc.docx - Word"` ist gut dokumentiert und wird robust geparst (Suffix → Flags in beliebiger Reihenfolge → Unsaved-Marker → Untitled-Erkennung „Document1"). |
+| 5 | Excel-Spezifika | **Hinweis im MD, dass UIA nur sichtbare Zellen liefert** | Echter Sheet-Inhalt (alle Zellen) erfordert COM. Wir liefern, was sichtbar ist, und dokumentieren die Einschränkung im Output-Markdown. |
+| 6 | PowerPoint-Spezifika | **Hinweis im MD, dass UIA nur sichtbare Slide liefert** | Folien-Nummern, Notizen, Layouts erfordern COM. Wir liefern sichtbaren Inhalt + dokumentieren die Einschränkung. |
+| 7 | UIA-Verfügbarkeit | **`UseWPF=true` im csproj** | UIA (`AutomationElement`, `TextPattern`, `ValuePattern`) lebt in `UIAutomationClient.dll`, das in .NET 8 nur via `<UseWPF>` automatisch referenziert wird. Alternative wäre explizite `<Reference>`-Tags, die aber in .NET 8 SDK nicht aufgelöst werden können. |
+| 8 | Tests | **54 neue Unit-Tests** (`WordAppReaderTests` 18, `ExcelAppReaderTests` 14, `PowerPointAppReaderTests` 14, weitere Smoke-Tests) | Tests prüfen ParseTitle (Normal, Untitled, ReadOnly, SafeMode, Unsaved-Marker, Edge-Cases) und Read-Smoke (IntPtr.Zero → kein UIA-Text, kein Crash). e2e-Tests gegen echtes Office entfallen in der Sandbox (Martin 2026-07-04). |
+
+### Tests
+
+- 54 neue Tests in `tests/AiRecall.Core.Tests/AppReaders/{Word,Excel,PowerPoint}AppReaderTests.cs`.
+- Test-Count gesamt: 243 / 243 grün (vorher 189 / 189).
+
+### Verworfen
+
+- **COM-Interop für Word/Excel/PowerPoint** (`Microsoft.Office.Interop.*`): würde Office-Installation
+  voraussetzen, ist auf vielen Maschinen nicht vorhanden, und die Bindung an spezifische
+  Office-Versionen macht die Pflege teuer. UIA liefert einen akzeptablen Ausschnitt
+  ohne diese Abhängigkeit.
+- **Folien-Nr / Sheet-Name / Notizen via UIA**: in Tests nicht zuverlässig abrufbar,
+  wäre nur über COM oder Office-Add-Ins sinnvoll. Explizit als „nicht implementiert"
+  im Output-Markdown dokumentiert.
+
 ### Verworfen
 
 - **`EVENT_OBJECT_SELECTION` als Trigger-Quelle**: würde bei Caret-Wechsel

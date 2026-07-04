@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 189/189 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern)
+- [x] Tests: 243/243 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1)
 - [x] **Browser-Reader Iter. 4 — ReverseMarkdown 1:1 via JSON:** neue Sektion
   `appReader.browser.markdown` mappt alle 8 öffentlichen `ReverseMarkdown.Config`-Felder
   (`unknownTags`, `githubFlavored`, `removeComments`, `whitelistUriSchemes`,
@@ -68,7 +68,8 @@
   - Alte `CapturePipeline`/`EventDetector`/`Models.cs` (Polling-basiert)
     entfernt.
   - 91 neue Tests (Schritte A–G).
-- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint
+- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting)
+- [x] App-Reader: Word/Excel/PowerPoint (Spec 0004 Iter. Documents — UIA-only, Office nicht erforderlich; Tests grün, e2e-Smoke gegen Office ausstehend)
 - [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
 - [x] Push auf `origin/main`
 
@@ -105,8 +106,9 @@ Ausführlich: `specs/0001-vision.md`
 | `src/AiRecall.Trigger/` | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service** |
 | `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
 | `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
+| `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
-| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger (189 Tests) |
+| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader (243 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
 | `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
 | `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |

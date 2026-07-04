@@ -54,6 +54,9 @@ public sealed class AppReaderConfig
 
     [JsonPropertyName("notepad")]
     public NotepadConfig Notepad { get; set; } = new();
+
+    [JsonPropertyName("documents")]
+    public DocumentsConfig Documents { get; set; } = new();
 }
 
 public sealed class OutlookConfig
@@ -163,6 +166,21 @@ public sealed class NotepadConfig
 {
     [JsonPropertyName("maxBufferKB")]
     public int MaxBufferKB { get; set; } = 256;
+}
+
+/// <summary>
+/// Konfiguration fuer die Office-Dokumente-Reader (Word/Excel/PowerPoint).
+/// Spec 0004 Iter. Documents.
+/// </summary>
+public sealed class DocumentsConfig
+{
+    /// <summary>Maximale Laenge des per UIA extrahierten Textes (KB).</summary>
+    [JsonPropertyName("maxTextKB")]
+    public int MaxTextKB { get; set; } = 64;
+
+    /// <summary>UIA-basierte Text-Extraktion aktivieren. Fallback: Title-only.</summary>
+    [JsonPropertyName("enableUiaExtraction")]
+    public bool EnableUiaExtraction { get; set; } = true;
 }
 
 public sealed class CaptureConfig
