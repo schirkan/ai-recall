@@ -14,6 +14,7 @@ public sealed class TrayAppContext : ApplicationContext
     private readonly TrayIconController _trayIcon;
     private readonly LogviewerSession _logSession;
     private LogviewerWindow? _logviewer;
+    private SettingsDialog? _settingsDialog;
     private AppConfig _config;
 
     /// <summary>
@@ -53,11 +54,13 @@ public sealed class TrayAppContext : ApplicationContext
             ExitThread();
         };
         _trayIcon.ShowLogviewerRequested += (_, _) => ShowLogviewer();
-        _trayIcon.ShowSettingsRequested += (_, _) => Log.Information("Settings dialog requested (Schritt 6)");
+        _trayIcon.ShowSettingsRequested += (_, _) => ShowSettings();
 
         _logSession = new LogviewerSession(LogSink);
         // ShowLogviewerItem aktivieren (Spec 0008 Schritt 5)
         _trayIcon.EnableLogviewer();
+        // Settings-Item aktivieren (Spec 0009 Schritt 6)
+        _trayIcon.EnableSettings();
 
         Log.Information("AiRecall TrayApp ready (config={Path})", UserConfigLocator.GetUserConfigPath());
     }
@@ -87,6 +90,22 @@ public sealed class TrayAppContext : ApplicationContext
         }
         _logviewer.Show();
         _logviewer.BringToFront();
+    }
+
+    private void ShowSettings()
+    {
+        if (_settingsDialog is null || _settingsDialog.IsDisposed)
+        {
+            _settingsDialog = new SettingsDialog(_config, onSave: newConfig =>
+            {
+                _config = newConfig;
+                Log.Information("Settings saved, hot-reloading supervisor");
+                _supervisor.Restart(newConfig);
+            });
+            _settingsDialog.FormClosed += (_, _) => _settingsDialog = null;
+        }
+        _settingsDialog.Show();
+        _settingsDialog.BringToFront();
     }
 
     protected override void ExitThreadCore()
