@@ -243,11 +243,14 @@ public sealed class ConversionWorker : IDisposable
         }
 
         // 3) Content-MD schreiben + Frontmatter update
+        //    Output-Datei: *.conversion.md (App-Reader schreibt *.content.md sync
+        //    in TriggerWorker; Schritt 7 wird App-Reader duenn-refactoren und
+        //    beide Quellen in *.content.md mergen).
         if (anyStep)
         {
             var dir = Path.GetDirectoryName(mdPath);
             var baseName = Path.GetFileNameWithoutExtension(mdPath);
-            var contentPath = Path.Combine(dir!, baseName + ".content.md");
+            var contentPath = Path.Combine(dir!, baseName + ".conversion.md");
             var contentBody = new StringBuilder();
             contentBody.AppendLine("---");
             contentBody.AppendLine($"timestamp: {DateTimeOffset.Now:O}");

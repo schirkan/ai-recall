@@ -137,7 +137,7 @@ public class ConversionWorkerTests : IDisposable
         Assert.True(worker.CompletedCount >= 1, $"Expected >=1 completed, got {worker.CompletedCount}");
 
         // Content-MD existiert
-        var contentPath = Path.ChangeExtension(mdPath, ".content.md");
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         Assert.True(File.Exists(contentPath), $"Expected content-MD at {contentPath}");
         var content = File.ReadAllText(contentPath);
         Assert.Contains("Hello from source.txt", content);
@@ -160,7 +160,7 @@ public class ConversionWorkerTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker, expectedZero: true, timeoutMs: 5000);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".content.md");
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         Assert.False(File.Exists(contentPath));
 
         var updatedMd = File.ReadAllText(mdPath);

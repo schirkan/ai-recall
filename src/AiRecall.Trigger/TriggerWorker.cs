@@ -3,13 +3,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Channels;
 using AiRecall.AppReader.Base;
+using AiRecall.Conversion;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
 using AiRecall.Core.Persistence;
 using AiRecall.Core.Util;
 using AiRecall.Core.Windows;
 using AiRecall.ScreenCapture.Screenshot;
-using AiRecall.ScreenCapture.Text;
 using Serilog;
 
 namespace AiRecall.Trigger;
@@ -20,9 +20,9 @@ namespace AiRecall.Trigger;
 /// Liest <see cref="TriggerEvent"/>s aus dem <see cref="Channel{T}"/>, der
 /// von <see cref="WinEventHookDetector"/> und <see cref="HeartbeatThread"/>
 /// befüllt wird. Wendet die Pipeline-Schritte 1–10 aus Spec 0005 an und
-/// ruft am Ende <see cref="CaptureWriter.Write"/> auf.
+/// ruft am Ende <see cref="CaptureWriter.WritePending"/> auf.
 ///
-/// Pipeline-Schritte (Spec 0005):
+/// Pipeline-Schritte (Spec 0005 + Spec 0007):
 ///   1. HWND normalisieren via <c>GetAncestor(hwnd, GA_ROOT)</c>
 ///   2. Self-Capture-Filter (PID == eigene PID)
 ///   3. Class-Blacklist (<c>trigger.blacklist.windowClasses</c>)
@@ -32,9 +32,13 @@ namespace AiRecall.Trigger;
 ///   7. Per-App-Throttle (<c>trigger.throttlePerAppSeconds</c>)
 ///   8. Screenshot
 ///   9. Hash-Dedup pro HWND (<c>HwndDedup</c>)
-///  10. OCR (Tesseract)
-///  11. App-Reader (Spec 0004)
-///  12. <see cref="CaptureWriter.Write"/> + Content-MD
+///  10. App-Reader (Spec 0004) — schreibt *.content.md synchron
+///  11. <see cref="CaptureWriter.WritePending"/> + enqueue to ConversionWorker
+///
+/// Spec 0007 Schritt 6: OCR ist in den async <see cref="ConversionWorker"/>
+/// gewandert. TriggerWorker schreibt nur noch den Pending-MD und übergibt
+/// den Pfad an den ConversionWorker, der OCR + DocumentConverter
+/// asynchron ausführt.
 /// </summary>
 public sealed class TriggerWorker : IDisposable
 {
@@ -49,6 +53,7 @@ public sealed class TriggerWorker : IDisposable
     private readonly Throttle<string> _appThrottle;
     private readonly HwndDedup _hwndDedup;
     private readonly AppReaderRegistry _appReaderRegistry;
+    private readonly ConversionWorker? _conversionWorker;
 
     private Thread? _thread;
     private CancellationTokenSource? _cts;
@@ -66,7 +71,8 @@ public sealed class TriggerWorker : IDisposable
         ChannelReader<TriggerEvent> reader,
         AppConfig config,
         Serilog.ILogger logger,
-        AppReaderRegistry? appReaderRegistry = null)
+        AppReaderRegistry? appReaderRegistry = null,
+        ConversionWorker? conversionWorker = null)
     {
         _reader = reader;
         _config = config;
@@ -80,6 +86,7 @@ public sealed class TriggerWorker : IDisposable
         _hwndDedup = new HwndDedup(stateFile);
 
         _appReaderRegistry = appReaderRegistry ?? LoadAppReaderRegistry();
+        _conversionWorker = conversionWorker;
     }
 
     /// <summary>Startet den Worker-Thread. Idempotent.</summary>
@@ -249,24 +256,15 @@ public sealed class TriggerWorker : IDisposable
             return;
         }
 
-        // 10. OCR (Tesseract) — Bild-Beweis + zusätzliche Textquelle
-        string contentText = string.Empty;
-        if (_config.Ocr.Engine.Equals("tesseract", StringComparison.OrdinalIgnoreCase))
-        {
-            try
-            {
-                using var ocr = new OcrEngine(_config.Ocr);
-                contentText = ocr.ExtractText(pngBytes);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning(ex, "OCR failed: {Message}", ex.Message);
-            }
-        }
+        // 10. Pending-MD schreiben (ohne OCR-Text, ohne App-Reader-Content).
+        //     Spec 0007: OCR + DocumentConverter laufen async im ConversionWorker.
+        //     App-Reader schreibt sein *.content.md weiterhin synchron (Schritt 7
+        //     refactored den App-Reader duenn, dann laeuft auch das async).
+        var item = CaptureWriter.WritePending(
+            window, pngBytes, hash, _config.Capture.RootPath,
+            parentWindow: parentWindow);
 
-        // 11. App-Reader (Spec 0004)
-        var item = CaptureWriter.Write(window, pngBytes, contentText, hash, _config.Capture.RootPath, parentWindow: parentWindow);
-
+        // 11. App-Reader (Spec 0004) — schreibt *.content.md synchron
         if (_config.AppReader.Enabled && _appReaderRegistry.Readers.Count > 0)
         {
             var context = new AppReaderContext
@@ -289,15 +287,28 @@ public sealed class TriggerWorker : IDisposable
             }
         }
 
-        // 12. State aktualisieren
+        // 12. Async Conversion-Worker (Spec 0007) — enqueue der MD-Pfad
+        if (_conversionWorker is not null)
+        {
+            try
+            {
+                _conversionWorker.EnqueueAsync(item.MarkdownPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning(ex, "ConversionWorker.EnqueueAsync failed for {MdPath}", item.MarkdownPath);
+            }
+        }
+
+        // 13. State aktualisieren
         _hwndThrottle.Mark(rootHwnd, ev.Timestamp);
         _appThrottle.Mark(window.ProcessName, ev.Timestamp);
         _hwndDedup.Mark(rootHwnd, hash, ev.Timestamp);
 
         CaptureCount++;
         _logger.Information(
-            "Captured {Kind} {Process}/{Title} -> {Path} (hash={Hash}, chars={Chars})",
-            ev.Kind, window.ProcessName, window.Title, item.ScreenshotPath, hash, contentText.Length);
+            "Captured {Kind} {Process}/{Title} -> {Path} (hash={Hash})",
+            ev.Kind, window.ProcessName, window.Title, item.ScreenshotPath, hash);
     }
 
     // -----------------------------------------------------------------------

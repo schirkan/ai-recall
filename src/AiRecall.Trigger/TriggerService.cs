@@ -1,6 +1,8 @@
 using System.Threading.Channels;
 using AiRecall.AppReader.Base;
+using AiRecall.Conversion;
 using AiRecall.Core.Configuration;
+using AiRecall.ScreenCapture.Text;
 using Serilog;
 
 namespace AiRecall.Trigger;
@@ -13,16 +15,26 @@ namespace AiRecall.Trigger;
 ///     <item><see cref="WinEventHookDetector"/> (Hauptquelle, optional)</item>
 ///     <item><see cref="HeartbeatThread"/> (Fallback-Polling, optional)</item>
 ///     <item><see cref="TriggerWorker"/> (verarbeitet Events aus dem Channel)</item>
+///     <item><see cref="ConversionWorker"/> (async OCR + DocumentConverter, Spec 0007)</item>
 ///   </list>
 ///
-/// Beide Quellen schreiben in denselben <see cref="Channel{T}"/>. Der
+/// Beide Trigger-Quellen schreiben in denselben <see cref="Channel{T}"/>. Der
 /// Channel wird unbounded erzeugt (Events gehen nicht verloren; Worker
 /// liest aktiv). Der Worker ruft am Ende
-/// <see cref="AiRecall.Core.Persistence.CaptureWriter.Write"/> auf.
+/// <see cref="AiRecall.Core.Persistence.CaptureWriter.WritePending"/> auf und
+/// enqueued den MD-Pfad an den <see cref="ConversionWorker"/>.
 ///
-/// Die beiden Quellen können einzeln deaktiviert werden (z. B. für Tests
+/// Die Trigger-Quellen können einzeln deaktiviert werden (z. B. für Tests
 /// oder für den MVP2-Tray-EXE, der den Heartbeat evtl. nicht braucht).
 /// Standard: beide aktiv, sofern die Config sie erlaubt.
+///
+/// Conversion-Worker (Spec 0007 Schritt 6):
+///   - Wenn <c>conversion.enabled=true</c> und kein externer Worker
+///     injiziert wurde, wird intern einer mit
+///     <see cref="TesseractOcrEngineAdapter"/> erzeugt.
+///   - Wird im <see cref="Dispose"/> sauber beendet (idempotent).
+///   - Über <see cref="ConversionWorker"/> öffentlich erreichbar (für
+///     Status-Inspektion aus CLI/MVP2-Tray-EXE).
 /// </summary>
 public sealed class TriggerService : ITriggerService
 {
@@ -32,6 +44,8 @@ public sealed class TriggerService : ITriggerService
     private readonly WinEventHookDetector? _winEventHook;
     private readonly HeartbeatThread? _heartbeat;
     private readonly TriggerWorker _worker;
+    private readonly ConversionWorker? _conversionWorker;
+    private readonly bool _ownsConversionWorker;
 
     private bool _isRunning;
     private bool _disposed;
@@ -41,7 +55,8 @@ public sealed class TriggerService : ITriggerService
         ILogger logger,
         AppReaderRegistry? appReaderRegistry = null,
         bool enableWinEventHook = true,
-        bool enableHeartbeat = true)
+        bool enableHeartbeat = true,
+        ConversionWorker? conversionWorker = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -70,7 +85,41 @@ public sealed class TriggerService : ITriggerService
                 logError: msg => _logger.Error("Heartbeat: {Msg}", msg));
         }
 
-        _worker = new TriggerWorker(_channel.Reader, _config, _logger, appReaderRegistry);
+        // ConversionWorker (Spec 0007 Schritt 6):
+        //   - Wenn extern injiziert: verwenden, nicht disposen
+        //   - Wenn null + Conversion.Enabled: selbst erzeugen mit
+        //     TesseractOcrEngineAdapter, disposen beim Service-Dispose
+        //   - Bei OcrEngine-Init-Fehler (z. B. tessdata fehlt) Fallback auf
+        //     NullOcrEngine — Conversion laeuft dann ohne OCR weiter
+        if (conversionWorker is not null)
+        {
+            _conversionWorker = conversionWorker;
+            _ownsConversionWorker = false;
+        }
+        else if (_config.Conversion.Enabled)
+        {
+            IOcrEngine ocrEngine;
+            if (_config.Ocr.Engine.Equals("tesseract", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    ocrEngine = new TesseractOcrEngineAdapter(new OcrEngine(_config.Ocr), _logger);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warning(ex, "TriggerService: Tesseract init failed, using NullOcrEngine (no OCR)");
+                    ocrEngine = new NullOcrEngine();
+                }
+            }
+            else
+            {
+                ocrEngine = new NullOcrEngine();
+            }
+            _conversionWorker = new ConversionWorker(_config, _logger, ocrEngine);
+            _ownsConversionWorker = true;
+        }
+
+        _worker = new TriggerWorker(_channel.Reader, _config, _logger, appReaderRegistry, _conversionWorker);
     }
 
     /// <inheritdoc />
@@ -93,6 +142,12 @@ public sealed class TriggerService : ITriggerService
     /// Replay historischer Events).
     /// </summary>
     public ChannelWriter<TriggerEvent> ChannelWriter => _channel.Writer;
+
+    /// <summary>
+    /// Async Conversion-Worker (Spec 0007). Kann <c>null</c> sein, wenn
+    /// <c>conversion.enabled=false</c> und kein externer Worker injiziert wurde.
+    /// </summary>
+    public ConversionWorker? ConversionWorker => _conversionWorker;
 
     /// <inheritdoc />
     public void Start()
@@ -134,6 +189,10 @@ public sealed class TriggerService : ITriggerService
         _worker.Dispose();
         _winEventHook?.Dispose();
         _heartbeat?.Dispose();
+        if (_ownsConversionWorker)
+        {
+            _conversionWorker?.Dispose();
+        }
         _disposed = true;
     }
 }

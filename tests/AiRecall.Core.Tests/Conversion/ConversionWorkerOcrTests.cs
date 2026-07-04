@@ -80,7 +80,7 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".content.md");
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         var content = File.ReadAllText(contentPath);
         Assert.Contains("## Document content", content);
         Assert.Contains("Document content here", content);
@@ -105,7 +105,7 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".content.md");
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         var content = File.ReadAllText(contentPath);
         Assert.DoesNotContain("## OCR Content", content); // keine Section bei leerem OCR
         Assert.Contains("## Document content", content);
@@ -149,7 +149,7 @@ public class ConversionWorkerOcrTests : IDisposable
         var md = File.ReadAllText(mdPath);
         // kein screenshot im Frontmatter → ocr skip
         Assert.Contains("ocr=skip,no-screenshot", md);
-        Assert.False(File.Exists(Path.ChangeExtension(mdPath, ".content.md")));
+        Assert.False(File.Exists(Path.ChangeExtension(mdPath, ".conversion.md")));
     }
 
     [Fact]
@@ -164,7 +164,7 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".content.md");
+        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         var content = File.ReadAllText(contentPath);
         Assert.DoesNotContain("## OCR Content", content);
         Assert.Contains("## Document content", content);
