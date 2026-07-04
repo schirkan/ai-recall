@@ -64,5 +64,23 @@
       "pollIntervalSeconds": 60,
       "ignoreAutoRuleMails": false
     }
+  },
+  "trigger": {
+    "enabled": true,
+    "throttleMs": 500,
+    "throttlePerAppSeconds": 2,
+    "heartbeatIntervalSeconds": 30,
+    "winEvents": {
+      "foreground": true,
+      "focus": true,
+      "nameChange": true,
+      "valueChange": true,
+      "scroll": true,
+      "menuPopup": true
+    },
+    "blacklist": {
+      "windowClasses": ["tooltips_class32", "NotifyIconOverflowWindow"],
+      "processes": []
+    }
   }
 }

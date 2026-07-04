@@ -22,6 +22,14 @@ public sealed class AppConfig
 
     [JsonPropertyName("appReader")]
     public AppReaderConfig AppReader { get; set; } = new();
+
+    /// <summary>
+    /// Trigger-Pipeline-Konfiguration (Spec 0005). Setzt Defaults für
+    /// <c>SetWinEventHook</c>-basierte Trigger, Heartbeat-Polling, Throttle,
+    /// Dedup-Logik und Class-/Process-Blacklist.
+    /// </summary>
+    [JsonPropertyName("trigger")]
+    public TriggerConfig Trigger { get; set; } = new();
 }
 
 public sealed class AppReaderConfig
@@ -208,4 +216,80 @@ public sealed class LoggingConfig
     /// <summary>Log directory. <c>null</c> disables file logging. Relative paths resolve to AppContext.BaseDirectory.</summary>
     [JsonPropertyName("path")]
     public string? Path { get; set; } = "logs";
+}
+
+/// <summary>
+/// Trigger-Pipeline-Konfiguration (Spec 0005). Werte, die hier nicht gesetzt
+/// sind, fallen auf die dokumentierten Defaults zurück.
+/// </summary>
+public sealed class TriggerConfig
+{
+    /// <summary>Master-Switch. <c>false</c> deaktiviert die gesamte Pipeline.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Min-Intervall zwischen Captures für dasselbe HWND (ms). Spec 0005 §Konfiguration.</summary>
+    [JsonPropertyName("throttleMs")]
+    public int ThrottleMs { get; set; } = 500;
+
+    /// <summary>Max 1 Capture pro App pro Zeitfenster (Sekunden). Spec 0005 §Konfiguration.</summary>
+    [JsonPropertyName("throttlePerAppSeconds")]
+    public int ThrottlePerAppSeconds { get; set; } = 2;
+
+    /// <summary>Heartbeat-Polling-Fallback (Sekunden). <c>0</c> deaktiviert den Heartbeat.</summary>
+    [JsonPropertyName("heartbeatIntervalSeconds")]
+    public int HeartbeatIntervalSeconds { get; set; } = 30;
+
+    /// <summary>Granular pro Win32-Event-Typ ein-/ausschalten.</summary>
+    [JsonPropertyName("winEvents")]
+    public WinEventSubscription WinEvents { get; set; } = new();
+
+    /// <summary>Blacklist für Window-Klassen und Prozess-Namen.</summary>
+    [JsonPropertyName("blacklist")]
+    public TriggerBlacklist Blacklist { get; set; } = new();
+}
+
+/// <summary>
+/// Welche Win32-Events subskribiert werden. Spec 0005 §Trigger-Quellen.
+/// <c>Selection</c> ist bewusst nicht enthalten (Diskussion 2026-07-04 Punkt 2).
+/// </summary>
+public sealed class WinEventSubscription
+{
+    /// <summary><c>EVENT_SYSTEM_FOREGROUND</c> — Haupttrigger für Fensterwechsel.</summary>
+    [JsonPropertyName("foreground")]
+    public bool Foreground { get; set; } = true;
+
+    /// <summary><c>EVENT_OBJECT_FOCUS</c> — Fokus innerhalb des Fensters.</summary>
+    [JsonPropertyName("focus")]
+    public bool Focus { get; set; } = true;
+
+    /// <summary><c>EVENT_OBJECT_NAMECHANGE</c> — Titel/URL geändert.</summary>
+    [JsonPropertyName("nameChange")]
+    public bool NameChange { get; set; } = true;
+
+    /// <summary><c>EVENT_OBJECT_VALUECHANGE</c> — Inhalt geändert.</summary>
+    [JsonPropertyName("valueChange")]
+    public bool ValueChange { get; set; } = true;
+
+    /// <summary><c>EVENT_OBJECT_SCROLL</c> — Scroll-Bewegung.</summary>
+    [JsonPropertyName("scroll")]
+    public bool Scroll { get; set; } = true;
+
+    /// <summary><c>EVENT_SYSTEM_MENUPOPUPSTART</c> — Menü/Kontextmenü geöffnet.</summary>
+    [JsonPropertyName("menuPopup")]
+    public bool MenuPopup { get; set; } = true;
+}
+
+/// <summary>
+/// Blacklist für Win32-Window-Klassen und Prozess-Namen (Spec 0005 §Sonderfälle).
+/// </summary>
+public sealed class TriggerBlacklist
+{
+    /// <summary>Default: Tooltips + Notification-Overflow.</summary>
+    [JsonPropertyName("windowClasses")]
+    public List<string> WindowClasses { get; set; } = new() { "tooltips_class32", "NotifyIconOverflowWindow" };
+
+    /// <summary>Prozess-Namen (case-insensitive substring), die ignoriert werden.</summary>
+    [JsonPropertyName("processes")]
+    public List<string> Processes { get; set; } = new();
 }
