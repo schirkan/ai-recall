@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using AiRecall.Core.Configuration;
-using AiRecall.ScreenCapture.Trigger;
+using AiRecall.Trigger;
 
 namespace AiRecall.Core.Tests.Trigger;
 

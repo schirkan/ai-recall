@@ -1,5 +1,5 @@
 using System.Threading.Channels;
-using AiRecall.ScreenCapture.Trigger;
+using AiRecall.Trigger;
 
 namespace AiRecall.Core.Tests.Trigger;
 

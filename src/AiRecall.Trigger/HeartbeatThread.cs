@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
-namespace AiRecall.ScreenCapture.Trigger;
+namespace AiRecall.Trigger;
 
 /// <summary>
 /// Periodisches Heartbeat-Polling (Spec 0005 §Trigger-Quellen, sekundär).

@@ -9,6 +9,7 @@
     <ProjectReference Include="..\AiRecall.AppReader.Notepad\AiRecall.AppReader.Notepad.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
+    <ProjectReference Include="..\AiRecall.Trigger\AiRecall.Trigger.csproj" />
   </ItemGroup>
 
   <ItemGroup>

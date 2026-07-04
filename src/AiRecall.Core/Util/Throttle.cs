@@ -1,11 +1,11 @@
-namespace AiRecall.ScreenCapture.Trigger;
+namespace AiRecall.Core.Util;
 
 /// <summary>
 /// Generischer Throttle: pro Key (Prozessname, HWND, …) wird der Zeitpunkt
 /// des letzten Captures gespeichert; ein neues Capture ist erst nach
 /// Ablauf des Intervalls erlaubt.
 ///
-/// Spec 0002 TR-4 (pro-App) und Spec 0005 §Pipeline-Schritte 2+3
+/// Spec 0002 TR-4 (pro-App) und Spec 0005 §Pipeline-Schritte 6+7
 /// (per-HWND + per-App). Generisch, damit derselbe Code für
 /// <c>Throttle&lt;string&gt;</c> (Prozessname) und
 /// <c>Throttle&lt;IntPtr&gt;</c> (HWND) genutzt werden kann.
@@ -31,7 +31,7 @@ public sealed class Throttle<TKey> where TKey : notnull
         return now - last >= _window;
     }
 
-    /// <summary>Markiert „jetzt gerade capturiert" für den Key.</summary>
+    /// <summary>Markiert "jetzt gerade capturiert" für den Key.</summary>
     public void Mark(TKey key, DateTimeOffset now)
     {
         _lastCapture[key] = now;

@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using AiRecall.Core.Configuration;
-using AiRecall.ScreenCapture.Trigger;
+using AiRecall.Trigger;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;

@@ -1,4 +1,4 @@
-using AiRecall.ScreenCapture.Trigger;
+using AiRecall.Core.Util;
 
 namespace AiRecall.Core.Tests.Trigger;
 

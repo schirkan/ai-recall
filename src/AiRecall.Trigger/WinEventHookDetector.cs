@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
-using AiRecall.Core.Models;
 using AiRecall.Core.Configuration;
-using AiRecall.ScreenCapture.Windows;
+using AiRecall.Core.Models;
+using AiRecall.Core.Windows;
 
-namespace AiRecall.ScreenCapture.Trigger;
+namespace AiRecall.Trigger;
 
 /// <summary>
 /// Win32-Event-basierter Detector via <c>SetWinEventHook</c> (Spec 0005).

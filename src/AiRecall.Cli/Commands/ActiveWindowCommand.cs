@@ -5,6 +5,7 @@ using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
 using AiRecall.Core.Persistence;
 using AiRecall.Core.Util;
+using AiRecall.Core.Windows;
 using AiRecall.ScreenCapture.Screenshot;
 using AiRecall.ScreenCapture.Text;
 using AiRecall.ScreenCapture.Windows;

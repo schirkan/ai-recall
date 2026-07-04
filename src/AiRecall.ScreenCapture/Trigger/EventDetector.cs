@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using AiRecall.Core.Models;
-using AiRecall.ScreenCapture.Windows;
+using AiRecall.Core.Windows;
 
 namespace AiRecall.ScreenCapture.Trigger;
 

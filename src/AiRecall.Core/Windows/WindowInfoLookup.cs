@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using AiRecall.Core.Models;
 
-namespace AiRecall.ScreenCapture.Windows;
+namespace AiRecall.Core.Windows;
 
 /// <summary>
 /// Looks up a single <see cref="WindowInfo"/> for a specific HWND.

@@ -1,16 +1,16 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace AiRecall.ScreenCapture.Trigger;
+namespace AiRecall.Trigger;
 
 /// <summary>
 /// HWND-basierte Hash-Dedup (Spec 0005 §Pipeline-Schritt 9, Diskussion 2026-07-04
 /// Punkt 4: Hash pro Fenster, nicht pro App).
 ///
-/// Im Gegensatz zur pro-App-Variante (<see cref="Dedup{TKey}"/>) wird hier
-/// der HWND als Hex-String serialisiert, weil <see cref="IntPtr"/> nicht
-/// direkt JSON-serialisierbar ist. State wird in
-/// <c>%APPDATA%/AiRecall/hwnd-dedup-state.json</c> persistiert.
+/// Im Gegensatz zur pro-App-Variante wird hier der HWND als Hex-String
+/// serialisiert, weil <see cref="IntPtr"/> nicht direkt JSON-serialisierbar
+/// ist. State wird in <c>%APPDATA%/AiRecall/hwnd-dedup-state.json</c>
+/// persistiert.
 ///
 /// Hinweis HWND-Recycling: HWNDs können nach Window-Destroy recycelt werden
 /// (selten, aber möglich). In dem Fall würde der neue HWND-Inhaber den

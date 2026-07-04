@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AiRecall.ScreenCapture.Trigger;
+namespace AiRecall.Core.Util;
 
 /// <summary>
 /// Hash-basierte Dedup (Spec 0002 TR-5). Pro Prozess wird der Hash des
