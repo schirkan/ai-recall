@@ -1,6 +1,6 @@
 # 0007 — Async Document Conversion Pipeline
 
-> **Status:** Draft v0.3 (2026-07-04) — OCR ebenfalls in Conversion-Pipeline (Martin 2026-07-04 19:25)
+> **Status:** v0.4 final (2026-07-04) — Alle offenen Fragen geklärt, kein Legacy-Handling (Martin 2026-07-04 20:01: Tool ist neu, keine Legacy-Captures)
 > **Owner:** Martin
 > **Refactored:** Spec 0004 Iter. 4 — App-Reader → DocumentConverter + async pipeline
 
@@ -149,7 +149,7 @@ ConversionWorker (Background-Task)
 - Recovery-Mechanismus: scannt Disk nach `*.md` mit `conversion: pending`
 - Füllt Channel → ConversionWorker verarbeitet asynchron
 - **Nicht blockierend**: gibt Stats zurück (N enqueued), läuft nicht selbst
-- Plus `--include-legacy`: scannt auch Captures ohne `conversion:`-Feld (alle als `pending` behandeln)
+- Plus `--include-legacy`: entfällt — Tool ist neu, keine Legacy-Captures (Martin 2026-07-04 20:01)
 
 **Vorteile ggü. FileSystemWatcher (Martin 2026-07-04 19:25):**
 
@@ -280,22 +280,26 @@ Tesseract (typisch 100–500ms pro Bild) erst nachgelagert läuft.
 
 ## Migration
 
-- **Bestehende Captures ohne `conversion:`-Feld** = `legacy`
-- `recall convert` überspringt Legacy-Files (kein Nachträglich-Konvertieren)
-- Optionaler Flag `--include-legacy` in `recall convert` zum Nachträglich-Konvertieren
+**Keine Migration nötig** — das Tool ist neu (Martin 2026-07-04 20:01),
+es existieren keine Legacy-Captures vor Spec 0007. Alle Captures ab
+Release werden im neuen Format (`conversion: pending|done|partial|failed`,
+OCR + DocumentConverter asynchron) erstellt.
 
-## Offene Fragen (Martin-Review)
+`recall convert` ist ein reiner **Recovery-Subcommand** für gecrashte
+`recall record`-Sessions: scannt Disk nach `pending`-Captures und füllt
+die Channel-Queue. Kein `--include-legacy`-Flag.
 
-1. ~~**Pandoc als externe Dependency OK?**~~ **Erledigt (Martin 2026-07-04 19:12):** Pandoc raus.
-2. **NuGet-Packages OK?**
-   - `DocumentFormat.OpenXml` (MIT, Microsoft) für docx/xlsx/pptx
-   - `UglyToad.PdfPig` (Apache 2.0, MIT-kompatibel) für pdf
-   - `ReverseMarkdown` (MIT, vorhanden) für html
-3. ~~**FileSystemWatcher im selben Prozess?**~~ **Erledigt (Martin 2026-07-04 19:25):** FileSystemWatcher raus, ersetzt durch in-process `Channel<string>`-Queue. TriggerWorker enqueued direkt nach CaptureWriter.
-4. **`recall convert` als CLI-Subcommand OK?** Plus `--include-legacy`-Flag. Empfehlung: ja, scannt Disk nach pending, füllt Channel, läuft non-blocking (gibt Stats zurück, Worker verarbeitet async).
-5. **Bestehende Captures:** Legacy-Status akzeptabel oder nachträglich konvertieren? Empfehlung: Legacy akzeptabel, optionaler `--include-legacy`-Flag für Nachträglich-Konvertierung.
-6. **OCR-Sprache-Default:** `"deu+eng"` (deutsch+englisch) OK? Konfigurierbar via `conversion.ocr.language`.
-7. **OCR-Engine:** aktuell nur Tesseract. Weitere Engines später (z. B. Azure Vision, Google Vision)? — aktuell YAGNI.
+## Offene Fragen — alle geklärt (Martin-Review 2026-07-04)
+
+1. ~~**Pandoc als externe Dependency OK?**~~ **Erledigt:** Pandoc raus.
+2. ~~**NuGet-Packages OK?**~~ **Erledigt (Martin 2026-07-04 20:01):** DocumentFormat.OpenXml + PdfPig + ReverseMarkdown bestätigt.
+3. ~~**FileSystemWatcher im selben Prozess?**~~ **Erledigt:** Channel-Queue.
+4. ~~**`recall convert` als CLI-Subcommand OK?**~~ **Erledigt:** ja, ohne `--include-legacy`-Flag.
+5. ~~**Bestehende Captures:** Legacy-Migration?~~ **Erledigt (Martin 2026-07-04 20:01):** Kein Legacy-Handling — Tool ist neu.
+6. ~~**OCR-Sprache-Default `"deu+eng"`**~~ **Erledigt (Martin 2026-07-04 19:52):** OK, konfigurierbar.
+7. ~~**OCR-Engine-Erweiterung (Azure/Google Vision)?**~~ **Erledigt:** aktuell nur Tesseract, YAGNI.
+
+**Status: Spec final.** Bereit für Implementation.
 
 ## Implementierungs-Reihenfolge
 
@@ -320,7 +324,7 @@ Tesseract (typisch 100–500ms pro Bild) erst nachgelagert läuft.
 | `OcrWorkerTests` | Tesseract-Integration, Empty-Image-Handling, Timeout, Language-Switch |
 | `CaptureWriterConversionTests` | Frontmatter `conversion: pending` wird korrekt geschrieben |
 | `AppReaderRefactorTests` | Reader liefert nur Rohdaten, ContentMarkdown = Platzhalter |
-| `RecallConvertCommandTests` | CLI-Parsing, Batch-Verarbeitung, Exit-Codes, --include-legacy |
+| `RecallConvertCommandTests` | CLI-Parsing, Batch-Verarbeitung, Exit-Codes |
 | `ChannelQueueTests` | Producer-Consumer-Pattern, Backpressure, Cancellation |
 
 Geschätzt: **~30-40 neue Tests**, Test-Count gesamt: **~300-310**.
