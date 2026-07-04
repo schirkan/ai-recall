@@ -33,12 +33,14 @@ public sealed class ConversionWorker : IDisposable
     private readonly Task _workerTask;
     private readonly ILogger _logger;
     private readonly AppConfig _config;
+    private readonly IOcrEngine _ocrEngine;
 
     private int _pendingCount;
     private int _completedCount;
     private int _failedCount;
     private int _ocrSkippedCount;
     private int _partialCount;
+    private int _ocrErrorCount;
     private bool _disposed;
 
     /// <summary>Anzahl Captures in der Channel-Queue (noch nicht verarbeitet).</summary>
@@ -56,10 +58,14 @@ public sealed class ConversionWorker : IDisposable
     /// <summary>Anzahl Captures mit partieller Konvertierung (ein Schritt failed, anderer ok).</summary>
     public int PartialCount => _partialCount;
 
-    public ConversionWorker(AppConfig config, ILogger logger)
+    /// <summary>Anzahl OCR-Fehler (Tesseract nicht verfuegbar, leeres Bild, etc.).</summary>
+    public int OcrErrorCount => _ocrErrorCount;
+
+    public ConversionWorker(AppConfig config, ILogger logger, IOcrEngine? ocrEngine = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _ocrEngine = ocrEngine ?? new NullOcrEngine();
 
         _channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
         {
@@ -190,13 +196,46 @@ public sealed class ConversionWorker : IDisposable
             steps.Add("doc=skip,no-filePath");
         }
 
-        // 2) OCR (Schritt 4 — wird spaeter integriert)
-        // TODO: Tesseract-Aufruf hier
+        // 2) OCR (Schritt 4 — Tesseract-Adapter)
         if (!string.IsNullOrWhiteSpace(screenshotFile))
         {
-            // OCR noch nicht implementiert (Schritt 4)
-            steps.Add("ocr=skip,not-implemented");
-            Interlocked.Increment(ref _ocrSkippedCount);
+            // Screenshot-Pfad ist relativ zum Capture-MD (gleicher Ordner)
+            var mdDir = Path.GetDirectoryName(mdPath);
+            var screenshotPath = Path.IsPathRooted(screenshotFile)
+                ? screenshotFile
+                : Path.Combine(mdDir!, screenshotFile);
+
+            if (File.Exists(screenshotPath))
+            {
+                try
+                {
+                    var pngBytes = await File.ReadAllBytesAsync(screenshotPath, ct);
+                    var ocrText = await _ocrEngine.ExtractTextAsync(pngBytes, ct);
+                    if (!string.IsNullOrWhiteSpace(ocrText))
+                    {
+                        sections.Add($"## OCR Content (via {_ocrEngine.Name})\n\n```\n{ocrText.Trim()}\n```");
+                        steps.Add($"ocr=ok,{_ocrEngine.Name}");
+                        anyStep = true;
+                    }
+                    else
+                    {
+                        steps.Add($"ocr=ok,empty,{_ocrEngine.Name}");
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    steps.Add($"ocr=fail,{ex.GetType().Name}");
+                    anyFailed = true;
+                    Interlocked.Increment(ref _ocrErrorCount);
+                    _logger.Warning(ex, "ConversionWorker: OCR failed for {ScreenshotPath}", screenshotPath);
+                }
+            }
+            else
+            {
+                steps.Add("ocr=skip,file-missing");
+                Interlocked.Increment(ref _ocrSkippedCount);
+            }
         }
         else
         {

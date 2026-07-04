@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
+    <ProjectReference Include="..\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -12,6 +12,7 @@ return args[0] switch
     "active-window" or "aw" => ActiveWindowCommand.Run(args[1..]),
     "record" => RecordCommand.Run(args[1..]),
     "status" => StatusCommand.Run(args[1..]),
+    "convert" => ConvertCommand.Run(args[1..]),
     "-h" or "--help" or "help" => PrintRootUsage(returnCode: 0),
     _ => UnknownCommand(args[0])
 };
@@ -34,6 +35,7 @@ static int PrintRootUsage(int returnCode = 1)
     Console.WriteLine("  active-window (aw)    Capture the current foreground window as PNG + MD.");
     Console.WriteLine("  record                Continuous capture with trigger pipeline (Ctrl+C to stop).");
     Console.WriteLine("  status                Show config, today's captures, trigger settings.");
+    Console.WriteLine("  convert               Recover pending captures (Spec 0007).");
     Console.WriteLine();
     Console.WriteLine("Run 'recall <command> --help' for command-specific help.");
     return returnCode;

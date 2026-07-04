@@ -10,6 +10,7 @@
     <ProjectReference Include="..\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
     <ProjectReference Include="..\AiRecall.Trigger\AiRecall.Trigger.csproj" />
+    <ProjectReference Include="..\AiRecall.Conversion\AiRecall.Conversion.csproj" />
   </ItemGroup>
 
   <ItemGroup>
