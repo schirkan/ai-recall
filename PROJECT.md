@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: **525/525 grün** (425 MVP1+Trigger+MVP2-Basis + 100 Outlook-Reader Iter. 3: 14 EntryStore + 20 AutoRuleDetector + 16 TitleParser + 23 BodyToMarkdown + 27 OutlookAppReader [18 Facts + 1 Theory mit 9 InlineData])
+- [x] Tests: **650/650 grün** (425 MVP1+Trigger+MVP2-Basis + 100 Outlook-Reader Iter. 3: 14 EntryStore + 20 AutoRuleDetector + 16 TitleParser + 23 BodyToMarkdown + 27 OutlookAppReader [18 Facts + 1 Theory mit 9 InlineData] + 64 OneNote-Reader Spec 0010: 5 Config + 8 ComInterop + 30 PageXmlToMarkdown + 21 AppReader + 61 Teams-Reader Spec 0011: 5 Config + 29 UIA + 10 CDP + 17 Reader)
 - [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
   - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
     auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist
@@ -112,6 +112,14 @@
   - `OneNoteConfig` in `AppConfig` mit `Enabled`, `MaxContentKB`, `IncludeImages`, `IncludeTags`, `HierarchyDepth` (PageOnly|PageAndSection|PageAndSectionAndNotebook), `ActivePageStrategy` (WindowsApi|HierarchyXml|Auto), `PollIntervalSeconds` (=0 Read-only), `SkipNotebookPatterns`.
   - Persistenz-Schema: `capture/yyyy-MM-dd/onenote/HHmmss-{pageIdShort}.md` mit YAML-Frontmatter (kind=onenote-page, pageId, pageTitle, [section/sectionId], [notebook/notebookId], lastModified, strategy, includeImages, includeTags, attachments, source=onenote-com, reader, readerVersion).
   - 64 neue Tests (525 → 589 grün): 5 OneNoteConfig + 8 OneNoteComInterop (XML-Parser) + 30 OneNotePageXmlToMarkdown + 21 OneNoteAppReader (Public-Surface + ShortId-Theory + Internal-BuildFullMarkdown).
+- [x] **Teams App-Reader (Spec 0011 abgeschlossen)** — Modern Teams Chat-Log via UIA + CDP opt-in:
+  - Neue DLL `AiRecall.AppReader.Teams` mit `TeamsAppReader` (Read only, kein OnPoll — Window-orientiert, nicht Stream-orientiert)
+  - 3-Strategy-Active-Chat-Auflösung: CDP bevorzugt (wenn `UseCdpIfAvailable=true` + `/json/version` HTTP-Discovery erfolgreich) → UIA (TextPattern-Walk auf sichtbares Chat-Panel, immer verfügbar) → Title-Fallback (nur Title + Hinweis-Body)
+  - `TeamsUiaReader` (internal static, ~280 LoC): `ParseWindowTitle` für Format `"Chat | Alice - Microsoft Teams"`/`"Channel | #general - Microsoft Teams"`/etc., `IsTeamsChatWindow` + `TryGetActiveChat` via UIA TextPattern mit heuristischer Sender-Separation
+  - `TeamsCdpReader` (internal static, ~270 LoC): `HttpClient.GetAsync("/json/version")` + `ClientWebSocket.ConnectAsync` + `Runtime.evaluate(document.title + Chat-Panel-DOM)`; Cancellation/Timeout via `linkedCts.CancelAfter(CdpTimeoutMs)`
+  - `TeamsConfig` in `AppConfig` mit `Enabled`, `MaxContentKB=512`, `UseCdpIfAvailable=true`, `CdpEndpoint=http://localhost:9222`, `CdpTimeoutMs=1500`, `PreferredStrategy=Auto`, `PollIntervalSeconds=0`, `SkipChatPatterns`, `IncludeSenderPatterns`
+  - Persistenz-Schema: `capture/yyyy-MM-dd/ms-teams/HHmmss-{chatIdShort}.md` mit YAML-Frontmatter (kind=teams-chat, chatType, chatTitle, chatIdShort, source=teams-cdp|teams-uia|teams-title-fallback, strategy, senderCount, messageCount, isSelfIncluded, capturedAt, reader, readerVersion); `chatIdShort` = erste 8 Zeichen einer SHA256-Hash über `Title|Type|SenderSet` (deterministisch, "0" bei Empty-Input)
+  - 61 neue Tests (589 → 650 grün): 5 Config + 29 UIA (9 Facts + 4 Theories mit insgesamt 20 InlineData) + 10 CDP + 17 Reader (10 Facts + 1 Theory mit 7 InlineData)
 - [x] App-Reader: Word/Excel/PowerPoint (Spec 0004 Iter. Documents — UIA-only, Office nicht erforderlich; Tests grün, e2e-Smoke gegen Office ausstehend)
 - [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
 - [x] **Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen)**
@@ -172,6 +180,7 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0008-live-logviewer.md` | Live Logviewer Window (v1.0 abgeschlossen) |
 | `specs/0009-settings-dialog.md` | Settings-Dialog JSON-Editor (v1.0 abgeschlossen) |
 | `specs/0010-onenote-app-reader.md` | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only) |
+| `specs/0011-teams-app-reader.md` | Teams App-Reader (Spec 0011, Modern Teams only, UIA + CDP opt-in, 3-Strategy-Auflösung) |
 | `src/` | .NET-Solution-Projekte |
 | `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
 | `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
@@ -180,7 +189,7 @@ Ausführlich: `specs/0001-vision.md`
 | `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
 | `src/AiRecall.TrayApp/` | **MVP2 Tray-Icon-EXE (Spec 0006 v1.0)**: `NotifyIcon` + `TriggerSupervisor`-Wiring + `LogviewerWindow` (Spec 0008) + `SettingsDialog` (Spec 0009) |
 | `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
-| `src/AiRecall.AppReader.{Browser,Outlook,OneNote,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
+| `src/AiRecall.AppReader.{Browser,Outlook,OneNote,Teams,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
 | `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (416 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |

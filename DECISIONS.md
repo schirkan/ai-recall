@@ -5,6 +5,76 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-05 — Teams App-Reader (Spec 0011)
+
+Spec 0011 ist mit Commits `ec4631e` ... `237b457` abgeschlossen (Cluster 1–5;
+Cluster 6 = dieser Doku-Eintrag). Test-Count 589 → **650/650 grün** (+61).
+Modul komplett neu in `AiRecall.AppReader.Teams` (4 Files, 0 Warnings, 0 Errors).
+
+**Direktive Martin 2026-07-05:** „Nur das neue Teams — nicht legacy, nicht graph."
+Verbindlich für Spec 0011: Modern Teams (Electron, `ms-teams.exe`) + UIA + CDP opt-in.
+Legacy Teams Classic (`Microsoft Teams` ProgID COM) und Graph API (OAuth) explizit
+ausgeschlossen.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | DLL-Struktur | **Neue DLL `AiRecall.AppReader.Teams.dll`** (analog Outlook/OneNote) | Eine DLL pro App-Familie. Plugin-Discovery via `AppReaderRegistry` automatisch. `UseWPF=true` für UIA + WebSocket. |
+| 2 | Architektur-Modus | **Read-only (kein `OnPoll`)** | Modern Teams synchronisiert serverseitig, lokal sichtbar = was User sieht. Read reicht. `SupportsBackgroundPolling = false`. `PollIntervalSeconds = 0` im Default. |
+| 3 | Active-Chat-Strategie | **3-stufige Kette: CDP → UIA → Title-Fallback** | CDP liefert reichhaltigen Chat-Content (HTML→MD, mit Reply-Threads, Sender-Highlighting), erfordert aber User-Mitarbeit (Teams mit `--remote-debugging-port` starten). UIA ist immer verfügbar, aber Plain-Text. Title-Fallback wenn beides scheitert. Konfigurierbar via `TeamsConfig.PreferredStrategy` (Cdp / Uia / Auto-Default). |
+| 4 | CDP-Discovery | **HTTP-GET auf `/json/version` + `ClientWebSocket` zu `webSocketDebuggerUrl`** | Built-in `System.Net.WebSockets` aus .NET 8 — kein NuGet-Paket, keine externe Library. Discovery-Failure (kein aktiver Debug-Server) → Fallback auf UIA, kein Hard-Fail. |
+| 5 | CDP-Timeout | **`CdpTimeoutMs` (Default 1500) via `CancellationTokenSource.CancelAfter(...)`** | Schutz gegen hängende WebSocket-Connections. Bei Timeout → Fallback auf UIA. |
+| 6 | UIA-Implementation | **Window-Title-Parser für Modern-Teams-Format** | Format: `"Chat | Alice - Microsoft Teams"` (1:1), `"Channel | #general - Microsoft Teams"` (Channel), `"Group Chat | Project Alpha - Microsoft Teams"` (Group), `"Meeting | Daily Standup - Microsoft Teams"` (Meeting). Zerlegt nach `|` als Trenner, `- Microsoft Teams` als Suffix. Edge-Case: kein Separator → `ChatName = title.Trim()`, `Suffix = ""`. |
+| 7 | Sender-Separation | **Heuristik im UIA-Pfad** (Plain-Text → Liste von `(Sender, Body)`) | UIA liefert nur geflashten Text ohne Struktur. Heuristik: Zeile mit Zeit-Prefix (`HH:mm` oder `Yesterday`) + nachfolgender Name → Message-Boundary. Reply-Threads fehlen in Iter. 1, CDP-Pfad liefert sie in Iter. 2. |
+| 8 | ChatID-Hash | **`ComputeChatId(Title, Type, SenderSet)` = SHA256 → erste 8 Hex-Zeichen** | Deterministisch: zwei Captures mit identischer Chat-Konstellation (gleicher Chat + gleiche Senders) → identischer `chatIdShort` → spätere Deduplikation möglich. Edge-Case `""` → `"0"` (defensiv, testbar). |
+| 9 | Persistenz-Schema | **`capture/yyyy-MM-dd/ms-teams/HHmmss-{chatIdShort}.md`** | Analog Outlook/OneNote. `chatIdShort` ersetzt die bei Teams nicht verfügbare eindeutige Message-ID. YAML-Frontmatter mit `kind=teams-chat`, `chatType`, `chatTitle`, `chatIdShort`, `source=teams-cdp|teams-uia|teams-title-fallback`, `strategy`, `senderCount`, `messageCount`, `isSelfIncluded`, `capturedAt`, `reader`, `readerVersion`. |
+| 10 | Title-Fallback-Body | **`(teams content unavailable, only title captured)`** | Klare Markierung im MD, dass nur der Title persistiert wurde. Verhindert Verwechslung mit leerem Chat. |
+| 11 | `TeamsContent` + `TeamsTitleInfo` als `public` | **`public sealed record`/`record`**, nicht internal | C# CS0051: `internal` types in `public` method signatures erzeugen Inconsistent-Accessibility-Error. Da `ParseWindowTitle` als `public static` exponiert wird (via `TeamsUiaReader`), müssen `TeamsTitleInfo`/`TeamsChatKind` ebenfalls `public` sein. |
+| 12 | `ChatTitleHint` als `init`-Property | **`public string ChatTitleHint { get; init; }`** | Erlaubt Set im Record-Konstruktor + `with { ChatTitleHint = ... }`, blockiert externe Mutation. |
+| 13 | `SkipChatPatterns` + `IncludeSenderPatterns` | **Case-insensitive Substring-Filter** (Listen, User-konfigurierbar) | `SkipChatPatterns` filtert Chats anhand des Title (z. B. „Bots", „Notifications"). `IncludeSenderPatterns` = Whitelist (leer = alle Sender). Beide im Frontmatter dokumentiert, nicht im MD-Body. |
+| 14 | Test-Strategie | **Pure-Function-First, Read-Pfad nicht unit-testbar** (ohne installiertes Teams + CDP-Endpoint) | `ParseWindowTitle`, `IsTeamsChatWindow`, `ChatIdShort`, `BuildFullMarkdown` voll testbar. `Read()` mit CDP-Endpoint als `[Trait("Integration", "Teams")]` markiert — auf Martins Workstation lauffähig, in CI geskippt. `TryFindEndpoint` mit Mock-`HttpMessageHandler` testbar. |
+| 15 | CDP-Mock-Pattern | **HttpMessageHandler-Subclass** statt WireMock oder externer Library | Minimaler Overhead, vollständig in-process testbar. Mock liefert `/json/version`-Response mit `webSocketDebuggerUrl`; Test simuliert WebSocket-Connect ohne echten Server. |
+| 16 | `Microsoft.Web.WebView2` Dependency | **NICHT erforderlich** | `System.Net.WebSockets` ist built-in in .NET 8 und reicht für CDP-Client. WebView2 wäre für ein Browser-Embedding, nicht für ein DevTools-Client. |
+
+### Tests
+
+- 61 neue Tests in 4 Files: `TeamsConfigTests` (5), `TeamsUiaReaderTests` (29 = 9 Facts + 4 Theories mit 20 InlineData), `TeamsCdpReaderTests` (10), `TeamsAppReaderTests` (17 = 10 Facts + 1 Theory mit 7 InlineData).
+- Test-Count gesamt: **650/650 grün** (vorher 589).
+- Teams-Modul: **0 Warnings, 0 Errors**.
+- Cluster: Spec + Config (Cluster 1, `ec4631e`) → UiaReader + Skeleton (Cluster 2, `678c8bd`) → CdpReader (Cluster 3, `d7eec32`) → AppReader (Cluster 4, `95d0a49`) → Tests (Cluster 5, `237b457`) — 5 thematische Commits + Docs-Update (Cluster 6, dieser Eintrag).
+
+### Lessons Learned (Cluster 1–5)
+
+- **C# CS0051 — `internal` types in `public` method signatures**: Lösung ist `public` record/enum für die Typen, die in `public` Methoden-Signaturen auftauchen. Records und Enums, die in `public` API exponiert werden, müssen `public` sein, auch wenn sie nur intern genutzt werden.
+- **`init`-Accessormodifier** auf Records für schreibgeschützten Test-State (`CS8856` Fix).
+- **Title-Parser Edge-Case** „kein Separator": erst `IndexOf(" | ")` suchen, wenn `-1` → `ChatName = title.Trim()` ohne Separator-Injection. Expliziter Test deckt den Edge-Case dauerhaft ab.
+- **`ChatIdShort("")` → `"0"`** als defensive Edge-Case-Behandlung (verhindert kryptische Filename-Kollisionen mit deterministischem SHA256-Output).
+- **xUnit `Record.ExceptionAsync` mit `async () => return await ...`-Lambda** funktioniert nicht zuverlässig für saubere Stack-Traces → try/catch direkt im Test.
+- **CSP-Search für Test-Pfade** `AppContext.BaseDirectory` Walk-Up (`AiRecall.sln` suchen statt fixer `../../../../../..`-Navigation) — robust gegen CI vs. lokales net8.0 vs. net8.0-windows.
+- **`UseWPF=true` im csproj** für UIA + WebSocket-Client (analog Documents-Reader, Iter. 2).
+
+### Verworfen
+
+- **Legacy Teams Classic** (`Microsoft Teams` ProgID COM): seit 2023 deprecated. Martin-Direktive 2026-07-05: „Nur das neue Teams — nicht legacy, nicht graph."
+- **Graph API** (REST/OAuth): async-Parallelität, Token-Lifecycle, OnPoll-Pattern passt nicht zum synchronen `IAppReader.Read()`. Out-of-Scope, wäre Spec 0014.
+- **Tab-Wechsel-Erkennung** während Capture: pro Read-Call nur das aktuell aktive Tab, Multi-Tab-Chats = Multi-Captures (deterministisch via ChatID-Hash deduplizierbar).
+- **Reply-Threads-Struktur im UIA-Pfad**: UIA liefert nur geflashten Text, keine Hierarchie. CDP-Pfad mit DOM-Analyse könnte Threads in Iter. 2 liefern.
+- **Inline-Media-Persistierung** (Bilder, GIFs, Voice Messages): UIA liefert nur Alt-Text, CDP liefert DOM-URLs. Beide in Plain-Text/MD, keine File-Persistierung.
+- **Reactions/Emojis**: Iter. 2 via CDP-DOM-Analyse.
+- **File-Attachments aus Teams-Chats**: nicht im Scope.
+- **Eigener WebSocket-Pool**: einmalige Connection pro Read reicht; bei nächstem Read wird ohnehin ein neuer Reader gebaut.
+
+### Auswirkungen
+
+- Neue DLL: `AiRecall.AppReader.Teams` (ProjectRef → `AiRecall.AppReader.Base` + `AiRecall.Core`)
+- Neue Config-Sektion `appReader.teams`: `Enabled`, `MaxContentKB`, `UseCdpIfAvailable`, `CdpEndpoint`, `CdpTimeoutMs`, `PreferredStrategy`, `PollIntervalSeconds`, `SkipChatPatterns`, `IncludeSenderPatterns`
+- Neuer Persistenz-Subdir: `capture/yyyy-MM-dd/ms-teams/`
+- `AppReaderRegistry` pickt `AiRecall.AppReader.Teams.dll` automatisch via Reflection auf (`AppReaderRegistry.LoadFromDirectory`-Pattern)
+- `AiRecall.sln` um neue Project-Reference erweitert
+- `AiRecall.Core.Tests.csproj` um `<ProjectReference>` auf Teams-Modul erweitert
+- Commits: `ec4631e` (Spec+Config), `678c8bd` (UiaReader+Skeleton), `d7eec32` (CdpReader), `95d0a49` (AppReader), `237b457` (Tests), `(TBD)` (Cluster 6 = Doku)
+
+---
+
 ## 2026-07-05 — OneNote App-Reader (Spec 0010)
 
 OneNote als dritte COM-bindungende App-Familie (nach Outlook + Documents).

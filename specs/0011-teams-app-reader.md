@@ -1,7 +1,7 @@
 # 0011 — Teams App-Reader
 
-> **Status:** Draft (Cluster 1 in Arbeit)
-> **Implements:** TN-1 .. TN-8 (App-Reader-Erweiterung für Microsoft Teams Modern)
+> **Status:** Abgeschlossen (Cluster 1–6, alle 5+1 Commits gepusht)
+> **Implements:** TN-1 .. TN-12 (App-Reader-Erweiterung für Microsoft Teams Modern)
 > **Pattern:** analog Outlook App-Reader (Spec 0004 Iter. 3) + OneNote App-Reader (Spec 0010)
 > **Owner:** Martin + Pia
 > **Branch:** `main`
@@ -260,6 +260,32 @@ Test-Trait-Marker analog Outlook/OneNote:
 - Teams Voice Messages (Media-Datei-Persistierung).
 - Reactions/Emojis (in Iter. 2 via CDP-DOM-Analyse).
 - File-Attachments aus Teams-Chats.
+
+## Acceptance Criteria
+
+Stand 2026-07-05 (Cluster 6 Doku-Abschluss, geprüft gegen Code + Tests):
+
+- [x] **AC-T1** — Spec 0011 Datei angelegt mit Direktiven-Block, Motivation, Architektur, 3-Strategy-Auflösung, Komponenten, Persistenz-Schema, Test-Plan, Out-of-Scope, Referenzen.
+- [x] **AC-T2** — `TeamsConfig` POCO in `AppConfig` eingebunden mit allen 9 Feldern (Enabled, MaxContentKB=512, UseCdpIfAvailable=true, CdpEndpoint=http://localhost:9222, CdpTimeoutMs=1500, PreferredStrategy=Auto, PollIntervalSeconds=0, SkipChatPatterns=[], IncludeSenderPatterns=[]). JSON-Section in `default-config.json` synchron.
+- [x] **AC-T3** — `TeamsUiaReader` (internal static) parst Window-Title-Format `"Chat | Alice - Microsoft Teams"` / `"Channel | #general - Microsoft Teams"` / `"Group Chat | ..."` / `"Meeting | ..."` korrekt. `IsTeamsChatWindow` + `TryGetActiveChat` über UIA `TextPattern`. `ParseWindowTitle` mit Edge-Case „kein Separator" (singulärer Title wird nicht künstlich gesplittet).
+- [x] **AC-T4** — `TeamsCdpReader` (internal static) entdeckt Endpoint via `HttpClient.GetAsync("/json/version")`, baut `ClientWebSocket` zu `webSocketDebuggerUrl`, führt `Runtime.evaluate` auf `document.title` + Chat-Panel-DOM aus. Timeout via `CancellationTokenSource.CancelAfter(CdpTimeoutMs)`.
+- [x] **AC-T5** — `TeamsAppReader : AppReaderBase` mit `SupportedProcesses = ["ms-teams"]`, `SupportsBackgroundPolling = false`, `DisplayName = "Microsoft Teams (UIA; CDP opt-in)"`. 3-Strategy-Read-Pipeline (Cdp→Uia→Title-Fallback). `BuildFullMarkdown` internal helper mit YAML-Frontmatter + `kind=teams-chat`, `chatType`, `chatTitle`, `chatIdShort`, `source=teams-cdp|teams-uia|teams-title-fallback`, `strategy`, `senderCount`, `messageCount`, `isSelfIncluded`, `capturedAt`, `reader`, `readerVersion`.
+- [x] **AC-T6** — Persistenz-Schema `capture/yyyy-MM-dd/ms-teams/HHmmss-{chatIdShort}.md` mit `chatIdShort` = SHA256(Title|Type|SenderSet) ersten 8 Hex-Zeichen. Edge-Case `""` → `"0"`.
+- [x] **AC-T7** — `AppReaderRegistry.LoadFromDirectory` pickt `AiRecall.AppReader.Teams.dll` automatisch via Reflection auf (`AiRecall.AppReader.*.dll`-Pattern). Kein manueller Registrierungs-Schritt.
+- [x] **AC-T8** — `TeamsConfigTests` (5 Tests): Defaults, JSON-Deserialisierung, Missing-Section-Default, Range-Validation, Enum-Parse (PreferredStrategy).
+- [x] **AC-T9** — `TeamsUiaReaderTests` (29 Tests = 9 Facts + 4 Theories mit 20 InlineData): Title-Parser alle 4 Formate (1:1/Group/Channel/Meeting), Edge-Cases (Em-Dash-Toleranz, kein Separator, mehrzeilig), `ChatIdShort("")` → `"0"`, `ChatIdShort` Determinismus.
+- [x] **AC-T10** — `TeamsCdpReaderTests` (10 Tests): Endpoint-Discovery mit Mock-`HttpMessageHandler`, WebSocket-Connect-Failure-Pfad, Cancellation-Test mit `try/catch`-Pattern, JSON-Parse-Failure, Timeout-Behavior, `webSocketDebuggerUrl` Extraction.
+- [x] **AC-T11** — `TeamsAppReaderTests` (17 Tests = 10 Facts + 1 Theory mit 7 InlineData): Strategy-Auflösung Cdp/Uia/Auto, Fallback-Chain-Verifikation, `BuildFullMarkdown`-YAML-Frontmatter-Format, internal Test-Ctor mit Mock-Logger, `SkipChatPatterns`-Filter, `IncludeSenderPatterns`-Filter, `Title-Fallback`-Body `(teams content unavailable, only title captured)`.
+- [x] **AC-T12** — `AiRecall.sln` + `AiRecall.Core.Tests.csproj` um `<ProjectReference>` auf `AiRecall.AppReader.Teams` erweitert. Build 0 Warnings, 0 Errors. Test-Count 589 → **650/650 grün** (+61 neue Teams-Tests).
+
+### Out-of-Scope (für Iter. 1, explizit für Iter. 2 vorgesehen)
+
+- [ ] **AC-T-Iter2-1** — Echte E2E-Smoke-Tests gegen installiertes Modern Teams + aktiven CDP-Endpoint via `[Trait("Integration", "Teams")]` (analog Outlook/OneNote-Pattern). Auf Martins Workstation lauffähig, in CI geskippt.
+- [ ] **AC-T-Iter2-2** — Reply-Thread-Hierarchie im CDP-Pfad via DOM-Analyse (`<div data-tid="messageReplies">` etc.).
+- [ ] **AC-T-Iter2-3** — Reactions/Emojis-Extraktion (CDP-DOM: `<reactions-pill>`-Elemente).
+- [ ] **AC-T-Iter2-4** — File-Attachments aus Teams-Chats (CDP-DOM: `<file-card>`-Elemente + Download-URL).
+
+---
 
 ## Referenzen
 

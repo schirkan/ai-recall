@@ -38,6 +38,11 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
     Windows-foreach + Active, GetHierarchy + isCurrentlyViewed="true", null-Fallback);
     Page-XML (xs2013)→MD-Konvertierung mit Tag/Image/Table/InkContent-Mapping;
     Read-only (kein Background-Poll — Page-orientiert)
+  - **Teams** ([Spec 0011](./specs/0011-teams-app-reader.md)): aktiver Modern-Teams-Chat
+    (1:1/Group/Channel/Meeting) via UIA (immer verfügbar, TextPattern auf Chat-Panel)
+    + CDP opt-in (wenn mit `--remote-debugging-port` gestartet, `Runtime.evaluate`
+    auf Chat-Panel-DOM); 3-Strategy-Auflösung CDP→UIA→Title-Fallback; Sender-Separation
+    heuristisch; Read-only (kein Background-Poll)
   - **Word/Excel/PowerPoint** ([Spec 0004 Iter. 2](./specs/0004-app-reader.md#iter-2-2026-07-04--com-interop-für-office--pdf-viewer-martin)):
     UIA + optional COM-Interop (late binding, ProgID + P/Invoke) für Pfad +
     Inhalt; COM-Fallback auf UIA+Title
@@ -121,7 +126,7 @@ Hilfreich für Skripte und headless Tests.
 dotnet test
 ```
 
-Aktuell **589/589 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + OneNote + MVP2-Basis + Conversion + TrayApp-PureLogic).
+Aktuell **650/650 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + OneNote + Teams + MVP2-Basis + Conversion + TrayApp-PureLogic).
 
 ## Konfiguration
 
