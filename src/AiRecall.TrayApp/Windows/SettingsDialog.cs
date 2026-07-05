@@ -155,7 +155,7 @@ public sealed class SettingsDialog : Form
         // Properties
         foreach (var prop in section.Properties)
         {
-            var info = PropertyEditorFactory.GetEditor(prop);
+            var info = PropertyEditorFactory.GetEditor(prop, section.Instance);
 
             // Label
             var lbl = new Label
@@ -240,7 +240,7 @@ public sealed class SettingsDialog : Form
         foreach (var prop in section.Properties)
         {
             if (!_editors.TryGetValue(prop.Name, out var control)) continue;
-            var info = PropertyEditorFactory.GetEditor(prop);
+            var info = PropertyEditorFactory.GetEditor(prop, section.Instance);
             if (info.Parser is null) continue;
 
             try

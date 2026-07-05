@@ -14,6 +14,14 @@ namespace AiRecall.Trigger;
 ///     <item><c>ParseValue(text)</c> — parses edited text back to the property type</item>
 ///   </list>
 ///
+/// The descriptor + the owning <paramref name="instance"/> must both be
+/// passed because the descriptor typically comes from
+/// <c>TypeDescriptor.GetProperties(instance)</c> (instance-bound); calling
+/// <c>prop.GetValue(null)</c> on such a descriptor returns the type's
+/// default value, not the instance's current value — which would silently
+/// overwrite real config with defaults on save. See bug-bash 2026-07-05
+/// finding I-1.
+///
 /// Lives outside the WinForms UI so it can be unit-tested.
 /// </summary>
 public static class PropertyEditorFactory
@@ -29,47 +37,47 @@ public static class PropertyEditorFactory
 
     public readonly record struct EditorInfo(EditorKind Kind, string DisplayText, Func<string, object?>? Parser);
 
-    public static EditorInfo GetEditor(PropertyDescriptor prop)
+    public static EditorInfo GetEditor(PropertyDescriptor prop, object? instance)
     {
         ArgumentNullException.ThrowIfNull(prop);
 
-        if (prop.IsReadOnly) return new EditorInfo(EditorKind.ReadOnly, prop.GetValue(null)?.ToString() ?? "", null);
+        if (prop.IsReadOnly) return new EditorInfo(EditorKind.ReadOnly, prop.GetValue(instance)?.ToString() ?? "", null);
 
         var type = prop.PropertyType;
 
         if (type == typeof(bool))
         {
-            var v = (bool)prop.GetValue(null)!;
+            var v = (bool)prop.GetValue(instance)!;
             return new EditorInfo(EditorKind.CheckBox, v ? "true" : "false", s => bool.Parse(s));
         }
 
         if (type == typeof(int))
         {
-            var v = (int)prop.GetValue(null)!;
+            var v = (int)prop.GetValue(instance)!;
             return new EditorInfo(EditorKind.TextBox, v.ToString(), s => int.Parse(s));
         }
 
         if (type == typeof(long))
         {
-            var v = (long)prop.GetValue(null)!;
+            var v = (long)prop.GetValue(instance)!;
             return new EditorInfo(EditorKind.TextBox, v.ToString(), s => long.Parse(s));
         }
 
         if (type == typeof(string))
         {
-            var v = (string?)prop.GetValue(null) ?? "";
+            var v = (string?)prop.GetValue(instance) ?? "";
             return new EditorInfo(EditorKind.TextBox, v, s => s);
         }
 
         if (type.IsEnum)
         {
-            var v = prop.GetValue(null);
+            var v = prop.GetValue(instance);
             return new EditorInfo(EditorKind.ComboBox, v?.ToString() ?? "", s => Enum.Parse(type, s, ignoreCase: true));
         }
 
         if (type == typeof(List<string>) || (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>)))
         {
-            var list = (List<string>?)prop.GetValue(null);
+            var list = (List<string>?)prop.GetValue(instance);
             var joined = list is null ? "" : string.Join(", ", list);
             return new EditorInfo(EditorKind.ListStringTextBox, joined, s =>
             {

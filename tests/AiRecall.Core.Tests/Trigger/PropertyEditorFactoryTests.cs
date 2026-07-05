@@ -9,7 +9,8 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_Bool_ReturnsCheckBox()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "BoolProp", true));
+        var (prop, instance) = MakePropWithInstance("BoolProp", true);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.CheckBox, info.Kind);
         Assert.Equal("true", info.DisplayText);
         Assert.True((bool)info.Parser!("true")!);
@@ -18,7 +19,8 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_Int_ReturnsTextBox()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "IntProp", 42));
+        var (prop, instance) = MakePropWithInstance("IntProp", 42);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.TextBox, info.Kind);
         Assert.Equal("42", info.DisplayText);
         Assert.Equal(123, info.Parser!("123"));
@@ -27,7 +29,8 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_String_ReturnsTextBox()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "StringProp", "hello"));
+        var (prop, instance) = MakePropWithInstance("StringProp", "hello");
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.TextBox, info.Kind);
         Assert.Equal("hello", info.DisplayText);
     }
@@ -35,7 +38,8 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_Enum_ReturnsComboBox()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "EnumProp", FakeEnum.B));
+        var (prop, instance) = MakePropWithInstance("EnumProp", FakeEnum.B);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.ComboBox, info.Kind);
         Assert.Equal("B", info.DisplayText);
         Assert.Equal(FakeEnum.A, info.Parser!("a"));
@@ -45,7 +49,8 @@ public class PropertyEditorFactoryTests
     public void GetEditor_ListString_ReturnsListStringTextBox()
     {
         var list = new List<string> { "a", "b", "c" };
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "ListProp", list));
+        var (prop, instance) = MakePropWithInstance("ListProp", list);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.ListStringTextBox, info.Kind);
         Assert.Equal("a, b, c", info.DisplayText);
         var parsed = (List<string>)info.Parser!("x, y, z")!;
@@ -55,7 +60,8 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_ReadOnly_ReturnsReadOnlyKind()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "ReadOnlyProp", "x", readOnly: true));
+        var (prop, instance) = MakePropWithInstance("ReadOnlyProp", "x", readOnly: true);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.ReadOnly, info.Kind);
         Assert.Null(info.Parser);
     }
@@ -63,11 +69,32 @@ public class PropertyEditorFactoryTests
     [Fact]
     public void GetEditor_UnsupportedType_ReturnsReadOnlyKind()
     {
-        var info = PropertyEditorFactory.GetEditor(MakeProp(typeof(FakeConfig), "GuidProp", Guid.NewGuid()));
+        var (prop, instance) = MakePropWithInstance("GuidProp", Guid.NewGuid());
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
         Assert.Equal(PropertyEditorFactory.EditorKind.ReadOnly, info.Kind);
     }
 
-    private static PropertyDescriptor MakeProp(Type type, string name, object value, bool readOnly = false)
+    /// <summary>
+    /// I-1 Regressions-Test (Bug-Bash 2026-07-05): Der Editor MUSS die Instance-Werte
+    /// sehen, NICHT die Type-Defaults. Wenn das Production-Code-Pattern
+    /// (prop.GetValue(null)) wieder eingeführt wird, bricht dieser Test.
+    /// </summary>
+    [Fact]
+    public void GetEditor_ReadsInstanceValue_NotDefault()
+    {
+        // Instance hat ungewöhnliche Werte — wenn der Editor "0" / "" / "false"
+        // zurückgibt, liest er die Defaults statt der Instance.
+        var instance = new FakeConfig { IntProp = 12345, StringProp = "instance-value", BoolProp = true };
+        var intProp = TypeDescriptor.GetProperties(instance).Find("IntProp", ignoreCase: false)!;
+        var strProp = TypeDescriptor.GetProperties(instance).Find("StringProp", ignoreCase: false)!;
+        var boolProp = TypeDescriptor.GetProperties(instance).Find("BoolProp", ignoreCase: false)!;
+
+        Assert.Equal("12345", PropertyEditorFactory.GetEditor(intProp, instance).DisplayText);
+        Assert.Equal("instance-value", PropertyEditorFactory.GetEditor(strProp, instance).DisplayText);
+        Assert.Equal("true", PropertyEditorFactory.GetEditor(boolProp, instance).DisplayText);
+    }
+
+    private static (PropertyDescriptor prop, FakeConfig instance) MakePropWithInstance(string name, object? value, bool readOnly = false)
     {
         var instance = new FakeConfig();
         var prop = TypeDescriptor.GetProperties(instance).Find(name, ignoreCase: false)!;
@@ -79,8 +106,9 @@ public class PropertyEditorFactoryTests
         {
             prop.SetValue(instance, value);
         }
-        // We need a property whose value comes from the instance we set
-        return new InstancePropertyDescriptor(instance, prop);
+        // Echte PropertyDescriptor zurückgeben (instance-bound via TypeDescriptor.GetProperties(instance)).
+        // KEIN InstancePropertyDescriptor-Wrapper mehr — der hat den Bug-bash-Fund maskiert.
+        return (prop, instance);
     }
 
     private enum FakeEnum { A, B, C }
@@ -120,22 +148,4 @@ public class PropertyEditorFactoryTests
     /// uses the instance's actual values, but we need a clean way to set a value
     /// and then get the right value back.
     /// </summary>
-    private sealed class InstancePropertyDescriptor : PropertyDescriptor
-    {
-        private readonly PropertyDescriptor _inner;
-        private readonly object _instance;
-        public InstancePropertyDescriptor(object instance, PropertyDescriptor inner) : base(inner)
-        {
-            _instance = instance;
-            _inner = inner;
-        }
-        public override bool IsReadOnly => _inner.IsReadOnly;
-        public override Type PropertyType => _inner.PropertyType;
-        public override Type ComponentType => _inner.ComponentType;
-        public override object? GetValue(object? component) => _inner.GetValue(_instance);
-        public override void SetValue(object? component, object? value) => _inner.SetValue(_instance, value);
-        public override bool CanResetValue(object component) => _inner.CanResetValue(_instance);
-        public override void ResetValue(object component) => _inner.ResetValue(_instance);
-        public override bool ShouldSerializeValue(object component) => _inner.ShouldSerializeValue(_instance);
-    }
 }
