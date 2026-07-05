@@ -26,6 +26,7 @@ public sealed class SettingsDialog : Form
     private readonly Button _cancelButton;
     private readonly Button _reloadButton;
     private readonly Dictionary<string, Control> _editors = new(StringComparer.OrdinalIgnoreCase);
+    private ConfigSectionDescriptor? _activeSection;
 
     public SettingsDialog(AppConfig config, Action<AppConfig>? onSave = null)
     {
@@ -100,6 +101,7 @@ public sealed class SettingsDialog : Form
     private void PopulateTree()
     {
         _tree.Nodes.Clear();
+        _activeSection = null;
         var sections = ConfigSchemaReflection.GetTopLevelSections(_workingConfig);
         foreach (var section in sections)
         {
@@ -119,10 +121,16 @@ public sealed class SettingsDialog : Form
 
     private void OnTreeNodeSelected(object? sender, TreeViewEventArgs e)
     {
-        if (e.Node?.Tag is ConfigSectionDescriptor section)
+        if (e.Node?.Tag is not ConfigSectionDescriptor section) return;
+
+        // Erst Edits der VORHER sichtbaren Sektion in _workingConfig übernehmen,
+        // damit sie bei Save nicht verloren gehen.
+        if (_activeSection is not null && !ReferenceEquals(_activeSection, section))
         {
-            RenderSection(section);
+            ApplyEditorsToSection(_activeSection);
         }
+        _activeSection = section;
+        RenderSection(section);
     }
 
     private void RenderSection(ConfigSectionDescriptor section)
@@ -205,9 +213,9 @@ public sealed class SettingsDialog : Form
     {
         try
         {
-            // Read all editor values back into _workingConfig
-            var currentSection = _tree.SelectedNode?.Tag as ConfigSectionDescriptor;
-            if (currentSection is not null) ApplyEditorsToSection(currentSection);
+            // Edits der aktuell sichtbaren Sektion übernehmen (andere Sections
+            // wurden bereits beim TreeView-Wechsel in OnTreeNodeSelected übernommen).
+            if (_activeSection is not null) ApplyEditorsToSection(_activeSection);
 
             // Save atomic to user-config path
             var userPath = UserConfigLocator.GetUserConfigPath();

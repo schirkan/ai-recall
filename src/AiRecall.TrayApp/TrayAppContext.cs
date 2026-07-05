@@ -1,4 +1,5 @@
 using AiRecall.Core.Configuration;
+using AiRecall.TrayApp.Windows;
 using AiRecall.Trigger;
 using Serilog;
 
@@ -110,10 +111,18 @@ public sealed class TrayAppContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _trayIcon.Dispose();
-        _supervisor.Dispose();
-        LogSink.Dispose();
-        Log.CloseAndFlush();
+        try
+        {
+            _trayIcon.Dispose();
+            _supervisor.Dispose();
+        }
+        finally
+        {
+            // LogSink + Logger IMMER disposen, auch wenn oben was wirft
+            // (Tesseract tessdata-File-Handles, Serilog-Buffer, etc.)
+            try { LogSink.Dispose(); } catch (Exception ex) { Serilog.Log.Warning(ex, "LogSink dispose failed"); }
+            Serilog.Log.CloseAndFlush();
+        }
         base.ExitThreadCore();
     }
 }

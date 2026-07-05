@@ -21,7 +21,7 @@ public sealed class LogviewerWindow : Form
     private readonly ToolStripTextBox _searchTextBox;
     private readonly ToolStripButton _pauseButton;
     private readonly ToolStripButton _clearButton;
-    private readonly ToolStripCheckBox _autoScrollCheck;
+    private readonly ToolStripButton _autoScrollCheck;
     private readonly ToolStripStatusLabel _statusLabel;
     private readonly BindingList<LogEventEntry> _bindingList;
     private bool _suppressGridRefresh;
@@ -74,7 +74,9 @@ public sealed class LogviewerWindow : Form
         toolbar.Items.Add(_clearButton);
 
         toolbar.Items.Add(new ToolStripSeparator());
-        _autoScrollCheck = new ToolStripCheckBox { Checked = true, Text = "Auto-Scroll" };
+        // .NET 8 hat kein ToolStripCheckBox — ToolStripButton mit CheckOnClick ist
+        // die kanonische Alternative (gleiches Checked-Bool, gleiches Verhalten).
+        _autoScrollCheck = new ToolStripButton { CheckOnClick = true, Checked = true, Text = "Auto-Scroll" };
         toolbar.Items.Add(_autoScrollCheck);
 
         // DataGridView

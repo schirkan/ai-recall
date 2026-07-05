@@ -107,6 +107,7 @@ public sealed class TrayIconController : IDisposable
             catch (Exception ex)
             {
                 Log.Error(ex, "Start failed from menu");
+                ShowError("Failed to start recording", ex);
             }
         };
         _stopRecordingItem.Click += (_, _) =>
@@ -159,8 +160,20 @@ public sealed class TrayIconController : IDisposable
             catch (Exception ex)
             {
                 Log.Error(ex, "Toggle-Start failed");
+                ShowError("Failed to start recording", ex);
             }
         }
+    }
+
+    private static void ShowError(string title, Exception ex)
+    {
+        // Fire-and-forget; User sieht's, kann's wegklicken, läuft auf UI-Thread
+        // (Click-Handler laufen auf UI-Thread)
+        MessageBox.Show(
+            $"{title}\n\n{ex.GetType().Name}: {ex.Message}",
+            "AiRecall",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
     }
 
     private void ApplyState(TrayIconState state)
