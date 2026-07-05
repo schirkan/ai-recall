@@ -151,6 +151,79 @@ public class TriggerSupervisorTests
         }
     }
 
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-4 Regressions-Test: Wenn die Factory beim Start
+    /// wirft, darf CurrentConfig NICHT auf die neue Config zeigen — sonst
+    /// haette der Supervisor einen CurrentConfig ohne zugehoerigen Service.
+    /// </summary>
+    [Fact]
+    public void Start_FactoryThrows_CurrentConfigStaysNull()
+    {
+        var (s, _) = MakeSupervisor(throwOnStart: true);
+        using (s)
+        {
+            Assert.Throws<InvalidOperationException>(() => s.Start(MinimalConfig()));
+            Assert.Null(s.CurrentConfig); // bleibt auf Initialwert (null) bei Erststart
+            Assert.Null(s.Service);
+            Assert.Equal(TriggerState.Crashed, s.State);
+        }
+    }
+
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-4 Erweiterung: Wenn nach einem erfolgreichen
+    /// Start ein weiterer Start (mit dazwischen liegendem Stop) mit throwender
+    /// Factory fehlschlaegt, soll der CurrentConfig-Wert aus dem ersten
+    /// erfolgreichen Start erhalten bleiben.
+    /// </summary>
+    [Fact]
+    public void Start_FactoryThrowsAfterSuccess_KeepsLastGoodCurrentConfig()
+    {
+        var factory = new FakeTriggerServiceFactory();
+        using var s = new TriggerSupervisor(NullLogger, factory.Create);
+
+        var firstConfig = MinimalConfig();
+        s.Start(firstConfig);
+        Assert.Same(firstConfig, s.CurrentConfig);
+
+        // Stop, dann mit throwender Factory starten
+        s.Stop();
+        factory.ThrowOnStart = true;
+        Assert.Throws<InvalidOperationException>(() => s.Start(MinimalConfig()));
+
+        // Nach Cleanup-Dispose ist der Service weg, aber CurrentConfig
+        // bleibt auf dem letzten guten Wert.
+        Assert.Null(s.Service);
+        Assert.Equal(TriggerState.Crashed, s.State);
+        Assert.Same(firstConfig, s.CurrentConfig); // bleibt!
+    }
+
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-5 Regressions-Test: Ein werfender StateChanged-
+    /// Handler darf die State-Machine nicht zerschiessen. Nachfolgende
+    /// Transitions muessen weiter funktionieren.
+    /// </summary>
+    [Fact]
+    public void StateChanged_HandlerThrows_StateMachineSurvives()
+    {
+        var (s, _) = MakeSupervisor();
+        using (s)
+        {
+            var afterThrowTransitions = 0;
+            s.StateChanged += (_, _) => throw new InvalidOperationException("handler boom");
+            s.StateChanged += (_, _) => afterThrowTransitions++; // soll trotzdem laufen
+
+            s.Start(MinimalConfig()); // Starting -> Running, beide Handler rufen
+
+            Assert.Equal(TriggerState.Running, s.State);
+            // Zweiter Handler hat jede Transition mitgezaehlt, trotz Throw des ersten
+            Assert.Equal(2, afterThrowTransitions); // Starting, Running
+
+            s.Stop();
+            Assert.Equal(TriggerState.Stopped, s.State);
+            Assert.Equal(4, afterThrowTransitions); // + Stopping, Stopped
+        }
+    }
+
     [Fact]
     public void Dispose_StopsAndDisposesService()
     {

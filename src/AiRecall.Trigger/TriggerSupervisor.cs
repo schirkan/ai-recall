@@ -110,11 +110,16 @@ public sealed class TriggerSupervisor : IDisposable
         }
 
         SetState(TriggerState.Starting);
+        // Bug-Bash 2026-07-05 I-4: Lokale Variable, damit wir im Catch-Block
+        // den (halb-initialisierten) Service disposen koennen, auch wenn
+        // service.Start() wirft und _service noch nicht zugewiesen ist.
+        ITriggerService? service = null;
         try
         {
+            service = _serviceFactory(config, _logger);
+            service.Start();
+            _service = service;
             _currentConfig = config;
-            _service = _serviceFactory(config, _logger);
-            _service.Start();
             SetState(TriggerState.Running);
         }
         catch (Exception ex)
@@ -122,9 +127,11 @@ public sealed class TriggerSupervisor : IDisposable
             _logger.Error(ex, "TriggerSupervisor.Start failed");
             CrashCount++;
             LastCrashAt = DateTime.UtcNow;
-            try { _service?.Dispose(); }
+            try { service?.Dispose(); }
             catch (Exception disposeEx) { _logger.Warning(disposeEx, "TriggerSupervisor.Start: cleanup dispose threw"); }
             _service = null;
+            // _currentConfig bewusst NICHT aendern — bleibt auf letztem
+            // bekannten guten Wert (oder null bei Erststart).
             SetState(TriggerState.Crashed);
             throw;
         }
@@ -176,7 +183,27 @@ public sealed class TriggerSupervisor : IDisposable
         var oldState = State;
         State = newState;
         _logger.Information("TriggerSupervisor state {Old} -> {New}", oldState, newState);
-        StateChanged?.Invoke(this, new TriggerStateChangedEventArgs(oldState, newState));
+
+        // Bug-Bash 2026-07-05 I-5: Jeden Handler EINZELN aufrufen, weil
+        // Multicast-Delegates beim ersten Throw abbrechen und nachfolgende
+        // Handler nicht mehr aufgerufen werden. Handler-Snapshot vermeidet
+        // NullRef, wenn ein Subscriber sich waehrend des Invoke abmeldet.
+        var handler = StateChanged;
+        if (handler is not null)
+        {
+            var args = new TriggerStateChangedEventArgs(oldState, newState);
+            foreach (var d in handler.GetInvocationList())
+            {
+                try
+                {
+                    ((EventHandler<TriggerStateChangedEventArgs>)d).Invoke(this, args);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Error(ex, "TriggerSupervisor.StateChanged handler threw; state still {New}", newState);
+                }
+            }
+        }
     }
 
     public void Dispose()
