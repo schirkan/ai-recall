@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRecall.TrayApp", "src\AiR
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRecall.AppReader.OneNote", "src\AiRecall.AppReader.OneNote\AiRecall.AppReader.OneNote.csproj", "{77EB5683-1E60-41A4-BBF1-32CE2C7E7D5A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiRecall.AppReader.Teams", "src\AiRecall.AppReader.Teams\AiRecall.AppReader.Teams.csproj", "{9422898D-F08E-4B17-BA30-0600C95D9067}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -199,6 +201,18 @@ Global
 		{77EB5683-1E60-41A4-BBF1-32CE2C7E7D5A}.Release|x64.Build.0 = Release|Any CPU
 		{77EB5683-1E60-41A4-BBF1-32CE2C7E7D5A}.Release|x86.ActiveCfg = Release|Any CPU
 		{77EB5683-1E60-41A4-BBF1-32CE2C7E7D5A}.Release|x86.Build.0 = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|x64.Build.0 = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Debug|x86.Build.0 = Debug|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|x64.ActiveCfg = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|x64.Build.0 = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|x86.ActiveCfg = Release|Any CPU
+		{9422898D-F08E-4B17-BA30-0600C95D9067}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -217,5 +231,6 @@ Global
 		{9607D5E6-13D2-40E3-96BF-DDDCB8658188} = {470EB99E-15F3-4526-B246-DE744DFAE7EB}
 		{9454E3C9-9EB9-45AB-A3FF-466CDCE9C844} = {470EB99E-15F3-4526-B246-DE744DFAE7EB}
 		{77EB5683-1E60-41A4-BBF1-32CE2C7E7D5A} = {470EB99E-15F3-4526-B246-DE744DFAE7EB}
+		{9422898D-F08E-4B17-BA30-0600C95D9067} = {470EB99E-15F3-4526-B246-DE744DFAE7EB}
 	EndGlobalSection
 EndGlobal
