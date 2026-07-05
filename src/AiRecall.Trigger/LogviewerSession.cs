@@ -69,10 +69,11 @@ public sealed class LogviewerSession : IDisposable
 
     private void OnSinkEventEmitted(object? sender, LogEventEntry entry)
     {
-        if (_disposed) return;
-
+        // Disposed-Check + Buffer-Mutation UNTER demselben Lock, um Race
+        // mit Dispose() zu vermeiden (Bug-Bash 2026-07-05 I-3).
         lock (_lock)
         {
+            if (_disposed) return;
             _buffer.AddLast(entry);
             while (_buffer.Count > Capacity)
             {

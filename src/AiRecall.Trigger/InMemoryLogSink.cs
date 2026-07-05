@@ -83,12 +83,16 @@ public sealed class InMemoryLogSink : ILogEventSink, IDisposable
     public void Emit(LogEvent logEvent)
     {
         ArgumentNullException.ThrowIfNull(logEvent);
-        if (_disposed) return;
 
-        var entry = LogEventEntry.FromLogEvent(logEvent);
-
+        // Disposed-Check + Buffer-Mutation UNTER demselben Lock, um Race
+        // mit Dispose() zu vermeiden (Bug-Bash 2026-07-05 I-3). Subscriber-
+        // Notification bleibt außerhalb des Locks (sonst Deadlock-Risiko
+        // wenn Subscriber selbst Emit ruft).
+        LogEventEntry entry;
         lock (_lock)
         {
+            if (_disposed) return;
+            entry = LogEventEntry.FromLogEvent(logEvent);
             _events.AddLast(entry);
             while (_events.Count > _capacity)
             {

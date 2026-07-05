@@ -182,6 +182,50 @@ public class InMemoryLogSinkTests
         Assert.Equal(500, sink.Count);
     }
 
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-3 Regressions-Test: Emit darf NICHT in _events
+    /// schreiben, nachdem Dispose() gelaufen ist. Wenn das alte Verhalten
+    /// (Disposed-Check außerhalb des Locks) zurueckkommt, kann dieser Test
+    /// unter Last ObjectDisposedException oder falsche Count-Werte zeigen.
+    /// </summary>
+    [Fact]
+    public void Emit_AfterDispose_IsSafe_NoThrowNoMutation()
+    {
+        var sink = new InMemoryLogSink();
+        sink.Dispose();
+
+        // Sollte stillschweigend returnen — kein Throw, kein Count-Increment
+        sink.Emit(MakeEvent(LogEventLevel.Information, "after-dispose"));
+        Assert.Equal(0, sink.Count);
+    }
+
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-3 Regressions-Test: Concurrent Emit + Dispose
+    /// duerfen nicht zu ObjectDisposedException fuehren.
+    /// </summary>
+    [Fact]
+    public void Emit_ConcurrentWithDispose_NoThrow()
+    {
+        var sink = new InMemoryLogSink(capacity: 10_000);
+
+        var emitTask = Task.Run(() =>
+        {
+            for (var i = 0; i < 1000; i++)
+            {
+                sink.Emit(MakeEvent(LogEventLevel.Information, $"e{i}"));
+            }
+        });
+
+        // Dispose mitten im Emit-Lauf
+        Thread.Sleep(1);
+        sink.Dispose();
+
+        // Emit-Task darf nicht abstuerzen — einzelne Emits nach Dispose
+        // werden verworfen, das ist OK.
+        emitTask.Wait(TimeSpan.FromSeconds(5));
+        Assert.True(emitTask.IsCompletedSuccessfully, "Emit-Task sollte nicht abstuerzen");
+    }
+
     // ---------- Test Helpers ----------
 
     private static readonly MessageTemplateParser Parser = new();
