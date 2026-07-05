@@ -25,6 +25,11 @@ public sealed class LogviewerWindow : Form
     private readonly ToolStripStatusLabel _statusLabel;
     private readonly BindingList<LogEventEntry> _bindingList;
     private bool _suppressGridRefresh;
+    // Bug-Bash 2026-07-05 I-9: Wenn der User manuell weg vom Ende scrollt,
+    // wird Auto-Scroll automatisch ausgeschaltet (sonst schiesst das naechste
+    // EventAppended den User immer wieder nach unten). _programmaticScrolling
+    // verhindert, dass ScrollToEnd() den Listener selber ausloest.
+    private bool _programmaticScrolling;
 
     public LogviewerWindow(LogviewerSession session)
     {
@@ -125,6 +130,7 @@ public sealed class LogviewerWindow : Form
         });
         // Color-Coding pro Zeile
         _grid.CellFormatting += OnCellFormatting;
+        _grid.Scroll += OnGridScroll;
 
         // Status-Bar
         _statusLabel = new ToolStripStatusLabel();
@@ -220,7 +226,35 @@ public sealed class LogviewerWindow : Form
     {
         if (_bindingList.Count == 0) return;
         var lastIdx = _bindingList.Count - 1;
-        _grid.FirstDisplayedScrollingRowIndex = lastIdx;
+        _programmaticScrolling = true;
+        try
+        {
+            _grid.FirstDisplayedScrollingRowIndex = lastIdx;
+        }
+        finally
+        {
+            _programmaticScrolling = false;
+        }
+    }
+
+    private void OnGridScroll(object? sender, ScrollEventArgs e)
+    {
+        // Programmatic Scroll (durch ScrollToEnd) soll den Auto-Scroll-Toggle
+        // nicht anfassen — nur User-Initiiertes Scroll zaehlt.
+        if (_programmaticScrolling) return;
+
+        // User-Scroll: wenn die Top-Row nicht mehr die letzte sichtbare Zeile
+        // ist, hat der User weg vom Ende navigiert. Auto-Scroll deaktivieren,
+        // damit das naechste EventAppended den User nicht wieder nach unten
+        // reisst. (Bug-Bash 2026-07-05 I-9)
+        if (!_autoScrollCheck.Checked) return;
+        if (_bindingList.Count == 0) return;
+        var lastVisibleIdx = _grid.FirstDisplayedScrollingRowIndex + _grid.DisplayedRowCount(true) - 1;
+        var lastRowIdx = _bindingList.Count - 1;
+        if (lastVisibleIdx < lastRowIdx)
+        {
+            _autoScrollCheck.Checked = false;
+        }
     }
 
     private void OnCellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)

@@ -17,6 +17,12 @@ public sealed class TrayAppContext : ApplicationContext
     private LogviewerWindow? _logviewer;
     private SettingsDialog? _settingsDialog;
     private AppConfig _config;
+    // Bug-Bash 2026-07-05 I-10: Idempotent-Dispose-Flag. Ohne dieses Flag
+    // wuerde ein wiederholter ExitThreadCore-Aufruf _trayIcon und _supervisor
+    // doppelt disposen (die haben zwar eigene _disposed-Checks, aber Defense
+    // in Depth und symmetrisches Verhalten zu allen anderen IDisposable-
+    // Komponenten im TrayAppContext).
+    private bool _disposed;
 
     /// <summary>
     /// In-memory ring buffer for live log streaming. Subscribed by
@@ -111,6 +117,8 @@ public sealed class TrayAppContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        if (_disposed) return;
+        _disposed = true;
         try
         {
             _trayIcon.Dispose();
