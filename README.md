@@ -33,6 +33,11 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
     aktiver Inspector + Background-Polling für Mail-Stream (Inbox + Sent Items +
     Custom-Folders), EntryID-Dedup, Auto-Regel-Heuristik (4 Bedingungen),
     custom HTML→MD-Konvertierung
+  - **OneNote** ([Spec 0010](./specs/0010-onenote-app-reader.md)): aktive OneNote-Page
+    via COM-Late-Binding mit 4-stufiger Active-Page-Strategie (Windows.CurrentWindow.CurrentPageId,
+    Windows-foreach + Active, GetHierarchy + isCurrentlyViewed="true", null-Fallback);
+    Page-XML (xs2013)→MD-Konvertierung mit Tag/Image/Table/InkContent-Mapping;
+    Read-only (kein Background-Poll — Page-orientiert)
   - **Word/Excel/PowerPoint** ([Spec 0004 Iter. 2](./specs/0004-app-reader.md#iter-2-2026-07-04--com-interop-für-office--pdf-viewer-martin)):
     UIA + optional COM-Interop (late binding, ProgID + P/Invoke) für Pfad +
     Inhalt; COM-Fallback auf UIA+Title
@@ -116,7 +121,7 @@ Hilfreich für Skripte und headless Tests.
 dotnet test
 ```
 
-Aktuell **525/525 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + MVP2-Basis + Conversion + TrayApp-PureLogic).
+Aktuell **589/589 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + OneNote + MVP2-Basis + Conversion + TrayApp-PureLogic).
 
 ## Konfiguration
 

@@ -104,6 +104,14 @@
   - `OutlookBodyToMarkdown` (HTML→MD, Outlook-spezifisch, custom)
   - Polling alle 60 s (konfigurierbar, `outlook.pollIntervalSeconds`)
   - 109 neue Tests (499 → 525 grün)
+- [x] **OneNote App-Reader (Spec 0010 abgeschlossen)** — OneNote Page-Log via COM (late binding):
+  - Neue DLL `AiRecall.AppReader.OneNote` mit `OneNoteAppReader` (Read only, kein Background-Poll — Page-orientiert, nicht Stream-orientiert)
+  - `OneNoteComInterop` mit 4-stufiger Active-Page-Strategie (Stage 1: `Windows.CurrentWindow.CurrentPageId`, Stage 2: `Windows`-foreach + `Active`, Stage 3: `GetHierarchy(hsPages)` + `isCurrentlyViewed="true"`, Stage 4: null-Fallback); P/Invoke `oleaut32!GetActiveObject` (analog Outlook) + `Marshal.ReleaseComObject`-Cleanup pro COM-Objekt.
+  - `OneNoteComException` mit HRESULT-Klassifikation (fatal: hrXmlIsInvalid/hrRpcFailed2; transient-retry: hrRpcUnavailable/hrCOMBusy/hrServerCallRetried/hrObjectMissing). 3×Retry mit 500ms Backoff.
+  - `OneNotePageXmlToMarkdown` (Pure-Function XML→MD, ~411 LoC): `one:OE`/`T`/`Image`/`Tag`/`Table`/`InkContent`/`InsertedFile`-Mapping, HTML-Entity-Decode via `HttpUtility.HtmlDecode`, Bullet-Indent via `style="list"`, `IncludeImages`/`IncludeTags`-Flag-Steuerung, `xs2013`-Schema fix.
+  - `OneNoteConfig` in `AppConfig` mit `Enabled`, `MaxContentKB`, `IncludeImages`, `IncludeTags`, `HierarchyDepth` (PageOnly|PageAndSection|PageAndSectionAndNotebook), `ActivePageStrategy` (WindowsApi|HierarchyXml|Auto), `PollIntervalSeconds` (=0 Read-only), `SkipNotebookPatterns`.
+  - Persistenz-Schema: `capture/yyyy-MM-dd/onenote/HHmmss-{pageIdShort}.md` mit YAML-Frontmatter (kind=onenote-page, pageId, pageTitle, [section/sectionId], [notebook/notebookId], lastModified, strategy, includeImages, includeTags, attachments, source=onenote-com, reader, readerVersion).
+  - 64 neue Tests (525 → 589 grün): 5 OneNoteConfig + 8 OneNoteComInterop (XML-Parser) + 30 OneNotePageXmlToMarkdown + 21 OneNoteAppReader (Public-Surface + ShortId-Theory + Internal-BuildFullMarkdown).
 - [x] App-Reader: Word/Excel/PowerPoint (Spec 0004 Iter. Documents — UIA-only, Office nicht erforderlich; Tests grün, e2e-Smoke gegen Office ausstehend)
 - [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
 - [x] **Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen)**
@@ -163,6 +171,7 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0007-async-conversion.md` | Async Document Conversion Pipeline (v1.0 abgeschlossen) |
 | `specs/0008-live-logviewer.md` | Live Logviewer Window (v1.0 abgeschlossen) |
 | `specs/0009-settings-dialog.md` | Settings-Dialog JSON-Editor (v1.0 abgeschlossen) |
+| `specs/0010-onenote-app-reader.md` | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only) |
 | `src/` | .NET-Solution-Projekte |
 | `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
 | `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
@@ -171,7 +180,7 @@ Ausführlich: `specs/0001-vision.md`
 | `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
 | `src/AiRecall.TrayApp/` | **MVP2 Tray-Icon-EXE (Spec 0006 v1.0)**: `NotifyIcon` + `TriggerSupervisor`-Wiring + `LogviewerWindow` (Spec 0008) + `SettingsDialog` (Spec 0009) |
 | `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
-| `src/AiRecall.AppReader.{Browser,Outlook,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
+| `src/AiRecall.AppReader.{Browser,Outlook,OneNote,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
 | `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
 | `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (416 Tests) |
 | `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |

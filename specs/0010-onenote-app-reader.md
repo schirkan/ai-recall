@@ -1,6 +1,6 @@
 # 0010 — OneNote App-Reader
 
-> **Status:** Draft (Cluster 1 in Arbeit, Implementierung folgt)
+> **Status:** ✅ **abgeschlossen (Cluster 1–6, 2026-07-05)** — Test-Count 589/589 grün, gepusht als Commits `c02d861`, `fd03b7b`, `ce10dec`, `1081ece`, `b8a3e20` (+ Docs in Cluster 6).
 > **Implements:** ON-1 .. ON-7 (App-Reader-Erweiterung für OneNote)
 > **Pattern:** analog Outlook App-Reader (Spec 0004 Iter. 3)
 > **Owner:** Martin + Pia
@@ -271,3 +271,67 @@ Test-Trait-Marker analog Outlook:
 - OneMore AddIn: <https://github.com/stevencohn/OneMore>
 - Outlook App-Reader (Spec 0004 Iter. 3): `specs/0004-app-reader.md`
 - Trigger-Pipeline: `specs/0005-trigger-pipeline.md`
+
+## Acceptance Criteria (gegen Code verifiziert, 2026-07-05)
+
+Stand nach Cluster 1–6 (5 Commits + Docs). Verifikation gegen die tatsächliche Implementation
+in `src/AiRecall.AppReader.OneNote/`:
+
+### ON-1 — OneNote-Prozess-Erkennung
+- [x] `OneNoteComInterop.IsOneNoteRunning()` via `Process.GetProcessesByName("OneNote")` — implementiert in `OneNoteComInterop.cs` (Cluster 2).
+- [x] `OneNoteAppReader.IsOneNoteProcessRunning()` (public static) fuer externe Diagnostik — implementiert in `OneNoteAppReader.cs` (Cluster 4).
+- [x] Pre-Filter in `OneNoteAppReader.Read()` vermeidet COM-Aufrufe wenn OneNote nicht laeuft — verifiziert im Source.
+
+### ON-2 — 4-stufige Active-Page-Strategie
+- [x] **Stage 1**: `onenote.Windows.CurrentWindow.CurrentPageId` (offizielle API) — implementiert in `OneNoteComInterop.TryStage1Or2`.
+- [x] **Stage 2**: `Windows`-foreach + `window.Active == true` (Fallback) — implementiert in `OneNoteComInterop.TryStage1Or2`.
+- [x] **Stage 3**: `GetHierarchy(hsPages)` + XPath `//one:Page[@isCurrentlyViewed='true']` (Robust-Fallback) — implementiert in `OneNoteComInterop.TryStage3`.
+- [x] **Stage 4**: `null`-Rueckgabe (Caller faellt auf OCR zurueck) — implementiert in `OneNoteComInterop.TryGetActivePage` (Strategy "Auto" endet mit null).
+- [x] Konfigurierbar via `OneNoteConfig.ActivePageStrategy` (WindowsApi / HierarchyXml / Auto) — implementiert.
+
+### ON-3 — Page-Content-XML
+- [x] `OneNoteComInterop.TryGetPageContentXml(pageId)` mit `xs2013`-Schema — implementiert in `OneNoteComInterop.cs`.
+- [x] Private Konstante `XmlSchema2013 = "xs2013"` in `OneNoteComInterop` — implementiert.
+- [x] Fallback-Pfad: bei `null`-XML wird `BuildFallbackResult(info, hint)` aufgerufen — implementiert in `OneNoteAppReader.cs`.
+
+### ON-4 — XML→MD-Konvertierung (OneNotePageXmlToMarkdown)
+- [x] `ConvertBody(xml, config)` als Pure-Function (zustandslos, IO-frei) — implementiert in `OneNotePageXmlToMarkdown.cs`.
+- [x] `one:OE` → Absatz mit `\n\n`-Separator — implementiert in `AppendOutline` + `AppendOE`.
+- [x] `one:T` (CDATA) → Plain-Text via `HttpUtility.HtmlDecode` — implementiert in `DecodeHtml`.
+- [x] `one:Image` → `![alt](filename)` wenn `IncludeImages=true` — implementiert in `FormatImageInline` + `AppendImage`.
+- [x] `one:Tag` (to-do:empty) → `[ ]` — implementiert in `FormatTagInline`.
+- [x] `one:Tag` (to-do:complete) → `[x]` — implementiert in `FormatTagInline`.
+- [x] `one:Tag` (custom) → `#tag-name` — implementiert in `FormatTagInline`.
+- [x] `one:Table` → Markdown-Tabelle mit Header + Pipes — implementiert in `AppendTable`.
+- [x] `one:InkContent` → `*(handschriftlich)*` Hinweis + optionaler OCR-Text — implementiert in `AppendInkContent`.
+- [x] `one:InsertedFile` → `*Attached File:* filename` am Page-Level (Pfad getruncated auf Filename) — implementiert in `AppendInsertedFile`.
+- [x] Bullet-Indent mit `style="list..."`-Substring-Match + 2-Space-Indent pro Ebene — implementiert in `IsBulletStyle` + `AppendOE`.
+- [x] `ExtractPageTitle(xml)` → `page.name`-Attribut — implementiert.
+- [x] `ExtractLastModified(xml)` → `page.lastModifiedTime`-Attribut — implementiert.
+- [x] `ExtractInsertedFileNames(xml)` → deduped Liste der Filenames (ohne Pfad) — implementiert.
+
+### ON-5 — Frontmatter + Hierarchy-Info
+- [x] `OneNoteHierarchyInfo` record mit `PageId`, `PageTitle`, `SectionId`, `SectionTitle`, `NotebookId`, `NotebookTitle`, `LastModified` — implementiert in `OneNoteHierarchyInfo.cs` (Cluster 2).
+- [x] `PageIdShort`-Property (erste 8 Zeichen ohne Bindestriche) — implementiert in `OneNoteHierarchyInfo`.
+- [x] `HasMinimumInfo`-Property (PageId gesetzt?) — implementiert in `OneNoteHierarchyInfo`.
+- [x] `OneNoteAppReader.BuildFullMarkdown(info, body, xml, cfg)` produziert YAML-Frontmatter + Header + Body — implementiert (internal, fuer Tests via `InternalsVisibleTo`).
+- [x] `HierarchyDepth`-konfigurierbar (PageOnly / PageAndSection / PageAndSectionAndNotebook) — implementiert via `ShouldIncludeSection`/`ShouldIncludeNotebook`.
+
+### ON-6 — Persistenz-Schema
+- [x] Schema: `capture/yyyy-MM-dd/onenote/HHmmss-{pageIdShort}.md` — implementiert durch `CaptureWriter.WriteContent` (TriggerWorker-Pfad).
+- [x] YAML-Frontmatter-Felder: timestamp, kind=onenote-page, pageId, pageTitle, [section/sectionId], [notebook/notebookId], lastModified, strategy, includeImages, includeTags, attachments, source=onenote-com, reader, readerVersion — implementiert in `BuildFullMarkdown`.
+- [x] YAML-Escape (Backslash/Double-Quote/Newline) — implementiert in `EscapeYaml`-Helper.
+
+### ON-7 — Tests + Plugin-Discovery
+- [x] `AppReaderRegistry.LoadFromDirectory` scannt automatisch `AiRecall.AppReader.OneNote.dll` — durch Pattern-Match.
+- [x] Parameterloser `OneNoteAppReader()`-Konstruktor fuer `Activator.CreateInstance(type)` — implementiert (Cluster 4).
+- [x] `internal OneNoteAppReader(ILogger logger, string captureRoot)` fuer Test-Injection — implementiert.
+- [x] `[InternalsVisibleTo("AiRecall.Core.Tests")]` in `AiRecall.AppReader.OneNote.csproj` — implementiert (Cluster 2).
+- [x] Tests: 64 neue (5 Config + 8 ComInterop + 30 XML→MD + 21 AppReader) — **589/589 grün** (verifiziert in Cluster 5, Commit `b8a3e20`).
+- [x] Truncate-Logik (`OneNoteAppReader.TruncateBody` + Config `MaxContentKB`) — implementiert (Cluster 4).
+- [x] `SkipNotebookPatterns`-Filter (case-insensitive Substring gegen `NotebookTitle`) — implementiert in `OneNoteAppReader.Read()` (Cluster 4).
+- [x] `IsOneNoteProcessRunning`-Helper fuer UI-Hinweise (TrayApp-Integration vorbereitet) — implementiert (Cluster 4).
+
+### Test-Trait-Marker
+- [x] ComInterop-Pure-Function-Tests laufen ohne installiertes OneNote (alle 64 Tests auf CI gruen) — verifiziert.
+- [ ] **OFFEN (für Iter. 2):** Integration-Tests gegen echtes OneNote mit `[Trait("Integration", "OneNote")]`. Werden auf Martins Workstation zusaetzlich ausgefuehrt; in CI skipped wenn OneNote nicht installiert.

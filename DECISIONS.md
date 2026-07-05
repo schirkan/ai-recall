@@ -5,6 +5,55 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-05 — OneNote App-Reader (Spec 0010)
+
+OneNote als dritte COM-bindungende App-Familie (nach Outlook + Documents).
+Im Gegensatz zu Outlook (Dual-Modus mit OnPoll) ist OneNote Page-orientiert
+und braucht keinen Background-Stream. Pattern analog Outlook App-Reader,
+aber strukturell vereinfacht (Read-only).
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Lese-Strategie | **4-stufige Active-Page-Strategie**: Stage 1 `Windows.CurrentWindow.CurrentPageId`, Stage 2 `Windows`-foreach + `Active`, Stage 3 `GetHierarchy(hsPages)` + XPath `isCurrentlyViewed="true"`, Stage 4 null | Microsoft-dokumentierte API für OneNote 2013+. Wenn `CurrentWindow` nicht verfügbar (Edge-Cases), iterate Collection. Wenn COM-Hierarchie scheitert, parse `isCurrentlyViewed`-Filter. Bei allem null → Caller fällt auf OCR zurück. Konfigurierbar via `OneNoteConfig.ActivePageStrategy` (WindowsApi / HierarchyXml / Auto). |
+| 2 | Architektur-Modus | **Read-only (kein `OnPoll`)** — Capture ausschliesslich via Trigger (Foreground/Heartbeat) | OneNote arbeitet mit Einer sichtbarer Page. Kein konstanter Daten-Stream im Hintergrund. `SupportsBackgroundPolling = false` (anders als Outlook Dual-Modus mit Polling). `PollIntervalSeconds = 0` im Default. |
+| 3 | COM-Strategie | **Late binding via ProgID `OneNote.Application`** + P/Invoke auf `oleaut32.dll!GetActiveObject` | Analoger Workaround wie Outlook + Documents. `Marshal.GetActiveObject` ist im .NET 8 SDK 8.0.422 nicht direkt verfügbar. P/Invoke ist robust, kein NuGet-Paket, keine PIAs. |
+| 4 | Retry-Logik | **3× Retry mit 500ms Backoff**, transient-HRESULTs retry, fatal-HRESULTs kein Retry | OneNote COM ist fragil. `OneNoteComException` klassifiziert nach `IsRetryable`: fatal = `hrXmlIsInvalid` (0x80042001, fehlerhaftes XML-Schema) + `hrRpcFailed2` (0x800706BA, RPC-Server-Crash); transient = `hrRpcUnavailable`/`hrCOMBusy`/`hrServerCallRetried`/`hrObjectMissing`. Retryable-Errors lösen `Thread.Sleep(500ms)` zwischen Versuchen aus. Quelle: OneMore-AddIn-Production-Pattern. |
+| 5 | RCW-Cleanup | **Separate `object?`-Variablen + `Marshal.ReleaseComObject` in finally-Blocks** + `ReferenceEquals`-Schutz gegen Doppel-Release | Outlook-Pattern. Jede COM-Stufe (App, Window, Hierarchy) bekommt eigene Variable + finally-Block. Bei `Stage 3`-Fallback werden möglicherweise alle Stages durchlaufen — ReferenceEquals-Schutz verhindert, dass `currentWindow` doppelt released wird (sowohl in Stage 1-Branch als auch in finally). |
+| 6 | XML-Schema-Konstante | **`xs2013` immer** (nicht `xsCurrent`) | OneNote-API hat `xsCurrent`, das je nach Office-/OneNote-Version unterschiedliche Schemas liefert. `xs2013` ist stabil, gut dokumentiert, von OneMore & Co produktiv verwendet. Schema-Konstante als `private const` in `OneNoteComInterop`, im Helper klar dokumentiert. |
+| 7 | XML→MD als Pure-Function | **`OneNotePageXmlToMarkdown.ConvertBody(xml, cfg)` ist zustandslos, IO-frei, deterministisch** | Vollständig unit-testbar ohne OneNote-Installation. 30 Tests in `OneNotePageXmlToMarkdownTests` decken `one:OE`/`T`/`Image`/`Tag`/`Table`/`InkContent`/`InsertedFile`/Bullet-Indent/HTML-Entities/Edge-Cases ab. Pattern analog `OutlookBodyToMarkdown` (Spec 0004 Iter. 3). |
+| 8 | Mapping `one:OE` | **Inline-Content + Sub-Bullets rekursiv mit `append + newline`-Pattern** | OneNote-XML erlaubt mehrere `one:T`-Runs in einem `one:OE` (gestylte Text-Fragmente). Sub-OEs = Sub-Bullets. `AppendOE` konkatentiert Inline-Content in StringBuilder, ruft sich für Sub-OEs rekursiv mit `listIndent + 1` auf. |
+| 9 | Bullet-Heuristik | **`OE style="list..."` ist Bullet, sonst plain paragraph** | OneNote speichert List-Style im `style`-Attribut (z. B. `style="list:Bullet"`). Wir matchen Substring `list` case-insensitive, Prefix `- ` (mit 2-Space-Indent pro Ebene). Kein Bullet → plain paragraph ohne Prefix. |
+| 10 | Image-Include Default | **`IncludeImages = false`** (Default) | Base64-Inflation in MD-Files (1 MB PNG → 1.3 MB MD), Datenschutz-Risiko bei handschriftlichen Skizzen. Aktivieren nur bei expliziter Konfiguration. Flag in `OneNoteConfig` + JSON-Section in `default-config.json`. |
+| 11 | Tag-Format | **`to-do:empty` → `[ ]`, `to-do:complete` → `[x]`, custom-Tag → `#tag`** | OneNote speichert To-Do-Status im `type`-Attribut des `<one:Tag>`-Elements. Wir matchen `to-do`-Prefix + `complete`-Suffix. Custom-Tags werden als `#tag-name` (fett) gerendert. Inline-Format im OE-Context. |
+| 12 | InkContent-Handling | **`*(handschriftlich)*` Hinweis + optional OCR-Text aus `<one:InkWord>`/<one:RecognizedText>`** | Handschrift kann nicht visuell in MD abgebildet werden. Wenn OneNote Handschrift via OCR erkannt hat, wird der Text in derselben Zeile angehängt. |
+| 13 | Persistenz-Schema | **`capture/yyyy-MM-dd/onenote/HHmmss-{pageIdShort}.md`** | Analog Outlook (`outlook-mail`-Subfolder). PageIdShort = erste 8 Zeichen der Page-GUID ohne Bindestriche (z. B. `AB12CD34`). Pattern in `OneNoteHierarchyInfo.PageIdShort`-Property berechnet. |
+| 14 | YAML-Frontmatter | **`HierarchyDepth`-konfigurierbar**: PageOnly / PageAndSection (Default) / PageAndSectionAndNotebook | Wahl zwischen Datenschutz (PageOnly) und Vollständigkeit (alle drei Ebenen). Default = PageAndSection (Notebook ohne Privacy-Sorgen, falls Titel persönliche Daten enthält). Toggle via `OneNoteConfig.HierarchyDepth`. |
+| 15 | Test-Injection | **`internal OneNoteAppReader(ILogger logger, string captureRoot)`** + `[InternalsVisibleTo("AiRecall.Core.Tests")]` | Pattern analog OutlookAppReader. Tests injizieren Logger (`NullSink`) und Capture-Root (Temp-Directory) ohne installiertes OneNote und ohne `%APPDATA%`. Production: parameterloser `OneNoteAppReader()`-Konstruktor für `Activator.CreateInstance` im Plugin-Loader. |
+| 16 | Test-Strategie | **Pure-Function-First, App-Reader-Read-Pfad nicht unit-testbar** (ohne installiertes OneNote) | Pure-Function-Helper (`ParseIsCurrentlyViewed`, `ParseSelfHierarchyXml`, `ConvertBody`, `BuildFullMarkdown`) vollständig testbar. Der `Read()`-Pfad benötigt COM, markiert mit `[Trait("Integration", "OneNote")]` für spätere Martins-Workstation-Smoke-Tests (analog Outlook). Auf CI wird der Trait geskippt. |
+
+### Tests
+
+- 64 neue Tests (`OneNoteConfigTests` 5, `OneNoteComInteropTests` 8, `OneNotePageXmlToMarkdownTests` 30, `OneNoteAppReaderTests` 21).
+- Test-Count gesamt: 589 / 589 grün (vorher 525 / 525).
+- Cluster: Spec + Config (Cluster 1) → ComInterop (Cluster 2) → XML→MD (Cluster 3) → Reader (Cluster 4) → Tests (Cluster 5) — 5 thematische Commits + Docs-Update (Cluster 6, dieser Eintrag).
+- Commits: `c02d861`, `fd03b7b`, `ce10dec`, `1081ece`, `b8a3e20`.
+
+### Lessons Learned (Cluster 1–5)
+
+- **`AppContext.BaseDirectory` Walk-Up** für Test-Pfade (`AiRecall.sln` suchen statt `../../../../../..`-Relative-Navigation) — robust gegen CI vs. lokal Path-Diff (net8.0 vs. net8.0-windows).
+- **`new`-Keyword für `HResult`-Shadowing** in `OneNoteComException` (`Exception.HResult` verdeckt eigene Property ohne `new`-Keyword → CS0108).
+- **`HttpUtility.HtmlDecode` als built-in in .NET 8** (unter `System.Web` namespace) — kein zusätzliches NuGet für HTML-Entities nötig.
+- **Bullet-Indent mit `style` attribute substring-match** — keine XPath-Query nötig, einfacher `Contains` reicht für die OneNote-Pattern (`style="list:Bullet"`).
+
+### Verworfen
+
+- **Last-Modified-Heuristik (Option B)**: Verworfen zugunsten `Windows.CurrentWindow.CurrentPageId` (offizielle Microsoft-API) und `isCurrentlyViewed="true"`-Fallback (entdeckt via OneMore-AddIn-Source). Heuristik wäre ungenauer und erfordert mehr Code-Pfade.
+- **`OneNote UWP`-Support**: OneNote UWP hat kein COM-Interface, läuft sandboxed. Würde WinRT-API erfordern, deutlich mehr Komplexität. Out-of-Scope für Iter. 1.
+- **Handschrift-OCR**: OneNote hat eigenen OCR für `one:InkContent`, aber wir vertrauen auf OneNotes OCR-Ergebnis, statt eigenen OCR drüberzulaufen. `<one:RecognizedText>`-Elemente werden inline ausgelesen.
+- **Schreibzugriff (`UpdatePageContent`)**: OneNote-Page-Mutation ist nicht im Scope — wir lesen nur, niemals schreiben. UpdatePageContent-API ist zwar verfügbar, aber würde Trigger-Mode (User-confirms-before-write) erfordern, deutlich komplexer.
+
+---
+
 ## 2026-07-04 — Trigger-Pipeline: Implementation-Resultat + nachträgliche Entscheidungen
 
 Spec 0005 (Trigger-Pipeline) ist mit Commits `791161a` … `5d934dc`
