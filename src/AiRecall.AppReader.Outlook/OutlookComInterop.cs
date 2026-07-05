@@ -302,4 +302,121 @@ internal static class OutlookComInterop
             return null;
         }
     }
+
+    /// <summary>
+    /// Liefert die juengsten Mails (max <paramref name="maxItems"/>) aus einem
+    /// Outlook-Folder per Name (z. B. "Inbox", "Sent Items"). Late binding:
+    /// <c>Application.Session.GetDefaultFolder(olFolderInbox).Items</c>
+    /// bzw. <c>Application.Session.Folders(folderName).Items</c>.
+    /// </summary>
+    /// <param name="folderName">MAPI-Folder-Name (case-insensitive).</param>
+    /// <param name="maxItems">Cap (typisch <see cref="AiRecall.Core.Configuration.OutlookConfig.MaxItemsPerSweep"/>).</param>
+    public static IReadOnlyList<MailSnapshotFromCom> TryGetRecentMails(string folderName, int maxItems)
+    {
+        var result = new List<MailSnapshotFromCom>();
+        object? app = null;
+        object? session = null;
+        object? folder = null;
+        object? items = null;
+        try
+        {
+            app = GetActiveOutlookInstance();
+            if (app == null) return result;
+
+            session = app.GetType().InvokeMember("Session", BindingFlags.GetProperty, null, app, null);
+            if (session == null) return result;
+
+            // Strategie A: Folders(folderName) (Lookup by Name)
+            try
+            {
+                var folders = session.GetType().InvokeMember("Folders", BindingFlags.GetProperty, null, session, null);
+                if (folders != null)
+                {
+                    try
+                    {
+                        folder = folders.GetType().InvokeMember("Item", BindingFlags.GetProperty, null, folders, new object[] { folderName });
+                    }
+                    finally { Marshal.ReleaseComObject(folders); }
+                }
+            }
+            catch { /* fallback zu Strategie B */ }
+
+            // Strategie B: GetDefaultFolder via olDefaultFolders-Enum (Inbox=1, SentItems=5)
+            if (folder == null)
+            {
+                int olFolderId = MapFolderNameToOutlookId(folderName);
+                if (olFolderId > 0)
+                {
+                    folder = session.GetType().InvokeMember("GetDefaultFolder", BindingFlags.InvokeMethod, null, session, new object[] { olFolderId });
+                }
+            }
+
+            if (folder == null) return result;
+
+            items = folder.GetType().InvokeMember("Items", BindingFlags.GetProperty, null, folder, null);
+            if (items == null) return result;
+
+            // Sortiere nach ReceivedTime DESC
+            try
+            {
+                items.GetType().InvokeMember("Sort", BindingFlags.InvokeMethod, null, items, new object[] { "[ReceivedTime]", true });
+            }
+            catch { /* Sort optional */ }
+
+            var count = (int)(items.GetType().InvokeMember("Count", BindingFlags.GetProperty, null, items, null) ?? 0);
+            var take = Math.Min(count, maxItems);
+            for (int i = 1; i <= take; i++)
+            {
+                object? item = null;
+                try
+                {
+                    item = items.GetType().InvokeMember("Item", BindingFlags.GetProperty, null, items, new object[] { i });
+                    if (item == null) continue;
+                    var snap = ReadMailItem(item);
+                    if (snap != null && !string.IsNullOrEmpty(snap.EntryId)) result.Add(snap);
+                }
+                finally
+                {
+                    if (item != null) Marshal.ReleaseComObject(item);
+                }
+            }
+            return result;
+        }
+        catch
+        {
+            return result;
+        }
+        finally
+        {
+            if (items != null) Marshal.ReleaseComObject(items);
+            if (folder != null) Marshal.ReleaseComObject(folder);
+            if (session != null) Marshal.ReleaseComObject(session);
+            if (app != null) Marshal.ReleaseComObject(app);
+        }
+    }
+
+    /// <summary>
+    /// Mappt haeufige Outlook-Folder-Namen auf die
+    /// <c>OlDefaultFolders</c>-Enum-IDs. Outlook COM erwartet fuer
+    /// <c>GetDefaultFolder</c> den Enum-Wert, nicht den Namen.
+    /// </summary>
+    private static int MapFolderNameToOutlookId(string folderName)
+    {
+        // OlDefaultFolders: Inbox=1, SentItems=5, Drafts=16, Outbox=4,
+        // DeletedItems=3, Junk=23, Notes=12, Calendar=9, Contacts=10,
+        // Tasks=13, Journal=11, Conflicts=19, SyncIssues=20, ToDo=28,
+        // RssFeeds=25.
+        return folderName.ToLowerInvariant() switch
+        {
+            "inbox" => 1,
+            "sent items" => 5,
+            "drafts" => 16,
+            "outbox" => 4,
+            "deleted items" => 3,
+            "junk e-mail" => 23,
+            "junk" => 23,
+            "spam" => 23,
+            _ => -1,
+        };
+    }
 }
