@@ -80,6 +80,17 @@
       "activePageStrategy": "WindowsApi",
       "pollIntervalSeconds": 0,
       "skipNotebookPatterns": []
+    },
+    "teams": {
+      "enabled": true,
+      "maxContentKB": 512,
+      "useCdpIfAvailable": true,
+      "cdpEndpoint": "http://localhost:9222",
+      "cdpTimeoutMs": 1500,
+      "preferredStrategy": "Auto",
+      "pollIntervalSeconds": 0,
+      "skipChatPatterns": [],
+      "includeSenderPatterns": []
     }
   },
   "trigger": {

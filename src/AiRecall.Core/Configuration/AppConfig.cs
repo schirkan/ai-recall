@@ -68,6 +68,10 @@ public sealed class AppReaderConfig
     /// <summary>OneNote App-Reader (Spec 0010). Read-only, kein Background-Poll.</summary>
     [JsonPropertyName("onenote")]
     public OneNoteConfig OneNote { get; set; } = new();
+
+    /// <summary>Teams App-Reader (Spec 0011). Modern Teams only, UIA + CDP opt-in.</summary>
+    [JsonPropertyName("teams")]
+    public TeamsConfig Teams { get; set; } = new();
 }
 
 public sealed class OutlookConfig
@@ -304,6 +308,73 @@ public sealed class OneNoteConfig
     /// </summary>
     [JsonPropertyName("skipNotebookPatterns")]
     public List<string> SkipNotebookPatterns { get; set; } = new();
+}
+
+/// <summary>
+/// Konfiguration fuer die Office-Dokumente-Reader (Word/Excel/PowerPoint).
+/// Spec 0011 — Modern Teams App-Reader (UIA + CDP opt-in).
+/// Pattern: analog Outlook (Spec 0004 Iter. 3) und OneNote (Spec 0010),
+/// aber ohne COM-Late-Binding (Modern Teams ist Electron-basiert).
+/// </summary>
+public sealed class TeamsConfig
+{
+    /// <summary>Master-Switch. <c>false</c> liefert der Reader immer <c>null</c>.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Maximale Laenge des Chat-Contents im Markdown (KB). Laenger = abgeschnitten
+    /// mit Hinweis-Block am Ende.
+    /// </summary>
+    [JsonPropertyName("maxContentKB")]
+    public int MaxContentKB { get; set; } = 512;
+
+    /// <summary>
+    /// Wenn <c>true</c>: CDP-Pfad bevorzugt wenn Endpoint erreichbar.
+    /// Bei <c>false</c>: immer UIA-only (kein WebSocket, schneller, weniger Inhalt).
+    /// </summary>
+    [JsonPropertyName("useCdpIfAvailable")]
+    public bool UseCdpIfAvailable { get; set; } = true;
+
+    /// <summary>CDP-HTTP-Endpoint, typisch <c>http://localhost:9222</c>.</summary>
+    [JsonPropertyName("cdpEndpoint")]
+    public string CdpEndpoint { get; set; } = "http://localhost:9222";
+
+    /// <summary>Timeout (ms) fuer CDP-HTTP-Discovery + WebSocket-Roundtrip.</summary>
+    [JsonPropertyName("cdpTimeoutMs")]
+    public int CdpTimeoutMs { get; set; } = 1500;
+
+    /// <summary>
+    /// Strategy-Preference:
+    /// <c>"Cdp"</c> (nur CDP, scheitert wenn nicht erreichbar),
+    /// <c>"Uia"</c> (nur UIA),
+    /// <c>"Auto"</c> (CDP bevorzugt, UIA-Fallback).
+    /// </summary>
+    [JsonPropertyName("preferredStrategy")]
+    public string PreferredStrategy { get; set; } = "Auto";
+
+    /// <summary>
+    /// OnPoll-Intervall in Sekunden. <c>0</c> (Default) = Read-only,
+    /// kein Background-Poll. Teams ist Chat-orientiert, Capture reagiert
+    /// auf Foreground-Event (User oeffnet neues Chat-Tab).
+    /// </summary>
+    [JsonPropertyName("pollIntervalSeconds")]
+    public int PollIntervalSeconds { get; set; } = 0;
+
+    /// <summary>
+    /// Chat-Title-Patterns (case-insensitive substring), die ignoriert werden.
+    /// Nuetzlich fuer Meeting-Chats oder Status-Bots.
+    /// </summary>
+    [JsonPropertyName("skipChatPatterns")]
+    public List<string> SkipChatPatterns { get; set; } = new();
+
+    /// <summary>
+    /// Sender-Patterns (case-insensitive substring) als Whitelist.
+    /// Leer = alle Sender erfasst. Beispiel: <c>["Alice", "Bob"]</c>
+    /// erfasst nur Chats mit Alice/Bob.
+    /// </summary>
+    [JsonPropertyName("includeSenderPatterns")]
+    public List<string> IncludeSenderPatterns { get; set; } = new();
 }
 
 /// <summary>
