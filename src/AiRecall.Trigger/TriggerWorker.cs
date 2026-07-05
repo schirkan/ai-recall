@@ -22,12 +22,14 @@ namespace AiRecall.Trigger;
 /// befüllt wird. Wendet die Pipeline-Schritte 1–10 aus Spec 0005 an und
 /// ruft am Ende <see cref="CaptureWriter.WritePending"/> auf.
 ///
-/// Pipeline-Schritte (Spec 0005 + Spec 0007):
+/// Pipeline-Schritte (Spec 0005 + Spec 0007 + Bug-Bash 2026-07-05):
 ///   1. HWND normalisieren via <c>GetAncestor(hwnd, GA_ROOT)</c>
 ///   2. Self-Capture-Filter (PID == eigene PID)
 ///   3. Class-Blacklist (<c>trigger.blacklist.windowClasses</c>)
 ///   4. WindowInfo-Lookup
 ///   5. Process-Blacklist (<c>trigger.blacklist.processes</c>)
+///   5b. Title-Blacklist (<c>trigger.blacklist.windowTitles</c>) —
+///       schützt z. B. TrayApp-Fenster (SettingsDialog, LogviewerWindow)
 ///   6. Per-Hwnd-Throttle (<c>trigger.throttleMs</c>)
 ///   7. Per-App-Throttle (<c>trigger.throttlePerAppSeconds</c>)
 ///   8. Screenshot
@@ -215,6 +217,16 @@ public sealed class TriggerWorker : IDisposable
 
         // 5. Process-Blacklist
         if (MatchesAny(window.ProcessName, _config.Trigger.Blacklist.Processes))
+        {
+            BlacklistCount++;
+            return;
+        }
+
+        // 5b. Title-Blacklist (Bug-Bash 2026-07-05)
+        //     Schützt AiRecall-eigene UI-Fenster (SettingsDialog,
+        //     LogviewerWindow) davor, dass der Trigger sich selbst bzw.
+        //     die Settings capturt. Substring-Match analog zu Processes.
+        if (MatchesAny(window.Title, _config.Trigger.Blacklist.WindowTitles))
         {
             BlacklistCount++;
             return;

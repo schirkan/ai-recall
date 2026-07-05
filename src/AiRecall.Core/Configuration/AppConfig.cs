@@ -356,7 +356,8 @@ public sealed class WinEventSubscription
 }
 
 /// <summary>
-/// Blacklist für Win32-Window-Klassen und Prozess-Namen (Spec 0005 §Sonderfälle).
+/// Blacklist für Win32-Window-Klassen, Prozess-Namen und Window-Titel
+/// (Spec 0005 §Sonderfälle + Bug-Bash 2026-07-05 TrayApp-Blacklist).
 /// </summary>
 public sealed class TriggerBlacklist
 {
@@ -367,4 +368,13 @@ public sealed class TriggerBlacklist
     /// <summary>Prozess-Namen (case-insensitive substring), die ignoriert werden.</summary>
     [JsonPropertyName("processes")]
     public List<string> Processes { get; set; } = new();
+
+    /// <summary>
+    /// Window-Titel (case-insensitive substring), die ignoriert werden.
+    /// Default: "AiRecall - " — matcht SettingsDialog ("AiRecall - Settings")
+    /// und LogviewerWindow ("AiRecall - Live Logviewer") sowie alle
+    /// zukünftigen TrayApp-Fenster mit dem Prefix-Kontrakt.
+    /// </summary>
+    [JsonPropertyName("windowTitles")]
+    public List<string> WindowTitles { get; set; } = new() { "AiRecall - " };
 }

@@ -202,4 +202,38 @@ public class TriggerWorkerTests
         Assert.Equal(1, worker.SkippedCount);
         worker.Stop();
     }
+
+    // -----------------------------------------------------------------------
+    // Bug-Bash 2026-07-05: Title-Blacklist für TrayApp-Fenster
+    // (SettingsDialog, LogviewerWindow) — die Defaults müssen verhindern,
+    // dass der Trigger die eigene UI capturt.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void TriggerBlacklist_Default_WindowTitles_ContainsTrayAppPrefix()
+    {
+        var config = new AppConfig();
+        Assert.Contains("AiRecall - ", config.Trigger.Blacklist.WindowTitles);
+    }
+
+    [Fact]
+    public void TriggerBlacklist_Default_WindowTitles_MatchesTrayAppWindows()
+    {
+        // Substring-Match (case-insensitive) wie Processes / WindowClasses.
+        // Beide TrayApp-Fenster müssen von der Default-Blacklist erfasst werden.
+        var config = new AppConfig();
+        Assert.True(TriggerWorker.MatchesAny("AiRecall - Settings", config.Trigger.Blacklist.WindowTitles));
+        Assert.True(TriggerWorker.MatchesAny("AiRecall - Live Logviewer", config.Trigger.Blacklist.WindowTitles));
+    }
+
+    [Fact]
+    public void TriggerBlacklist_Default_WindowTitles_DoesNotMatchForeignWindows()
+    {
+        // False-Positive-Check: ein normaler WindowTitle darf nicht versehentlich
+        // auf den "AiRecall - "-Prefix matchen.
+        var config = new AppConfig();
+        Assert.False(TriggerWorker.MatchesAny("Microsoft Word - Document1.docx", config.Trigger.Blacklist.WindowTitles));
+        Assert.False(TriggerWorker.MatchesAny("Chrome", config.Trigger.Blacklist.WindowTitles));
+        Assert.False(TriggerWorker.MatchesAny("", config.Trigger.Blacklist.WindowTitles));
+    }
 }
