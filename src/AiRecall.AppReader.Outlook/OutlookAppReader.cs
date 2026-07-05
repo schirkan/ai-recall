@@ -58,7 +58,6 @@ public sealed class OutlookAppReader : AppReaderBase
     private OutlookEntryStore? _store;
     private ILogger? _logger;
     private string _captureRoot = string.Empty;
-    private bool _captureRootInitialized;
     private DateTimeOffset _lastPollAt = DateTimeOffset.MinValue;
 
     /// <summary>Parameterloser Konstruktor (fuer <see cref="System.Activator.CreateInstance(Type)"/> im Plugin-Loader).</summary>
@@ -74,7 +73,6 @@ public sealed class OutlookAppReader : AppReaderBase
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _captureRoot = captureRoot ?? throw new ArgumentNullException(nameof(captureRoot));
-        _captureRootInitialized = true;
     }
 
     public override IReadOnlyCollection<string> SupportedProcesses { get; } = new[] { OutlookProcessName };
@@ -135,22 +133,9 @@ public sealed class OutlookAppReader : AppReaderBase
             _lastPollAt = now;
         }
 
-        // Lazy Init Store
-        if (_store == null)
-        {
-            try
-            {
-                _store = OutlookEntryStore.CreateDefault(context.Logger);
-            }
-            catch (Exception ex)
-            {
-                context.Logger.Warning(ex, "OutlookAppReader: OutlookEntryStore.CreateDefault failed");
-                return;
-            }
-        }
-
-        _logger = context.Logger;
-        EnsureCaptureRoot(context);
+        // Lazy-Init (Store + CaptureRoot + Logger). Bei Fehler still
+        // aussteigen — naechster Poll versucht es erneut.
+        if (!EnsureInitialized(context)) return;
 
         int totalProcessed = 0;
         int totalSuspect = 0;
@@ -178,7 +163,7 @@ public sealed class OutlookAppReader : AppReaderBase
                     if (context.CancellationToken.IsCancellationRequested) break;
                     if (string.IsNullOrWhiteSpace(mail.EntryId)) continue;
 
-                    if (_store.IsSeen(mail.EntryId))
+                    if (_store!.IsSeen(mail.EntryId))
                     {
                         totalDuplicates++;
                         continue;
@@ -190,7 +175,7 @@ public sealed class OutlookAppReader : AppReaderBase
                 }
             }
 
-            _store.MarkSweepCompleted(DateTimeOffset.UtcNow);
+            _store!.MarkSweepCompleted(DateTimeOffset.UtcNow);
 
             if (totalProcessed > 0 || totalSuspect > 0 || totalDuplicates > 0)
             {
@@ -239,7 +224,7 @@ public sealed class OutlookAppReader : AppReaderBase
         // 3) Persist
         try
         {
-            EnsureCaptureRoot(context);
+            // _captureRoot ist nach EnsureInitialized in OnPoll garantiert non-empty.
             WriteMailCapture(mail, bodyMd, folder, cfg, context);
         }
         catch (Exception ex)
@@ -253,21 +238,42 @@ public sealed class OutlookAppReader : AppReaderBase
         return MailVerdict.Persisted;
     }
 
-    private void EnsureCaptureRoot(AppReaderContext context)
+    /// <summary>
+    /// Lazy-Init fuer Store + CaptureRoot + Logger. Liefert false bei
+    /// Initialisierungsfehler (Caller bricht ab). Thread-safety: nicht
+    /// noetig, da OnPoll serielle Sweeps macht. Mehrere parallele Calls
+    /// wuerden maximal zu doppelter Store-Init fuehren, was harmlos ist
+    /// (OutlookEntryStore.CreateDefault ist intern idempotent + lock-frei
+    /// fuer den Path-Resolve).
+    /// </summary>
+    private bool EnsureInitialized(AppReaderContext context)
     {
-        if (_captureRootInitialized && !string.IsNullOrEmpty(_captureRoot)) return;
+        // Logger immer setzen (kann sich pro Aufruf aendern).
+        _logger = context.Logger;
 
-        lock (_gate)
+        if (_store == null)
         {
-            if (_captureRootInitialized && !string.IsNullOrEmpty(_captureRoot)) return;
+            try
+            {
+                _store = OutlookEntryStore.CreateDefault(context.Logger);
+            }
+            catch (Exception ex)
+            {
+                context.Logger.Warning(ex, "OutlookAppReader: OutlookEntryStore.CreateDefault failed");
+                return false;
+            }
+        }
+
+        if (_captureRoot.Length == 0)
+        {
             // Default: %APPDATA%/AiRecall/capture
-            var fullPath = System.IO.Path.Combine(
+            _captureRoot = System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 ConfigLoader.AppDataSubdirectory,
                 "capture");
-            _captureRoot = fullPath;
-            _captureRootInitialized = true;
         }
+
+        return true;
     }
 
     private void WriteMailCapture(
@@ -277,13 +283,10 @@ public sealed class OutlookAppReader : AppReaderBase
         OutlookConfig cfg,
         AppReaderContext context)
     {
-        if (string.IsNullOrEmpty(_captureRoot))
+        if (_captureRoot.Length == 0)
         {
-            EnsureCaptureRoot(context);
-            if (string.IsNullOrEmpty(_captureRoot))
-            {
-                throw new InvalidOperationException("OutlookAppReader: captureRoot not initialized");
-            }
+            throw new InvalidOperationException(
+                "OutlookAppReader: captureRoot not initialized — call EnsureInitialized first");
         }
 
         var direction = InferDirection(folder);

@@ -154,12 +154,12 @@ internal static class OutlookComInterop
                 null);
             if (selection == null) return result;
 
-            var count = (int)selection.GetType().InvokeMember(
+            var count = (int)(selection.GetType().InvokeMember(
                 "Count",
                 BindingFlags.GetProperty,
                 null,
                 selection,
-                null);
+                null) ?? 0);
             var take = Math.Min(count, maxItems);
             for (int i = 1; i <= take; i++)
             {
