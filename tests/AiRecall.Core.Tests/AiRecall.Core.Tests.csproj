@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Notepad\AiRecall.AppReader.Notepad.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.OneNote\AiRecall.AppReader.OneNote.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Pdf\AiRecall.AppReader.Pdf.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Trigger\AiRecall.Trigger.csproj" />
