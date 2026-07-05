@@ -144,7 +144,7 @@ public static class ConfigSchemaReflection
             // Sub-Sections im TreeView angezeigt, NICHT als Property — sonst rekursive
             // Expansion. Ausnahme: einfache POCOs (z. B. WinEventSubscription, TriggerBlacklist)
             // werden als Property angezeigt, weil sie keine eigene Section im TreeView haben.
-            if (IsExpandableConfigType(prop.PropertyType) && HasConfigAttribute(prop))
+            if (IsExpandableConfigType(prop.PropertyType))
             {
                 continue;
             }
@@ -159,22 +159,16 @@ public static class ConfigSchemaReflection
         // editierbare Properties mitbringen — wir expandieren sie als Sub-Section statt
         // als einzelne PropertyGrid-Zeile. Sub-Sub-Configs (z. B. CdpConfig) bleiben als
         // einfache Properties sichtbar (BrowserConfig hat Sub-Section für Markdown).
+        //
+        // Bug-Bash 2026-07-05 I-6: Hat jetzt alle Checks in einer Funktion
+        // konsolidiert. Die ehemalige zweite Funktion HasConfigAttribute
+        // (PropertyDescriptor-Version) war eine schlampigere Variante dieser
+        // Logik und wurde entfernt.
         return type.IsClass
             && type != typeof(string)
             && !type.IsPrimitive
             && !type.IsGenericType   // List<>, Dictionary<> etc.
             && type != typeof(object)
             && type.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>() is not null;
-    }
-
-    private static bool HasConfigAttribute(PropertyDescriptor prop)
-    {
-        // Browser.Cdp / Browser.Markdown sind im PropertyGrid sichtbar als Sub-Section,
-        // aber wir wollen sie NICHT als Property anzeigen (sie haben eigene Sub-Sections
-        // in der Zukunft oder sind zu komplex). Hier: konservativ — wenn Property Type
-        // eine Klasse mit [JsonPropertyName] ist, blende sie aus (User navigiert zur Sub-Section).
-        return prop.PropertyType.IsClass
-            && prop.PropertyType != typeof(string)
-            && prop.PropertyType.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>() is not null;
     }
 }

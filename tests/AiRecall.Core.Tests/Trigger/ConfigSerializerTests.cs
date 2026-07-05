@@ -137,4 +137,46 @@ public class ConfigSerializerTests
             if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
         }
     }
+
+    /// <summary>
+    /// Bug-Bash 2026-07-05 I-7 Regressions-Test: Wenn der Backup-Pfad nicht
+    /// geschrieben werden kann (z. B. weil ein Read-only-Handle den Pfad
+    /// blockiert), soll der eigentliche Save trotzdem gelingen.
+    /// </summary>
+    [Fact]
+    public void SaveAtomic_BackupFailure_DoesNotPreventSave()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"config-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "config.json");
+        try
+        {
+            // Initial file schreiben
+            File.WriteAllText(path, "{\"initial\":true}");
+
+            // Backup-Pfad als Read-only-Datei anlegen — File.Copy mit overwrite
+            // wirft dann UnauthorizedAccessException
+            var bakPath = path + ".bak";
+            File.WriteAllText(bakPath, "old-backup");
+            File.SetAttributes(bakPath, FileAttributes.ReadOnly);
+
+            // Save sollte trotzdem gelingen, ohne dass die Exception propagiert
+            ConfigSerializer.SaveAtomic(new AppConfig(), path);
+
+            Assert.True(File.Exists(path));
+            // Save selbst hat stattgefunden — Datei existiert und enthaelt aktuelle Config
+            var content = File.ReadAllText(path);
+            Assert.Contains("\"capture\"", content);
+        }
+        finally
+        {
+            // Read-only-Attribut zuruecksetzen vor dem Cleanup
+            var bakPath = path + ".bak";
+            if (File.Exists(bakPath))
+            {
+                File.SetAttributes(bakPath, FileAttributes.Normal);
+            }
+            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+        }
+    }
 }

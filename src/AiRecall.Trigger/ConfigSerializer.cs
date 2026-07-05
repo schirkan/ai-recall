@@ -38,7 +38,7 @@ public static class ConfigSerializer
 
     /// <summary>
     /// Writes <paramref name="config"/> atomically to <paramref name="path"/>:
-    /// 1. backup existing file to <c>{path}.bak</c>
+    /// 1. backup existing file to <c>{path}.bak</c> (best-effort)
     /// 2. write to <c>{path}.tmp</c>
     /// 3. move tmp to path (overwrite)
     /// </summary>
@@ -53,11 +53,21 @@ public static class ConfigSerializer
             Directory.CreateDirectory(dir);
         }
 
-        // 1. Backup
+        // 1. Backup existing file (best-effort: Bug-Bash 2026-07-05 I-7).
+        // Wenn der Backup-Pfad gelockt ist (z. B. weil ein anderer Prozess
+        // oder die vorherige Schreibaktion ihn noch offen haelt), soll der
+        // Save trotzdem funktionieren. Backup-Verlust ist akzeptabler als
+        // ein kompletter Save-Fehler fuer ein Personal-Tool.
         if (File.Exists(path))
         {
-            var backupPath = path + ".bak";
-            File.Copy(path, backupPath, overwrite: true);
+            try
+            {
+                File.Copy(path, path + ".bak", overwrite: true);
+            }
+            catch
+            {
+                // bewusst geschluckt — siehe Kommentar oben
+            }
         }
 
         // 2. Write tmp
@@ -65,7 +75,7 @@ public static class ConfigSerializer
         var json = Serialize(config);
         File.WriteAllText(tmpPath, json);
 
-        // 3. Atomic move
+        // 3. Atomic move (Replace wenn Ziel existiert, sonst Move)
         if (File.Exists(path)) File.Replace(tmpPath, path, destinationBackupFileName: null);
         else File.Move(tmpPath, path);
     }
