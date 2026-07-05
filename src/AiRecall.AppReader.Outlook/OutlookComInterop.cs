@@ -69,21 +69,11 @@ internal static class OutlookComInterop
     }
 
     /// <summary>
-    /// Snapshot-Daten einer einzelnen Mail. Public fuer Tests und als
-    /// Datentransfer zwischen <see cref="OutlookComInterop"/> und
-    /// <see cref="OutlookAutoRuleDetector"/> (Heuristik).
+    /// Snapshot-Daten einer einzelnen Mail. Top-level type (siehe
+    /// <c>MailSnapshotFromCom.cs</c>) — Datentransfer zwischen
+    /// <see cref="OutlookComInterop"/>, <see cref="OutlookAppReader"/>
+    /// und <see cref="OutlookAutoRuleDetector"/> (Heuristik).
     /// </summary>
-    public sealed record MailSnapshotFromCom(
-        string EntryId,
-        string Subject,
-        string From,
-        string FolderName,
-        bool UnRead,
-        DateTimeOffset ReceivedTime,
-        DateTimeOffset LastModificationTime,
-        string Body,
-        string HtmlBody);
-
     /// <summary>
     /// Liefert den aktiven Inspector oder null. Wenn ein Mail-Inspector
     /// offen ist (d. h. User liest/schreibt eine Mail), wird dessen
