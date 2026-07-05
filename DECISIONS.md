@@ -208,7 +208,7 @@ Offene Punkte aus `specs/0002-mvp1-scope.md` durch Martin bestÃ¤tigt
 |---|---|---|---|
 | 1 | OCR-Engine | **Tesseract** (lokal, mehrsprachig) | Martin: "Build in OCR". Multi-OS-tauglich, kein Microsoft-Cloud-Zwang, MIT-kompatibel. |
 | 2 | CLI-Library | **Manueller Switch** (wie vorhanden) | Nur 5 Commands geplant; System.CommandLine/Spectre wÃ¤ren unnÃ¶tiger Ballast. Switch-Pattern in `Program.cs` ist < 30 Zeilen. |
-| 3 | Logging | **Serilog 3.1.1** + Console + File | Strukturiertes Logging, tÃ¤gliche Rolling-Files, Standard im .NET-Ã–kosystem. |
+| 3 | Logging | **Serilog 3.1.1** + Console + File | Strukturiertes Logging, tÃ¤gliche Rolling-Files, Standard im .NET-Ã¶kosystem. |
 | 4 | Tests | **xUnit** (bereits eingerichtet) | Bereits im Skeleton, gut fÃ¼r parallele Tests + VS-Integration. |
 | 5 | Ignore-Liste | **Blacklist-Ansatz** mit kleinen Seed-Patterns | Default-Config seeded `1Password`, `KeePass`, `Bitwarden`, ein paar Title-Patterns (`Sign in`/`Anmelden`/`Passwort`/`Fingerprint`) und zwei URL-Patterns (`banking`, `accounts.google.com`). User kann via `%APPDATA%/AiRecall/config.json` erweitern. |
 
@@ -270,7 +270,7 @@ zweiten Pfad ein, zusÃ¤tzlich zur bestehenden UIA-Strategie.
 Alle Ã¶ffentlichen Properties von `ReverseMarkdown.Config` (v3.13) werden Ã¼ber
 `appReader.browser.markdown` als JSON konfigurierbar gemacht. Damit lÃ¤sst
 sich das HTMLâ†’Markdown-Verhalten des Browser-Readers zur Laufzeit anpassen,
-ohne Code-Ã„nderung.
+ohne Code-Ã¤nderung.
 
 | Aspekt | Entscheidung | BegrÃ¼ndung |
 |---|---|---|
@@ -353,35 +353,35 @@ Commits `3a98e04` â€¦ `84afab7`. Test-Count 331/331 grÃ¼n (vorher 271).
 
 ---
 
-## 2026-07-04 — MVP2 Tray-Icon-EXE (Spec 0006/0008/0009, v1.0 abgeschlossen)
+## 2026-07-04 ï¿½ MVP2 Tray-Icon-EXE (Spec 0006/0008/0009, v1.0 abgeschlossen)
 
 Neue WinForms-EXE als alternative UI zur CLI. Martin-Direktive 22:18: Live Logviewer + Settings-Dialog. Architektur-Korrektur 22:29: in-process statt Subprozess.
 
-Commits 5ab077a...875ae98. Test-Count 331 -> **416/416 grün** (+85).
+Commits 5ab077a...875ae98. Test-Count 331 -> **416/416 grï¿½n** (+85).
 
-| # | Thema | Entscheidung | Begründung |
+| # | Thema | Entscheidung | Begrï¿½ndung |
 |---|---|---|---|
 | 1 | Assembly-Struktur | **AiRecall.TrayApp.exe (WinForms, WinExe) + AiRecall.Trigger.dll als Library** | Tray-EXE referenziert Trigger-Library und instanziiert ITriggerService direkt. CLI und Tray-EXE teilen sich denselben Code via Trigger-Library. Zyklusfreie Ref-Kette: Core -> Trigger -> TrayApp (+ AppReader.* + Conversion). |
-| 2 | Architektur (revidiert v0.2) | **In-process ITriggerService statt Subprozess** (Martin 22:29) | TrayApp ist ohnehin tot ohne Worker — Isolation bringt nichts. Cold-Start, MMF-IPC und Process-Supervision sind unnötige Komplexität. ProcessSupervisor und MmfLogPipe aus v0.1 sind tot. |
-| 3 | UI-Framework | **WinForms** (kein WPF, kein Avalonia) | WinForms-NotifyIcon ist out-of-the-box verfügbar; WPF wäre Overhead für Notification-Area-Use-Case. Cross-Platform unnötig (Windows-only per Spec 0001). |
-| 4 | TriggerSupervisor | **In-process-Wrapper um ITriggerService** mit TriggerState (Stopped/Starting/Running/Stopping/Crashed) + StateChanged-Event + optionaler ServiceFactory für DI/Tests | Sauberer Lifecycle: Start -> Running, Stop -> Stopped, Restart = Stop + Dispose + Start mit neuer Config (Hot-Reload-Pattern). Crash-Pfad: ServiceFactory throws -> State=Crashed, CrashCount++, LastCrashAt gesetzt. |
-| 5 | ServiceFactory-Pattern | **Func<AppConfig, ILogger, ITriggerService> als optionaler ctor-Parameter** | Tests können FakeTriggerService injecten, ohne WinEventHook/Heartbeat/Channel zu instantiieren. Production nutzt DefaultFactory = (c, l) => new TriggerService(c, l). |
+| 2 | Architektur (revidiert v0.2) | **In-process ITriggerService statt Subprozess** (Martin 22:29) | TrayApp ist ohnehin tot ohne Worker ï¿½ Isolation bringt nichts. Cold-Start, MMF-IPC und Process-Supervision sind unnï¿½tige Komplexitï¿½t. ProcessSupervisor und MmfLogPipe aus v0.1 sind tot. |
+| 3 | UI-Framework | **WinForms** (kein WPF, kein Avalonia) | WinForms-NotifyIcon ist out-of-the-box verfï¿½gbar; WPF wï¿½re Overhead fï¿½r Notification-Area-Use-Case. Cross-Platform unnï¿½tig (Windows-only per Spec 0001). |
+| 4 | TriggerSupervisor | **In-process-Wrapper um ITriggerService** mit TriggerState (Stopped/Starting/Running/Stopping/Crashed) + StateChanged-Event + optionaler ServiceFactory fï¿½r DI/Tests | Sauberer Lifecycle: Start -> Running, Stop -> Stopped, Restart = Stop + Dispose + Start mit neuer Config (Hot-Reload-Pattern). Crash-Pfad: ServiceFactory throws -> State=Crashed, CrashCount++, LastCrashAt gesetzt. |
+| 5 | ServiceFactory-Pattern | **Func<AppConfig, ILogger, ITriggerService> als optionaler ctor-Parameter** | Tests kï¿½nnen FakeTriggerService injecten, ohne WinEventHook/Heartbeat/Channel zu instantiieren. Production nutzt DefaultFactory = (c, l) => new TriggerService(c, l). |
 | 6 | Hot-Reload | **TriggerSupervisor.Restart(newConfig) = Stop + Dispose alter Service + Start mit neuer Config** | Im Gegensatz zu Subprozess-Kill: kein Cold-Start (200-500 ms gespart), keine MMF-Reinit, kein Datenverlust. UI merkt kurz State=Stopping -> Starting -> Running. |
-| 7 | In-Memory Log-Sink | **InMemoryLogSink (custom Serilog-Sink) mit Ringbuffer 10.000** | LogviewerWindow subscribed auf EventEmitted und appended live. Kein File-I/O, kein MMF. Bei Crash/Dispose: EventEmitted = null (detach subscribers). File-Tail als Fallback für History. |
-| 8 | LogviewerWindow-UI | **WinForms DataGridView mit 4 Spalten (Time, Level, Logger, Message), Virtual-Mode aus** | 10.000 Zeilen sind OK für non-virtual DataGridView. Color-Coding nach Level (grau/blau/schwarz/orange/rot/fett-rot) via CellFormatting. Cross-thread-safe via BeginInvoke. |
-| 9 | LogFilter | **Pure-Logic: MinLevel (LogEventLevel?) + SearchText (string?, case-insensitive)** | Außerhalb der WinForms-UI, separat unit-testbar. Matches(LogEventEntry) kombiniert beide Filter. |
-| 10 | LogviewerSession | **Bounded buffer (LinkedList + lock) subscribed auf InMemoryLogSink.EventEmitted** | Pure-Logic zwischen Sink und Window. Mehrere Sessions über denselben Sink möglich (isolation per capacity). IsPaused ist UI-Hint, Session puffert weiter. |
+| 7 | In-Memory Log-Sink | **InMemoryLogSink (custom Serilog-Sink) mit Ringbuffer 10.000** | LogviewerWindow subscribed auf EventEmitted und appended live. Kein File-I/O, kein MMF. Bei Crash/Dispose: EventEmitted = null (detach subscribers). File-Tail als Fallback fï¿½r History. |
+| 8 | LogviewerWindow-UI | **WinForms DataGridView mit 4 Spalten (Time, Level, Logger, Message), Virtual-Mode aus** | 10.000 Zeilen sind OK fï¿½r non-virtual DataGridView. Color-Coding nach Level (grau/blau/schwarz/orange/rot/fett-rot) via CellFormatting. Cross-thread-safe via BeginInvoke. |
+| 9 | LogFilter | **Pure-Logic: MinLevel (LogEventLevel?) + SearchText (string?, case-insensitive)** | Auï¿½erhalb der WinForms-UI, separat unit-testbar. Matches(LogEventEntry) kombiniert beide Filter. |
+| 10 | LogviewerSession | **Bounded buffer (LinkedList + lock) subscribed auf InMemoryLogSink.EventEmitted** | Pure-Logic zwischen Sink und Window. Mehrere Sessions ï¿½ber denselben Sink mï¿½glich (isolation per capacity). IsPaused ist UI-Hint, Session puffert weiter. |
 | 11 | Settings-Dialog-UI | **TreeView links (Top-Level + Sub-Sektionen) + dynamisch generierte Form rechts (Label + Type-Editor pro Property)** | WinForms .NET 8 hat **kein PropertyGrid-Control**. Daher dynamische Form-Generierung mit Type-spezifischen Editoren aus PropertyEditorFactory: bool->CheckBox, int/long/string->TextBox, enum->ComboBox, List<string>->Comma-Separated-TextBox. |
-| 12 | ConfigSchemaReflection | **Reflection auf AppConfig POCO-Typen, Single-Source-of-Truth** | Kein manuelles Schema-File (Drift-Risiko). GetTopLevelSections liefert 7 Top-Level + 5 Sub-Sections unter ppReader. FindByPath für hierarchische Suche. Filtert Read-Only + Sub-Config-Klassen aus Property-Liste aus. |
+| 12 | ConfigSchemaReflection | **Reflection auf AppConfig POCO-Typen, Single-Source-of-Truth** | Kein manuelles Schema-File (Drift-Risiko). GetTopLevelSections liefert 7 Top-Level + 5 Sub-Sections unter ppReader. FindByPath fï¿½r hierarchische Suche. Filtert Read-Only + Sub-Config-Klassen aus Property-Liste aus. |
 | 13 | ConfigSerializer | **JsonSerializer.Serialize (camelCase, indented) + SaveAtomic mit .bak-Backup + .tmp + File.Replace** | Atomic-Write-Pattern: temp file + rename, kein halb-geschriebenes File bei Crash. Backup der vorherigen Version vor jedem Save. |
 | 14 | Hot-Reload via Restart | **SettingsDialog.Save -> TrayAppContext.ApplyConfig -> supervisor.Restart(newConfig)** | Ein-Trigger-Pfad: User klickt Save -> File geschrieben -> Service restartet mit neuer Config -> LogviewerWindow bleibt offen, zeigt neuen Service-Log. |
-| 15 | Single-Instance | **Named-Mutex Local\AiRecall.TrayApp.SingleInstance** | Zweiter Start erkennt ersten via Mutex, bringt dessen Fenster in den Vordergrund. Bring-to-Front via FindWindow + SetForegroundWindow (Stub in Schritt 1, vollständig in Schritt 4). |
-| 16 | UserConfigLocator | **Statische Helper-Klasse in AiRecall.Trigger**, gibt ConfigLoader.DefaultUserConfigPath() zurück und LoadOrDefault(logger) mit Fallback auf 
+| 15 | Single-Instance | **Named-Mutex Local\AiRecall.TrayApp.SingleInstance** | Zweiter Start erkennt ersten via Mutex, bringt dessen Fenster in den Vordergrund. Bring-to-Front via FindWindow + SetForegroundWindow (Stub in Schritt 1, vollstï¿½ndig in Schritt 4). |
+| 16 | UserConfigLocator | **Statische Helper-Klasse in AiRecall.Trigger**, gibt ConfigLoader.DefaultUserConfigPath() zurï¿½ck und LoadOrDefault(logger) mit Fallback auf 
 ew AppConfig() | Trennt Config-Pfad-Logik von TrayApp. Testbar ohne WinForms. ConfigLoader bleibt statisch (DECISIONS.md Spec 0002 v0.1). |
-| 17 | Refactor: Pure Logic in AiRecall.Trigger | **TrayIconState, UserConfigLocator, LogFilter, LogviewerSession, InMemoryLogSink, ConfigSchemaReflection, ConfigSerializer, PropertyEditorFactory** sind in AiRecall.Trigger (Library), nicht in AiRecall.TrayApp (WinExe) | Tests brauchen kein WinForms-Setup (UseWindowsForms=true im Test-csproj verursacht xunit-Auflösungsprobleme). Library-Code ist plattform-neutral und auch von CLI nutzbar. |
-| 18 | LogSink-Auflösung | **Trick: Log.Logger global konfiguriert mit WriteTo.Sink(inMemoryLogSink)** | Serilog unterstützt custom Sinks via WriteTo.Sink(). InMemoryLogSink implementiert ILogEventSink mit Emit(LogEvent). Resultat: alle Log.Information(...) Calls landen sowohl in logs/trayapp-*.log als auch im In-Memory-Ringbuffer. |
-| 19 | TriggerEvent-Subscription (Logviewer) | **NICHT implementiert** (Workaround: Logviewer liest Serilog-Events, nicht Trigger-Events) | TriggerEvent hat kein Serilog-Format; ein dedizierter Subscription-Pfad wäre eigene Architektur. Aktuelle Lösung: Logviewer liest Log-Output, der reichhaltiger ist (Level, Logger, Message, Exception, Timestamp). Trigger-Counter werden in TrayIcon-Tooltip angezeigt. |
-| 20 | WinForms PropertyGrid | **NICHT verfügbar in .NET 8** (war im alten .NET Framework verfügbar) | Daher dynamische Form-Generierung. Alternative wäre WPF + WindowsFormsHost, aber Overhead. Eigene PropertyGrid-Implementation wäre mehrere Tausend Zeilen — YAGNI. |
+| 17 | Refactor: Pure Logic in AiRecall.Trigger | **TrayIconState, UserConfigLocator, LogFilter, LogviewerSession, InMemoryLogSink, ConfigSchemaReflection, ConfigSerializer, PropertyEditorFactory** sind in AiRecall.Trigger (Library), nicht in AiRecall.TrayApp (WinExe) | Tests brauchen kein WinForms-Setup (UseWindowsForms=true im Test-csproj verursacht xunit-Auflï¿½sungsprobleme). Library-Code ist plattform-neutral und auch von CLI nutzbar. |
+| 18 | LogSink-Auflï¿½sung | **Trick: Log.Logger global konfiguriert mit WriteTo.Sink(inMemoryLogSink)** | Serilog unterstï¿½tzt custom Sinks via WriteTo.Sink(). InMemoryLogSink implementiert ILogEventSink mit Emit(LogEvent). Resultat: alle Log.Information(...) Calls landen sowohl in logs/trayapp-*.log als auch im In-Memory-Ringbuffer. |
+| 19 | TriggerEvent-Subscription (Logviewer) | **NICHT implementiert** (Workaround: Logviewer liest Serilog-Events, nicht Trigger-Events) | TriggerEvent hat kein Serilog-Format; ein dedizierter Subscription-Pfad wï¿½re eigene Architektur. Aktuelle Lï¿½sung: Logviewer liest Log-Output, der reichhaltiger ist (Level, Logger, Message, Exception, Timestamp). Trigger-Counter werden in TrayIcon-Tooltip angezeigt. |
+| 20 | WinForms PropertyGrid | **NICHT verfï¿½gbar in .NET 8** (war im alten .NET Framework verfï¿½gbar) | Daher dynamische Form-Generierung. Alternative wï¿½re WPF + WindowsFormsHost, aber Overhead. Eigene PropertyGrid-Implementation wï¿½re mehrere Tausend Zeilen ï¿½ YAGNI. |
 
 ### Tests
 
@@ -394,30 +394,85 @@ ew AppConfig() | Trennt Config-Pfad-Logik von TrayApp. Testbar ohne WinForms. Co
   - LogviewerSessionTests (12): Sink-Subscribe, Append, Capacity-Overflow, Clear, Filter, Pause, Multi-Session
   - ConfigSchemaReflectionTests (11): Top-Level, Sub-Sections, Path-Lookup, Property-Editing
   - ConfigSerializerTests (9): Round-Trip, Atomic-Write, Backup, Malformed-JSON
-  - PropertyEditorFactoryTests (7): Type-Dispatch für bool/int/string/enum/List, ReadOnly
-- Test-Count gesamt: **416/416 grün** (vorher 331).
+  - PropertyEditorFactoryTests (7): Type-Dispatch fï¿½r bool/int/string/enum/List, ReadOnly
+- Test-Count gesamt: **416/416 grï¿½n** (vorher 331).
 
 ### Verworfen
 
-- **Subprozess-Spawn mit ProcessSupervisor + MmfLogPipe + MMF-IPC** (Spec 0006 v0.1): TrayApp ist ohnehin tot ohne Worker — Isolation bringt nichts. Martin-Korrektur 22:29.
-- **TrayApp in WPF**: Overhead ohne Mehrwert für Notification-Area-Use-Case.
-- **Avalonia/MauiUI**: Cross-Platform unnötig.
-- **MemoryMappedFile als IPC**: durch in-process-Architektur überflüssig.
-- **Named-Pipe für Log-Streaming**: durch in-process-Architektur überflüssig.
-- **WinForms PropertyGrid-Control**: nicht in .NET 8 verfügbar — dynamische Form-Generierung stattdessen.
+- **Subprozess-Spawn mit ProcessSupervisor + MmfLogPipe + MMF-IPC** (Spec 0006 v0.1): TrayApp ist ohnehin tot ohne Worker ï¿½ Isolation bringt nichts. Martin-Korrektur 22:29.
+- **TrayApp in WPF**: Overhead ohne Mehrwert fï¿½r Notification-Area-Use-Case.
+- **Avalonia/MauiUI**: Cross-Platform unnï¿½tig.
+- **MemoryMappedFile als IPC**: durch in-process-Architektur ï¿½berflï¿½ssig.
+- **Named-Pipe fï¿½r Log-Streaming**: durch in-process-Architektur ï¿½berflï¿½ssig.
+- **WinForms PropertyGrid-Control**: nicht in .NET 8 verfï¿½gbar ï¿½ dynamische Form-Generierung stattdessen.
 - **TriggerEvent-Subscription in LogviewerWindow**: redundant, da Logviewer bereits Serilog-Events liest.
-- **Eigene PropertyGrid-Implementation**: mehrere Tausend Zeilen für ein Edit-Control, YAGNI.
-- **<Using Include="Xunit" /> via Project-Reference** (vorheriger Fehler): xunit 2.6.6 wird mit explizitem <Using Include="Xunit" /> im Test-csproj aufgelöst (sonst scheitert Compile mit "Der Name 'Fact' wurde nicht gefunden").
+- **Eigene PropertyGrid-Implementation**: mehrere Tausend Zeilen fï¿½r ein Edit-Control, YAGNI.
+- **<Using Include="Xunit" /> via Project-Reference** (vorheriger Fehler): xunit 2.6.6 wird mit explizitem <Using Include="Xunit" /> im Test-csproj aufgelï¿½st (sonst scheitert Compile mit "Der Name 'Fact' wurde nicht gefunden").
 
 ### Auswirkungen
 
 - Neue DLL: AiRecall.TrayApp (WinForms, WinExe, 
 et8.0-windows)
 - AiRecall.Trigger erweitert um TriggerSupervisor, InMemoryLogSink, TrayIconState, UserConfigLocator, LogFilter, LogviewerSession, ConfigSchemaReflection, ConfigSerializer, PropertyEditorFactory
-- AiRecall.Cli unverändert (Standalone-Support für Scripts)
+- AiRecall.Cli unverï¿½ndert (Standalone-Support fï¿½r Scripts)
 - AiRecall.Trigger ProjectRef in AiRecall.TrayApp
 - AiRecall.TrayApp ProjectRef in Solution
-- Test-csproj: <Using Include="Xunit" /> für implizites using Xunit;
+- Test-csproj: <Using Include="Xunit" /> fï¿½r implizites using Xunit;
 - TrayAppContext orchestriert: InMemoryLogSink (Serilog) + TriggerSupervisor + TrayIconController + LogviewerSession
 - Hot-Reload-Pattern: SettingsDialog Save -> ConfigSerializer.SaveAtomic -> TriggerSupervisor.Restart (kein Process-Kill)
 - AiRecall.TrayApp.exe Start-Args: keine (Config aus %APPDATA%/AiRecall/config.json)
+
+
+
+
+
+## 2026-07-05 â€” Outlook App-Reader (Spec 0004 Iter. 3)
+
+Spec 0004 Iter. 3 ist mit Commits `f0dffb1` ... `42de0b9` abgeschlossen.
+Test-Count 425 â†’ **525/525 grÃ¼n** (+100). Modul komplett neu in
+`AiRecall.AppReader.Outlook` (6 Files, 0 Warnings, 0 Errors).
+
+| # | Thema | Entscheidung | BegrÃ¼ndung |
+|---|---|---|---|
+| 1 | DLL-Struktur | **Neue DLL `AiRecall.AppReader.Outlook.dll`** (analog zu Browser/Notepad/Documents) | Eine DLL pro App-Familie. Plugin-Discovery via AppReaderRegistry automatisch. |
+| 2 | COM-Strategie | **Late binding** (ProgID `Outlook.Application` + P/Invoke `oleaut32!GetActiveObject`) | Wie `OfficeComInterop`. Keine PIAs, keine Office-Version-Bindung. Funktioniert sobald Outlook als COM-Server lÃ¤uft. |
+| 3 | Active-Object-Pattern | **P/Invoke statt `Marshal.GetActiveObject`** | `Marshal.GetActiveObject` ist in .NET 8 SDK 8.0.422 nicht (mehr) direkt verfÃ¼gbar. P/Invoke funktioniert in allen SDK-Versionen. |
+| 4 | Dual-Mode Reader | **`Read()` fÃ¼r aktives Fenster + `OnPoll()` fÃ¼r Background-Sweep** | `Read` fÃ¼r AR-2 (Inspector/Explorer-Selection); `OnPoll` fÃ¼r AR-3+AR-7 (Mail-Stream-Log). `SupportsBackgroundPolling = true` â€” der TriggerSupervisor ruft `OnPoll` zusÃ¤tzlich zu `Read`. |
+| 5 | `OnPoll`-Throttle | **Internes `_lastPollAt`-Feld** + Check gegen `cfg.PollIntervalSeconds` | Verhindert Sweep-Spam bei mehrfachen TriggerService-Calls. Default 60 s. Kein zusÃ¤tzlicher Timer nÃ¶tig. |
+| 6 | EntryID-Dedup | **`OutlookEntryStore` mit `HashSet<string>` + atomic `File.Replace`** | Verhindert Re-Persistenz nach App-Restart. `IsSeen()` O(1), `MarkSeen()` atomar, `MarkSweepCompleted()` setzt Timestamp. State in `%APPDATA%/AiRecall/outlook-seen.json` (Plain-JSON, gitignored). |
+| 7 | AutoRule-Heuristik | **4 Bedingungen, â‰¥2 Hits = suspect** | Pure-Function auf `MailSnapshot`-Record: (a) Marked-Read-Fast, (b) Junk/Newsletter-Folder, (c) NoReply-Sender-Regex, (d) Auto-Reply-Subject+Body. Suspect-Mails werden via `MarkSeen()` markiert (keine Re-Evaluation) aber **kein MD geschrieben**. |
+| 8 | HTMLâ†’MD | **Custom-Konverter, kein ReverseMarkdown** | Outlook-HTML ist simpel genug fÃ¼r eigene Tag-Strip-Logik. Strippt `<style>`/`<script>`/Conditional-Comments/`<img>`; Links zu `[text](url)`; Block-Tags zu `\n\n`; `&nbsp;` â†’ space; Whitespace-Normalisierung mit Block-Boundary-Tracker (`\n\n` bleibt erhalten). |
+| 9 | Capture-Root-Default | **`%APPDATA%/AiRecall/capture`** als gemeinsamer Anchor | Gleicher Anchor wie `OutlookConfig.DefaultSeenStatePath()`. Ãœberschreibbar via Konstruktor (`internal OutlookAppReader(store, logger, captureRoot)`). |
+| 10 | Direction-Inferenz | **Folder-Name â†’ in/out** | `Inbox` â†’ `in`, `Sent Items` â†’ `out`, Custom-Folder â†’ `â€”`. Im Persistenz-Schema-Filename und im Frontmatter. |
+| 11 | Persistenz-Schema | **`capture/<yyyy-MM-dd>/outlook-mail/<HHmmss>-<direction>-<entryIdShort>.md`** | Eine MD pro Mail. YAML-Frontmatter: `timestamp`, `kind=mail`, `direction`, `entryId`, `subject`, `from`, `folder`, `date`, `lastModificationTime`, `unread`, `hasAttachments`, `autoRuleSuspect`, `source=outlook-com`, `reader`, `readerVersion`. |
+| 12 | Filename-Kollisionen | **`<HHmmss>-N`-Suffix** bei gleichem Timestamp | Outlook-EntryIDs sind eindeutig, aber im selben Sweep kÃ¶nnen zwei Mails gleichen `<HHmmss>` haben. Suffix `-1`, `-2`, ... verhindert Ãœberschreiben. |
+| 13 | Test-Injection | **`internal OutlookAppReader(store, logger, captureRoot)` + `[InternalsVisibleTo("AiRecall.Core.Tests")]`** | Tests kÃ¶nnen Dependencies isolieren, ohne `%APPDATA%` oder COM zu brauchen. Production-Pfad nutzt parameterlosen Konstruktor (AppReaderRegistry-Anforderung via `Activator.CreateInstance`). |
+| 14 | Lazy-Init-Konsolidierung | **`EnsureInitialized(context)`-Helper** statt mehrerer `_initialized`-Flags | Klare Init-Logik, keine Doppel-Checks. Init fÃ¼r Store + CaptureRoot + Logger in einem Helper. -12 Zeilen Code ggÃ¼. initialer Version. |
+| 15 | CS8605-Fix | **`(int)(InvokeMember(...) ?? 0)` defensiv** fÃ¼r COM Late-Binding Count-Properties | Casts auf `int` lÃ¶sen CS8605 aus, weil `object?` nicht implizit kompatibel. Null-Coalesce-Default verhindert Warning. Pattern auch fÃ¼r `bool`: `(bool)(InvokeMember(...) ?? false)`. |
+| 16 | Test-Trait-Marker | **`[Trait("Integration", "Outlook")]`** fÃ¼r COM-Tests | Sandbox hat kein Outlook â†’ e2e-Smoke-Tests entfallen. Struktur-Tests laufen ohne COM. |
+
+### Tests
+
+- 100 neue Tests in 5 Files: `OutlookEntryStoreTests` (14), `OutlookAutoRuleDetectorTests` (20), `OutlookTitleParserTests` (16), `OutlookBodyToMarkdownTests` (23), `OutlookAppReaderTests` (27 = 18 Facts + 1 Theory mit 9 InlineData).
+- Test-Count gesamt: **525/525 grÃ¼n** (vorher 425).
+- Outlook-Modul: **0 Warnings, 0 Errors**.
+
+### Verworfen
+
+- **Pandoc fÃ¼r Mail-Bodies**: zu groÃŸ, Mail-Bodies sind simpel genug fÃ¼r Custom-Konverter.
+- **Separate MD pro Mail-Part (HTML/Plain)**: Mail ist atomar, ein MD mit YAML-Frontmatter reicht.
+- **Auto-Disable bei Outlook-Neustart**: EntryID-Dedup fÃ¤ngt das ab â€” keine spezielle Recovery-Logik nÃ¶tig.
+- **Per-Folder Sweep-Parallelisierung**: `OutlookAppReader.OnPoll` ist single-threaded mit `lock (_gate)`. EntryID-Dedup macht Parallelisierung YAGNI.
+- **Polling-Interval pro Folder**: ein globales `pollIntervalSeconds` reicht fÃ¼r MVP1.
+- **Attachment-Speicherung**: `hasAttachments: true` im Frontmatter, keine Persistierung in Iter. 3 (Out of Scope fÃ¼r nÃ¤chsten Cluster).
+- **Outlook New (PIM-basiert)**: hat keine COM-Schnittstelle â€” bleibt Out of Scope (Spec 0004 Out-of-Scope-Liste).
+
+### Auswirkungen
+
+- Neue DLL: `AiRecall.AppReader.Outlook` (ProjectRef â†’ `AiRecall.AppReader.Base`)
+- Erweiterte Config-Sektion `appReader.outlook`: `folders`, `pollIntervalSeconds`, `ignoreAutoRuleMails`, `maxItemsPerSweep`, `bodyTruncateKB`, `htmlToMarkdown.{preserveLinks, preserveLineBreaks, stripImages}`
+- Neuer Persistenz-Pfad: `%APPDATA%/AiRecall/outlook-seen.json` (Plain-JSON, gitignored, atomar via `File.Replace`)
+- Neue Capture-Subdir: `capture/<yyyy-MM-dd>/outlook-mail/`
+- Spec 0004 Iter. 3 vollstÃ¤ndig dokumentiert (Motivation + Komponenten + Config + Schema + Tests + EinschrÃ¤nkungen)
+- `AiRecall.Core/Configuration/AppConfig.cs` um `OutlookConfig` + `HtmlToMarkdownOptions` erweitert
+- Commits: `f0dffb1` (Config+Spec), `ff1a0a2` (EntryStore), `587c1f4` (AutoRule), `57b52e5` (TitleParser+BodyToMD), `ef2469d`+`eae9817` (ComInterop), `fb0fe1a` (AppReader), `4ada756` (Doku), `42de0b9` (Refactor-Pass)

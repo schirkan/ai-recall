@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**MVP1 — `active-window` + App-Reader Foundation + erste Reader (Browser, Notepad) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen).**
+**MVP1 abgeschlossen — `active-window` + App-Reader-Foundation (Spec 0004 abgeschlossen: Browser [UIA + CDP opt-in + ReverseMarkdown 1:1], Notepad, Explorer, Documents [Word/Excel/PowerPoint mit COM-Interop Iter. 2/3], Outlook + Mail-Log [Iter. 3], PDF-Viewer) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0) + MVP2 Tray-Icon-EXE (Spec 0006/0008/0009 v1.0).**
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: **525/525 grün** (419 MVP1+Trigger+MVP2-Basis + 106 Outlook-Reader Iter. 3: 26 EntryStore + 14 AutoRuleDetector + 13 TitleParser + 27 BodyToMarkdown + 26 OutlookAppReader)
+- [x] Tests: **525/525 grün** (425 MVP1+Trigger+MVP2-Basis + 100 Outlook-Reader Iter. 3: 14 EntryStore + 20 AutoRuleDetector + 16 TitleParser + 23 BodyToMarkdown + 27 OutlookAppReader [18 Facts + 1 Theory mit 9 InlineData])
 - [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
   - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
     auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist

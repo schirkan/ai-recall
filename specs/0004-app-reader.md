@@ -337,13 +337,13 @@ Felder:
 
 ## Akzeptanzkriterien
 
-- [ ] `AppReaderRegistry` lädt alle `AiRecall.AppReader.*.dll` neben der Exe.
-- [ ] Fehlende / nicht-laden-bare DLLs werden geloggt, kein Crash.
-- [ ] Browser-Reader liefert für `chrome`/`msedge` mindestens URL + Titel
+- [x] `AppReaderRegistry` lädt alle `AiRecall.AppReader.*.dll` neben der Exe.
+- [x] Fehlende / nicht-laden-bare DLLs werden geloggt, kein Crash.
+- [x] Browser-Reader liefert für `chrome`/`msedge` mindestens URL + Titel
       (UIA-Pfad ohne CDP).
-- [ ] Browser-Reader mit `cdp.enabled = true` und aktivem CDP-Browser
+- [x] Browser-Reader mit `cdp.enabled = true` und aktivem CDP-Browser
       liefert URL + strukturiertes Markdown.
-- [ ] Browser-Reader mit `cdp.enabled = true`, aber ohne CDP-Server,
+- [x] Browser-Reader mit `cdp.enabled = true`, aber ohne CDP-Server,
       fällt lautlos auf UIA zurück (kein Crash, `contentSource = "none"`).
 - [x] Outlook-Reader liefert für aktiven Inspector-Mail mindestens Subject + Body.
 - [x] Outlook-Mail-Log persistiert alle Mails aus Inbox + Sent Items,
@@ -356,13 +356,16 @@ Felder:
 - [x] `appReader.documents.{maxTextKB,enableUiaExtraction}` ist konfigurierbar und per Unit-Test abgesichert.
 - [x] **Word/Excel/PowerPoint-Reader (COM-Erweiterung, Iter. 2):** COM-Interop liefert `FullName` + Inhalt; bei COM-Fehler Fallback auf UIA+Title. `filePath` wird im Content-MD-Frontmatter emittiert.
 - [x] **PDF-Viewer-Reader:** Prozess-Liste konfigurierbar (`appReader.pdf.processes`); Filename + voller Pfad + Page-Nr aus Titel. PDF-Inhalt-Extraktion in Iter. 2 (PdfPig).
-- [ ] Notepad-Reader liefert Buffer-Text (max `notepad.maxBufferKB`).
-- [ ] Explorer-Reader liefert aktuellen Pfad aus Fenster-Titel oder COM.
-- [ ] `*.content.md` wird bei jedem Capture mit App-Reader-Output
+- [x] Notepad-Reader liefert Buffer-Text (max `notepad.maxBufferKB`).
+- [x] Explorer-Reader liefert aktuellen Pfad aus Fenster-Titel oder COM.
+- [x] `*.content.md` wird bei jedem Capture mit App-Reader-Output
       geschrieben.
 - [ ] Capture-MD bekommt einen `## App-Reader`-Abschnitt mit Link auf
-      Content-MD.
-- [ ] Jedes Feld in `appReader.browser.markdown` setzt das gleichnamige
+      Content-MD. *(Hinweis: ConversionWorker emittiert bereits
+      `## App Reader Content (UIA)` für dünne Reader — die generische
+      `## App-Reader`-Section mit Link auf `<base>.content.md` ist noch nicht
+      implementiert; kommt mit einer Doku-Konsolidierungs-Iteration.)*
+- [x] Jedes Feld in `appReader.browser.markdown` setzt das gleichnamige
       Feld auf `ReverseMarkdown.Config`; nicht gesetzte Felder bleiben auf
       Library-Default. Per Unit-Test abgesichert (`BuildConverter_*`).
 

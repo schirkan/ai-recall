@@ -3,8 +3,7 @@
 > Lokales, persönliches „Recall"-Tool für Windows — Screenshot-basiertes
 > Memory für Bildschirmarbeit, Mails, Dokumente und (später) Meetings.
 
-⚠️ **Status:** Aktive MVP1-Entwicklung. Erste CLI-Commands lauffähig.
-Specs in [`specs/`](./specs/). Noch kein Release.
+⚠️ **Status:** MVP1 + MVP2 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release.
 
 ## Vision
 
@@ -14,7 +13,7 @@ läuft aber **komplett lokal**, ist **Open Source (MIT)** und fokussiert auf
 
 Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
 
-## Features (Stand MVP1-Start)
+## Features (Stand 2026-07-05)
 
 - ✅ `recall list-windows` — alle Top-Level-Fenster auflisten
 - ✅ `recall active-window` — aktives Fenster (oder per `--hwnd`) capturen
@@ -25,14 +24,34 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
   - Serilog-Logging (Console + Rolling-File)
 - ✅ App-Reader ([Spec 0004](./specs/0004-app-reader.md)) — Plugin-DLLs liefern
   strukturierten Content statt OCR-Fallback:
-  - **Browser** (Edge, Chrome): Tab-Titel + URL via UIA + Titel-Parsing
+  - **Browser** (Edge, Chrome, Firefox via CDP): Tab-Titel + URL via UIA,
+    optional reichhaltiger via Chrome DevTools Protocol (CDP opt-in),
+    HTML→MD via `ReverseMarkdown` mit allen 8 Feldern 1:1-konfigurierbar
   - **Notepad**: Buffer + Dateiname via Win32 `WM_GETTEXT`
+  - **Explorer**: aktueller Pfad aus Fenster-Titel (Hyphen/En-Dash/Em-Dash-tolerant)
+  - **Outlook** ([Spec 0004 Iter. 3](./specs/0004-app-reader.md#iter-3-2026-07-05--outlook-app-reader--mail-log-martin--pia)):
+    aktiver Inspector + Background-Polling für Mail-Stream (Inbox + Sent Items +
+    Custom-Folders), EntryID-Dedup, Auto-Regel-Heuristik (4 Bedingungen),
+    custom HTML→MD-Konvertierung
+  - **Word/Excel/PowerPoint** ([Spec 0004 Iter. 2](./specs/0004-app-reader.md#iter-2-2026-07-04--com-interop-für-office--pdf-viewer-martin)):
+    UIA + optional COM-Interop (late binding, ProgID + P/Invoke) für Pfad +
+    Inhalt; COM-Fallback auf UIA+Title
+  - **PDF-Viewer** (Adobe/Sumatra/Foxit/PDF-XChange/Edge/Chrome): Filename +
+    voller Pfad + Page-Nr aus Titel; PDF-Inhalt in Iter. 2 (`PdfPig` als Kandidat)
   - Inhalt als zusätzliche `*.content.md` neben dem Capture-MD
   - Reflection-basierte Plugin-Discovery (eine DLL pro App)
-- ⏳ App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting), Word/Excel/PowerPoint, Explorer
-- ⏳ Trigger-Pipeline (`recall record`, geplant)
-- MVP2: Auto-Meeting-Recording (Audio + Transcription)
-- MVP3: Auto Knowledge Base / Wiki
+- ✅ Trigger-Pipeline ([Spec 0005](./specs/0005-trigger-pipeline.md)) —
+  `recall record` mit WinEventHook (out-of-context) + Heartbeat-Fallback,
+  Per-HWND-Throttle, Hash-Dedup, modaler Dialog-Frontmatter, `--headless` + `--trigger-mode=events|polling|both`
+- ✅ Async Document Conversion Pipeline ([Spec 0007](./specs/0007-async-conversion.md))
+  — `DocumentConverter` (OpenXml + PdfPig + ReverseMarkdown), `ConversionWorker`
+  (in-process `Channel<string>`), async OCR via `TesseractOcrEngineAdapter`,
+  `recall convert` Recovery-Subcommand
+- ✅ MVP2 Tray-Icon-EXE ([Spec 0006](./specs/0006-mvp2-tray-exe.md)) — in-process
+  `ITriggerService`, Hot-Reload via `TriggerSupervisor.Restart`, SingleInstance-Mutex,
+  + Live Logviewer ([Spec 0008](./specs/0008-live-logviewer.md), Ringbuffer 10k + Filter + Auto-Scroll)
+  + Settings-Dialog ([Spec 0009](./specs/0009-settings-dialog.md), dynamische Form-Generierung via Reflection auf `AppConfig`)
+- MVP3: Auto Knowledge Base / Wiki (Embeddings + LLM-Indexing-Service)
 
 ## Quick Start
 
@@ -97,7 +116,7 @@ Hilfreich für Skripte und headless Tests.
 dotnet test
 ```
 
-Aktuell 18/18 grün (Hashing, IgnoreMatcher, ConfigLoader).
+Aktuell **525/525 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + MVP2-Basis + Conversion + TrayApp-PureLogic).
 
 ## Konfiguration
 
