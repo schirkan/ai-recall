@@ -64,6 +64,10 @@ public sealed class AppReaderConfig
 
     [JsonPropertyName("pdf")]
     public PdfConfig Pdf { get; set; } = new();
+
+    /// <summary>OneNote App-Reader (Spec 0010). Read-only, kein Background-Poll.</summary>
+    [JsonPropertyName("onenote")]
+    public OneNoteConfig OneNote { get; set; } = new();
 }
 
 public sealed class OutlookConfig
@@ -238,6 +242,68 @@ public sealed class PdfConfig
         "msedge",
         "chrome"
     };
+}
+
+/// <summary>
+/// Konfiguration fuer den OneNote App-Reader (Spec 0010).
+/// Pattern: analog Outlook (Spec 0004 Iter. 3) — Read-only, kein Background-Poll.
+/// OneNote ist Page-orientiert (kein Daten-Stream wie Outlook-Mails).
+/// </summary>
+public sealed class OneNoteConfig
+{
+    /// <summary>Master-Switch. <c>false</c> liefert der Reader immer <c>null</c>.</summary>
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Maximale Laenge des Page-Contents im Markdown (KB). Laenger = abgeschnitten
+    /// mit Hinweis-Block am Ende.
+    /// </summary>
+    [JsonPropertyName("maxContentKB")]
+    public int MaxContentKB { get; set; } = 256;
+
+    /// <summary>
+    /// <c>one:Image</c>-Embeds in Markdown konvertieren. Default <c>false</c> —
+    /// Base64-Inflation in MD-Files und Datenschutz-Risiko bei handschriftlichen
+    /// Skizzen. Aktivieren nur wenn explizit gewuenscht.
+    /// </summary>
+    [JsonPropertyName("includeImages")]
+    public bool IncludeImages { get; set; } = false;
+
+    /// <summary><c>one:Tag</c> (To-Do-Marker, <c>#tag-name</c>) in Markdown konvertieren.</summary>
+    [JsonPropertyName("includeTags")]
+    public bool IncludeTags { get; set; } = true;
+
+    /// <summary>
+    /// Hierarchy-Tiefe im Frontmatter:
+    /// <c>"PageOnly"</c>, <c>"PageAndSection"</c> (Default), <c>"PageAndSectionAndNotebook"</c>.
+    /// </summary>
+    [JsonPropertyName("hierarchyDepth")]
+    public string HierarchyDepth { get; set; } = "PageAndSection";
+
+    /// <summary>
+    /// Active-Page-Strategie (Spec 0010 Section "Active-Page-Strategie"):
+    /// <c>"WindowsApi"</c> (Default, schnellste via <c>Windows.CurrentWindow.CurrentPageId</c>),
+    /// <c>"HierarchyXml"</c> (Fallback via <c>isCurrentlyViewed="true"</c>),
+    /// <c>"Auto"</c> (alle 4 Stages probieren bis Erfolg).
+    /// </summary>
+    [JsonPropertyName("activePageStrategy")]
+    public string ActivePageStrategy { get; set; } = "WindowsApi";
+
+    /// <summary>
+    /// OnPoll-Intervall in Sekunden. <c>0</c> (Default) = Read-only, kein
+    /// Background-Poll. OneNote ist Page-orientiert, OnPoll ist i. d. R. nicht
+    /// sinnvoll — Capture wird ueber den Trigger (Foreground-Event) ausgeloest.
+    /// </summary>
+    [JsonPropertyName("pollIntervalSeconds")]
+    public int PollIntervalSeconds { get; set; } = 0;
+
+    /// <summary>
+    /// Notebook-Namen-Patterns (case-insensitive substring), die ignoriert werden,
+    /// z. B. <c>"*.deleted"</c>, <c>"Archive 2024"</c>.
+    /// </summary>
+    [JsonPropertyName("skipNotebookPatterns")]
+    public List<string> SkipNotebookPatterns { get; set; } = new();
 }
 
 /// <summary>

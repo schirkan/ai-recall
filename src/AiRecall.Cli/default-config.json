@@ -70,6 +70,16 @@
       "folders": ["Inbox", "Sent Items"],
       "pollIntervalSeconds": 60,
       "ignoreAutoRuleMails": false
+    },
+    "onenote": {
+      "enabled": true,
+      "maxContentKB": 256,
+      "includeImages": false,
+      "includeTags": true,
+      "hierarchyDepth": "PageAndSection",
+      "activePageStrategy": "WindowsApi",
+      "pollIntervalSeconds": 0,
+      "skipNotebookPatterns": []
     }
   },
   "trigger": {
