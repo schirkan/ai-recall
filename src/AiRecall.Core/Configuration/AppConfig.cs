@@ -68,6 +68,9 @@ public sealed class AppReaderConfig
 
 public sealed class OutlookConfig
 {
+    /// <summary>Default-Filename für den EntryID-Dedup-State in <c>%APPDATA%/AiRecall/</c>.</summary>
+    public const string DefaultSeenStateFileName = "outlook-seen.json";
+
     [JsonPropertyName("folders")]
     public List<string> Folders { get; set; } = new() { "Inbox", "Sent Items" };
 
@@ -77,6 +80,45 @@ public sealed class OutlookConfig
     /// <summary>Wenn true: Mails, die offenbar durch Outlook-Regeln "berührungslos" verarbeitet wurden, werden nicht persistiert.</summary>
     [JsonPropertyName("ignoreAutoRuleMails")]
     public bool IgnoreAutoRuleMails { get; set; } = false;
+
+    /// <summary>Maximale Anzahl Mails, die pro Sweep je Folder geprüft werden (Cap gegen riesige Postfächer).</summary>
+    [JsonPropertyName("maxItemsPerSweep")]
+    public int MaxItemsPerSweep { get; set; } = 200;
+
+    /// <summary>Maximale Body-Länge im persistierten MD (KB). Längere Bodies werden abgeschnitten mit Hinweis.</summary>
+    [JsonPropertyName("bodyTruncateKB")]
+    public int BodyTruncateKB { get; set; } = 256;
+
+    /// <summary>Konfiguration für die simple HTML→Markdown-Konvertierung der Mail-Bodies.</summary>
+    [JsonPropertyName("htmlToMarkdown")]
+    public HtmlToMarkdownOptions HtmlToMarkdown { get; set; } = new();
+
+    /// <summary>
+    /// Liefert den Default-Pfad für <c>outlook-seen.json</c>:
+    /// <c>%APPDATA%/AiRecall/outlook-seen.json</c> (siehe <see cref="ConfigLoader.AppDataSubdirectory"/>).
+    /// </summary>
+    public static string DefaultSeenStatePath() => System.IO.Path.Combine(
+        ConfigLoader.AppDataSubdirectory,
+        DefaultSeenStateFileName);
+}
+
+/// <summary>
+/// Konfiguration der simplen HTML→Markdown-Konvertierung in OutlookAppReader
+/// (Spec 0004 Iter. 3 — kein ReverseMarkdown, eigene simple Strip-Logik).
+/// </summary>
+public sealed class HtmlToMarkdownOptions
+{
+    /// <summary><c>&lt;a href="X"&gt;Y&lt;/a&gt;</c> → <c>[Y](X)</c>.</summary>
+    [JsonPropertyName("preserveLinks")]
+    public bool PreserveLinks { get; set; } = true;
+
+    /// <summary><c>&lt;br&gt;</c>, <c>&lt;/p&gt;</c>, <c>&lt;/div&gt;</c> → Zeilenumbruch.</summary>
+    [JsonPropertyName("preserveLineBreaks")]
+    public bool PreserveLineBreaks { get; set; } = true;
+
+    /// <summary><c>&lt;img&gt;</c>-Tags komplett entfernen (Tracking-Pixel-Schutz).</summary>
+    [JsonPropertyName("stripImages")]
+    public bool StripImages { get; set; } = true;
 }
 
 public sealed class BrowserConfig

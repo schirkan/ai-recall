@@ -1,6 +1,7 @@
 # 0004 — App Reader Architecture
 
-> **Status:** Iter. 2 abgeschlossen (2026-07-04) — COM-Interop für Office + PDF-Viewer
+> **Status:** Iter. 3 abgeschlossen (2026-07-05) — Outlook App-Reader + Mail-Log (Martin + Pia)
+> **Implements:** AR-1, AR-2, AR-3, AR-4, AR-5, AR-6, AR-7 from MVP1 spec
 > **Owner:** Martin
 > **Implements:** AR-1, AR-2, AR-3, AR-4 from MVP1 spec
 
@@ -460,3 +461,286 @@ Neue DLL `AiRecall.AppReader.Pdf` mit `PdfViewerAppReader`:
 - PDF-Reader (Adobe, Edge-PDF, Sumatra) — spätere Spec
 - Terminal-Reader (WindowsTerminal, ConEmu, WezTerm) — nutzlos ohne OCR
 - IDEs (VS, Rider, VSCode) — zu komplex, viele Sub-Fenster
+
+## Iter. 3 (2026-07-05) — Outlook App-Reader + Mail-Log (Martin + Pia)
+
+### Motivation
+
+Outlook ist der wichtigste Mail-Workflow in MVP1 und war als einzige
+App-Familie in Iter. 2 noch **nicht** implementiert (Spec 0004 §„Outlook-
+Spezial: Mail-Log“). Iter. 3 schließt AR-2 (aktiver Inspector) und AR-3
+(Mail-Stream-Log) ab. AR-7 (Auto-Regel-Heuristik) kommt mit.
+
+Außerdem wird der Outlook-Reader auch in der Pipeline-Wiring benötigt
+(Trigger-Pipeline Spec 0002 + Trigger-Pipeline Spec 0006 Iter. 2):
+ein Outlook-Fenster ohne Reader würde nur OCR-Text liefern, was bei
+HTML-Mails praktisch unbrauchbar ist.
+
+### Architektur
+
+Neue DLL **`AiRecall.AppReader.Outlook`** mit folgenden Klassen:
+
+| Datei | Verantwortlichkeit |
+|---|---|
+| `OutlookAppReader.cs` | Hauptklasse. `Read` = aktiver Inspector, `OnPoll` = Mail-Log-Sweep. Erbt von `AppReaderBase`. |
+| `OutlookComInterop.cs` | Late-binding COM-Wrapper (ProgID `Outlook.Application`, `ActiveExplorer()`, `ActiveInspector()`, Folder/MailItem-Properties). P/Invoke `oleaut32!GetActiveObject` wie `OfficeComInterop`. |
+| `OutlookEntryStore.cs` | Persistente EntryID-Verwaltung. State in `%APPDATA%/AiRecall/outlook-seen.json` (Plain-JSON, atomar via `File.Replace`). Threadsafe. |
+| `OutlookAutoRuleDetector.cs` | Pure-Function-Heuristik (4 Bedingungen) für „berührungslose“ Auto-Regel-Mails. |
+| `OutlookTitleParser.cs` | Parst Outlook-Fenster-Titel (z. B. `"Inbox - foo@bar.com - Outlook"` oder `"Subject - Outlook"`). Liefert `Folder`, `Subject`, ggf. `Sender`. |
+| `OutlookBodyToMarkdown.cs` | Konvertiert Mail-Body (HTML oder Plain) zu Markdown. Plain → direkt; HTML → einfache Tag-Strip-Logik (kein ReverseMarkdown — zu fett für Mail-Bodies). |
+
+### `OutlookAppReader` API
+
+```csharp
+public sealed class OutlookAppReader : AppReaderBase
+{
+    public override IReadOnlyCollection<string> SupportedProcesses => new[] { "OUTLOOK" };
+    public override string DisplayName => "Outlook (COM + Mail-Log)";
+
+    // AR-2: Aktiver Inspector / Explorer → offene Mail
+    public override AppReaderResult? Read(WindowInfo window, AppReaderContext context);
+
+    // AR-3 + AR-7: Mail-Log-Sweep
+    public override bool SupportsBackgroundPolling => true;
+    public override void OnPoll(AppReaderContext context);
+}
+```
+
+### `Read` (AR-2 — aktiver Inspector)
+
+1. **COM-Lookup** via `OutlookComInterop.TryGetActiveMail(window.Title)`:
+   - ProgID `Outlook.Application` → `ActiveExplorer()` oder `ActiveInspector()`.
+   - Wenn `Inspector` aktiv: `CurrentItem` als `MailItem` casten, Header + Body lesen.
+   - Wenn `Explorer` aktiv (Hauptfenster mit Folder-Liste): `Selection[1]` casten,
+     sonst null.
+2. **Fallback auf Title-Parsing** wenn COM nicht verfügbar:
+   `OutlookTitleParser` extrahiert Subject aus dem Titel.
+3. **Body-Extraktion**:
+   - `MailItem.Body` (Plain) bevorzugt.
+   - Falls leer und `MailItem.HTMLBody` nicht leer: `OutlookBodyToMarkdown.FromHtml(...)`.
+4. **Persistenz**: liefert `AppReaderResult` mit `IsThinReader = false` (kein
+   `ConversionWorker` nötig — Mail-Content ist vollständig im MD).
+
+### `OnPoll` (AR-3 + AR-7 — Mail-Log)
+
+Pro Sweep:
+
+1. **COM-Verbindung** zu Outlook aufbauen (gleiche Lookup-Logik wie `Read`).
+2. **Folder-Iteration**: für jeden konfigurierten Folder (`outlook.folders`,
+   Default `["Inbox", "Sent Items"]`):
+   - `MAPI-Folder.Items` restriktiv sortieren nach `ReceivedTime` DESC.
+   - Erste N (Default 200, Cap gegen riesige Postfächer) durchlaufen.
+3. **EntryID-Dedup** via `OutlookEntryStore.IsSeen(entryId)`.
+   - Neue Mails → MD schreiben + `MarkSeen(entryId)`.
+   - Bereits gesehene → skip (kein Log-Eintrag, sonst Spam).
+4. **Auto-Regel-Heuristik** wenn `ignoreAutoRuleMails: true`:
+   - `OutlookAutoRuleDetector.IsSuspect(mail)` → wenn true, skip mit
+     `context.Logger.Information("Outlook: skipped auto-rule mail {Subject} ({EntryIdShort})", ...)`.
+   - **Trotzdem** in `outlook-seen.json` markieren, damit die Mail nicht
+     beim nächsten Sweep nochmal geprüft wird.
+5. **Persistenz-Schema** (siehe unten).
+6. **Threading**: `OutlookAppReader` ist NICHT thread-safe; der zukünftige
+   `AppReaderPollService` (Iter. 4) serialisiert Aufrufe. Für Iter. 3 ist
+   OnPoll single-threaded (manuell oder via Timer im Tests).
+
+### Konfiguration
+
+Bestehende `OutlookConfig` (Spec 0004 Iter. 1) wird erweitert:
+
+```json
+{
+  "appReader": {
+    "outlook": {
+      "folders": ["Inbox", "Sent Items"],
+      "pollIntervalSeconds": 60,
+      "ignoreAutoRuleMails": false,
+      "maxItemsPerSweep": 200,
+      "bodyTruncateKB": 256,
+      "htmlToMarkdown": {
+        "preserveLinks": true,
+        "preserveLineBreaks": true,
+        "stripImages": true
+      }
+    }
+  }
+}
+```
+
+Felder:
+- `folders` *(Default `["Inbox", "Sent Items"]`)* — MAPI-Folder-Namen, die
+  gepollt werden. Case-insensitive Match gegen `Folder.Name`.
+- `pollIntervalSeconds` *(Default `60`)* — Hinweis für den späteren
+  Poll-Service; Iter. 3 triggert `OnPoll` manuell oder per Test.
+- `ignoreAutoRuleMails` *(Default `false`)* — Master-Switch für die
+  Heuristik (Spec 0004 §„Auto-Regel-Mails“).
+- `maxItemsPerSweep` *(Default `200`)* — Cap gegen riesige Postfächer; nur
+  die N neuesten Mails je Folder werden geprüft. Verhindert stundenlange
+  First-Run-Sweeps.
+- `bodyTruncateKB` *(Default `256`)* — Maximale Body-Länge im MD. Längere
+  Bodies werden bei `bodyTruncateKB * 1024` Zeichen mit Hinweis
+  `_(... truncated, original size: NNN KB)_` abgeschnitten.
+- `htmlToMarkdown.preserveLinks` *(Default `true`)* — `<a href="...">X</a>` → `[X](...)`.
+- `htmlToMarkdown.preserveLineBreaks` *(Default `true`)* — `<br>`, `</p>` → `\n\n`.
+- `htmlToMarkdown.stripImages` *(Default `true`)* — `<img>`-Tags komplett
+  entfernen (kein Markdown-Image, da Mails oft Tracking-Pixel haben).
+
+### Persistenz-Schema
+
+Pro Mail eine MD-Datei unter:
+
+```
+capture/<yyyy-MM-dd>/outlook-mail/<HHmmss>-<direction>-<entryId-short>.md
+```
+
+`<direction>` = `in` (Inbox) oder `out` (Sent Items). `<entryId-short>` =
+erste 12 Zeichen der EntryID (Outlook-EntryIDs sind 70+ Zeichen, eindeutig
+über MAPI-Session, reicht für Filename).
+
+**Filename-Kollisionen**: Wenn im selben Sweep zwei Mails denselben
+`<HHmmss>` haben, wird ein `-N`-Suffix angehängt (`-1`, `-2`, ...). Datei-
+namen-Kollisionen über Sweeps hinweg sind ausgeschlossen, weil Outlook
+EntryIDs eindeutig sind.
+
+YAML-Frontmatter (siehe Spec 0004 §„Outlook-Spezial: Mail-Log“):
+
+```yaml
+---
+timestamp: 2026-07-03T15:23:11+02:00
+direction: "in"
+entryId: "00000000ABCDEF1234567890..."
+subject: "RE: Angebot Q3"
+from: "kunde@example.com"
+to: "martin@martin.local"
+cc: ""
+date: 2026-07-03T15:18:42+02:00
+folder: "Inbox"
+hasAttachments: false
+unread: false
+autoRuleSuspect: false
+bodyLengthKB: 12
+---
+```
+
+Body folgt als Plain-Markdown (entweder direkt Plain-Text oder HTML
+konvertiert).
+
+### EntryStore-Format (`outlook-seen.json`)
+
+```json
+{
+  "version": 1,
+  "lastSweepAt": "2026-07-05T10:00:00+02:00",
+  "entryIds": [
+    "00000000ABCDEF1234567890...",
+    "0000000012345678ABCDEF12..."
+  ]
+}
+```
+
+- Plain-JSON (System.Text.Json), gitignored, **nicht** in der
+  `%APPDATA%/AiRecall/`-Hierarchie.
+- Atomar via `File.Replace` (siehe `OutlookEntryStore.MarkSeen`).
+- `OutlookEntryStore.IsSeen` ist O(1) (`HashSet<string>` im Memory).
+- Load beim `AppReader`-Init, Save nach jedem Sweep.
+- `lastSweepAt` wird für Diagnostics geloggt, hat aber keine
+  Filter-Funktion (EntryID-Dedup ist robuster).
+
+### Auto-Regel-Heuristik (`OutlookAutoRuleDetector`)
+
+Eine Mail ist „Auto-Regel-Suspect" wenn **mindestens 2** der folgenden
+Bedingungen zutreffen (Spec 0004 §„Auto-Regel-Mails“):
+
+1. `UnRead == false` **und** `LastModificationTime - ReceivedTime < 5 s`
+   — Mail wurde nie geöffnet, aber als gelesen markiert.
+2. Folder-Name ist `Junk E-Mail`, `Deleted Items`, oder matcht Regex
+   `^(Newsletter|Notifications|Auto|Rule)` (case-insensitive).
+3. `SenderEmailAddress` matched Regex `^(noreply|no-reply|notifications|mailer-daemon)@`.
+4. Subject matched Regex `^(WG:|AW:|Fwd:|TR:)` **und** Body enthält
+   `Auto-Reply`, `Automatische Antwort`, oder `Out of Office`
+   (case-insensitive).
+
+**Pure Function**: `OutlookAutoRuleDetector.IsSuspect(MailSnapshot snap)`. Die
+Heuristik operiert auf einem `MailSnapshot`-Record (`Subject`, `From`,
+`FolderName`, `UnRead`, `ReceivedTime`, `LastModificationTime`, `Body`) —
+nicht direkt auf `MailItem` (COM). Damit ist die Heuristik unit-testbar
+ohne Outlook.
+
+### HTML-zu-Markdown-Konvertierung
+
+`OutlookBodyToMarkdown.FromHtml(string html, HtmlToMarkdownOptions opts)`:
+
+- Verwendet **NICHT** ReverseMarkdown (zu fett für Mails, viele Edge-Cases
+  bei Outlook-spezifischem HTML).
+- Eigene simple Tag-Strip-Logik:
+  - `<style>`, `<script>`, `<!-- -->` → komplett entfernen.
+  - `<a href="X">Y</a>` → `[Y](X)` (wenn `preserveLinks`), sonst `Y`.
+  - `<br>`, `</p>`, `</div>` → `\n\n`.
+  - `<img>` → komplett entfernen (wenn `stripImages`), sonst
+    `![alt](src)`.
+  - Alle anderen Tags → innerText.
+- HTML-Entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&nbsp;`) werden
+  decoded.
+- Output ist Plain-Text mit Markdown-Link-Syntax.
+
+### Tests
+
+- **`OutlookEntryStoreTests`** (≥ 6 Tests):
+  - `IsSeen_NewEntry_ReturnsFalse`
+  - `MarkSeen_Persists_LoadReadsIt`
+  - `MarkSeen_Idempotent`
+  - `MarkSeen_Multiple_OrderIndependent`
+  - `Load_MissingFile_StartsEmpty`
+  - `Load_CorruptedJson_StartsEmpty_WithLog`
+- **`OutlookAutoRuleDetectorTests`** (≥ 5 Tests):
+  - `IsSuspect_FreshUnreadMail_ReturnsFalse`
+  - `IsSuspect_MarkedReadImmediately_ReturnsTrue` (Bedingung 1)
+  - `IsSuspect_InNewsletterFolder_ReturnsTrue` (Bedingung 2)
+  - `IsSuspect_NoreplySender_ReturnsTrue` (Bedingung 3)
+  - `IsSuspect_AutoReplySubjectAndBody_ReturnsTrue` (Bedingung 4)
+  - `IsSuspect_SingleCondition_ReturnsFalse` (≥ 2 erforderlich)
+- **`OutlookTitleParserTests`** (≥ 4 Tests):
+  - `Parse_InboxFolderName`
+  - `Parse_SubjectOnly`
+  - `Parse_SentItems`
+  - `Parse_UnknownFolder_FallsBackToSubject`
+- **`OutlookBodyToMarkdownTests`** (≥ 5 Tests):
+  - `FromHtml_StripsStyleAndScript`
+  - `FromHtml_PreservesLinks`
+  - `FromHtml_DropsImages_ByDefault`
+  - `FromHtml_ConvertsLineBreaks`
+  - `FromPlain_PassesThrough`
+  - `FromHtml_DecodesEntities`
+- **`OutlookAppReaderTests`** (≥ 3 Tests):
+  - `Read_NoOutlook_ReturnsNull`
+  - `Read_UnsupportedProcess_ReturnsNull`
+  - `OnPoll_NoOutlook_DoesNotThrow`
+  - `OnPoll_DetectsSeenEntryIds_DoesNotPersist` (Mock-Store)
+- Test-Count Ziel: **+23 neue Tests**, gesamt **≥ 449 / 449 grün**.
+
+### Bekannte Einschränkungen (Iter. 3)
+
+- **OnPoll wird in Iter. 3 nicht automatisch aufgerufen.** Der Trigger-
+  Worker kennt aktuell `OnPoll` noch nicht. Spec 0004 Iter. 4 wird einen
+  `AppReaderPollService` einführen, der `OnPoll` periodisch aufruft. Bis
+  dahin ist der Outlook-Reader manuell via Test oder Custom-CLI-Sub-
+  Command testbar.
+- **Nur Outlook Classic** (COM-basiert). Outlook New (PIM-basiert) hat
+  keine COM-Schnittstelle und bleibt Out-of-Scope (siehe Out-of-Scope-
+  Liste).
+- **COM-Lookup nimmt die erste laufende Outlook-Instanz.** Bei mehreren
+  parallelen Outlook-Profilen kann der falsche Folder gelesen werden.
+  Pro-Profil-Filterung ist Iter.-4-Kandidat.
+- **HTML-zu-Markdown ist simpel.** Outlook produziert oft verschachteltes
+  HTML mit Conditional-Comments (`<!--[if gte mso 9]>...<![endif]-->`),
+  Word-spezifische CSS-Klassen und Inline-Styles. Unsere Konvertierung
+  strippt alles, was sie nicht versteht — d. h. das Ergebnis ist Plain-
+  Text mit Markdown-Links, nicht „schönes Markdown". Für Spec 0004
+  Iter. 3 ist das ausreichend (Ziel ist Volltext-Indexierung, nicht
+  Rendering).
+- **Attachments werden nicht persistiert.** Spec 0004 erwähnt das nicht
+  explizit, aber `hasAttachments: true` im Frontmatter zeigt an, dass
+  welche da waren. Attachment-Speicherung ist Iter.-4-Kandidat.
+- **Race Condition zwischen mehreren Outlook-Sweeps:** Wenn `OnPoll`
+  parallel aufgerufen wird (z. B. von Tests), kann `outlook-seen.json`
+  inkonsistent werden. Iter. 4 serialisiert via Poll-Service. Für
+  Iter. 3 ist `OutlookAppReader.OnPoll` mit `lock (_gate)` geschützt.
