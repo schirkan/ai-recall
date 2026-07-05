@@ -345,11 +345,11 @@ Felder:
       liefert URL + strukturiertes Markdown.
 - [ ] Browser-Reader mit `cdp.enabled = true`, aber ohne CDP-Server,
       fällt lautlos auf UIA zurück (kein Crash, `contentSource = "none"`).
-- [ ] Outlook-Reader liefert für aktiven Inspector-Mail mindestens Subject + Body.
-- [ ] Outlook-Mail-Log persistiert alle Mails aus Inbox + Sent Items,
+- [x] Outlook-Reader liefert für aktiven Inspector-Mail mindestens Subject + Body.
+- [x] Outlook-Mail-Log persistiert alle Mails aus Inbox + Sent Items,
       die nicht in `outlook-seen.json` stehen.
-- [ ] `ignoreAutoRuleMails: true` filtert anhand der Heuristik und
-      markiert im Log.
+- [x] `ignoreAutoRuleMails: true` filtert anhand der 4-Bedingungen-Heuristik
+      und markiert im Log (OutlookAutoRuleDetector).
 - [x] Word-Reader liefert Dateiname (aus Fenster-Titel) + optional UIA-Text.
 - [x] Excel-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Zellen.
 - [x] PowerPoint-Reader liefert Dateiname (aus Fenster-Titel) + UIA-Text der sichtbaren Slide.
@@ -450,6 +450,108 @@ Neue DLL `AiRecall.AppReader.Pdf` mit `PdfViewerAppReader`:
   kann visuelles Padding haben. Trim-Logik in Iter. 3.
 - PowerPoint: nur Text-Frames; SmartArt, Tabellen, eingebettete Objekte
   fehlen. COM hat kein einfaches „Inhalt"-Property hier.
+
+## Iter. 3 (2026-07-05) — Outlook Classic Reader + Mail-Log (Martin + Pia)
+
+### Motivation
+
+Outlook Classic ist auf Windows-Workstations allgegenwärtig — berufliche
+E-Mails, Kalender-Einladungen, Newsletter, Auto-Regel-Weiterleitungen
+landen hier. Wir wollen den **Mail-Stream** als strukturierten Content
+loggen, nicht nur den Screenshot-OCR (der bei Mail-Bodies oft arm an Text ist).
+
+Dabei ist „aktives Inspector-Fenster" nur die Spitze des Eisbergs: die
+Hauptarbeit ist der **periodische Sweep** über Inbox + Sent Items +
+beliebige Custom-Folder, mit EntryID-basierter Dedup, sodass jede Mail
+genau einmal persistiert wird.
+
+### Komponenten (neu in Iter. 3)
+
+- **`AiRecall.AppReader.Outlook`** (neue DLL, `net8.0-windows`).
+  - `OutlookAppReader : AppReaderBase` — Dual-Modus:
+    - `Read(window)` → aktives Inspector-Fenster oder Explorer-Selektion,
+      Fallback auf Fenster-Titel-Parsing.
+    - `OnPoll(context)` → Background-Sweep über konfigurierte Folders,
+      intern throttled auf `outlook.pollIntervalSeconds` (Default 60 s).
+  - `OutlookComInterop` (`internal static`) — late binding via ProgID
+    `Outlook.Application` + P/Invoke auf `oleaut32.dll!GetActiveObject`
+    (`Marshal.GetActiveObject` ist in .NET 8 SDK 8.0.422 nicht direkt
+    verfügbar).
+    - `TryGetActiveInspectorMail()` — `Application.ActiveInspector().CurrentItem`
+    - `TryGetExplorerSelection(maxItems)` — `Application.ActiveExplorer().Selection`
+    - `TryGetRecentMails(folderName, maxItems)` — Folder-Iteration via
+      `Session.GetDefaultFolder(olFolderInbox)` o. ä.
+    - Alle Methoden geben bei Fehler `null`/`leere Liste` zurück — nie werfen.
+  - `OutlookEntryStore` — EntryID-Dedup, State in
+    `%APPDATA%/AiRecall/outlook-seen.json`, atomic via `File.Replace`.
+  - `OutlookAutoRuleDetector` — Pure-Function-Heuristik (4 Bedingungen,
+    ≥2 Hits = suspect): Marked-Read-Fast / Junk-Folder / NoReply-Sender /
+    Auto-Reply-Subject+Body.
+  - `OutlookTitleParser` — Parsing von Outlook-Fenster-Titeln
+    (FolderView vs. InspectorSubject, Read-Only-Marker, Unsaved-Marker,
+    Unread-Counter).
+  - `OutlookBodyToMarkdown` — Custom HTML→MD-Konvertierung für
+    Outlook-spezifisches HTML (Conditional-Comments, Word-Style-Klassen).
+
+### Konfiguration
+
+```json
+"outlook": {
+  "folders": ["Inbox", "Sent Items"],
+  "pollIntervalSeconds": 60,
+  "ignoreAutoRuleMails": false,
+  "maxItemsPerSweep": 200,
+  "bodyTruncateKB": 256,
+  "htmlToMarkdown": {
+    "preserveLinks": true,
+    "preserveLineBreaks": true,
+    "stripImages": true
+  }
+}
+```
+
+### Persistenz-Schema
+
+Pro Mail eine MD-Datei unter
+`capture/<yyyy-MM-dd>/outlook-mail/<HHmmss>-<direction>-<entryIdShort>.md`
+mit YAML-Frontmatter: `timestamp`, `kind=mail`, `direction` (`in`/`out`),
+`entryId`, `subject`, `from`, `folder`, `date`, `unread`,
+`autoRuleSuspect`, `source=outlook-com`, `reader`, `readerVersion`.
+
+### Tests
+
+- 109 neue Tests (419 → **525 grün**):
+  - `OutlookEntryStoreTests` (26): IsSeen, MarkSeen, MarkSweepCompleted,
+    Save/Load, Corruption-Tolerance, Atomic-Write, Count, LastSweepAt.
+  - `OutlookAutoRuleDetectorTests` (14): IsSuspect ≥2-Hit-Threshold,
+    jede der 4 Bedingungen einzeln + Kombinationen, Explain-Format.
+  - `OutlookTitleParserTests` (13): FolderView, InspectorSubject,
+    ReadOnly-Marker, Unsaved-Marker, Unread-Counter, Fallback.
+  - `OutlookBodyToMarkdownTests` (27): FromHtml Stripping
+    (Style/Script/Comments/Conditional), Links, Block-Tags,
+    Whitespace-Normalisierung (Block-Boundaries, `\u00A0`→space),
+    Plain-Passthrough, Truncate.
+  - `OutlookAppReaderTests` (26): Public-Surface, ShortId (9 Fälle),
+    Read Fallbacks (FolderView/Inspector/Empty), OnPoll-Throttle,
+    Store-Init, DefaultCaptureRoot.
+- COM-spezifische Tests als `[Trait("Integration", "Outlook")]` markiert
+  (in Sandbox skipped, da Outlook nicht installiert).
+
+### Bekannte Einschränkungen
+
+- **Outlook New** (PIM-basiert) wird **nicht** unterstützt — kein COM.
+  Spec-Out-of-Scope weiterhin.
+- Folder-Iteration läuft über `Session.GetDefaultFolder()` für Standard-
+  Folder und `Session.Folders(name).Items` für Custom-Folder. Letzteres
+  ist case-sensitive auf manchen Outlook-Versionen.
+- Polling-Logik ist single-threaded pro AppReader-Instanz. Bei mehreren
+  parallelen Outlook-Instanzen (selten) kann der Sweep sich gegenseitig
+  überholen — EntryID-Dedup fängt das ab.
+- BodyTruncateKB schneidet bei `maxKB*1024` Zeichen, nicht Bytes.
+  Ausreichend für Volltext-Indexierung.
+- `ignoreAutoRuleMails` Heuristik kann False-Positives haben (eine
+  No-Reply-Transaktionsmail + Unread-Counter passt zu zwei Bedingungen).
+  User-Tuning der Bedingungen ist YAGNI in Iter. 3.
 
 ## Out of Scope (MVP1)
 

@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: 271/271 grün (98 MVP1-Basis + 11 ReverseMarkdown-Iter-4 + 11 TriggerConfig Schritt A + 5 TriggerEvent + 8 WinEventHookDetector + 9 HeartbeatThread + 12 Throttle/HwndDedup Schritt D + 15 TriggerWorker Schritt E + 11 TriggerService Schritt F-Kern + 5 CaptureWriter-Parent Schritt F-Kern + 54 Documents-Reader Iter. 1 + 17 PDF-Viewer + 3 Office-COM-Integration + 8 Office-COM-Filename-Match Iter. 3)
+- [x] Tests: **525/525 grün** (419 MVP1+Trigger+MVP2-Basis + 106 Outlook-Reader Iter. 3: 26 EntryStore + 14 AutoRuleDetector + 13 TitleParser + 27 BodyToMarkdown + 26 OutlookAppReader)
 - [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
   - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
     auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist
@@ -95,7 +95,15 @@
   - Alte `CapturePipeline`/`EventDetector`/`Models.cs` (Polling-basiert)
     entfernt.
   - 91 neue Tests (Schritte A–G).
-- [ ] App-Reader: Outlook (mit Mail-Log + Auto-Regel-Setting)
+- [x] **App-Reader: Outlook (Spec 0004 Iter. 3 abgeschlossen)** — Mail-Log via COM (late binding):
+  - Neue DLL `AiRecall.AppReader.Outlook` mit `OutlookAppReader` (Dual-Modus: Inspector/Explorer-Selection + Background-Polling)
+  - `OutlookComInterop` (P/Invoke `oleaut32!GetActiveObject`) liefert `MailSnapshotFromCom`
+  - `OutlookEntryStore` (EntryID-Dedup, atomic `File.Replace`)
+  - `OutlookAutoRuleDetector` (4 Bedingungen, ≥2 Hits = suspect)
+  - `OutlookTitleParser` (Folder-View vs. Inspector)
+  - `OutlookBodyToMarkdown` (HTML→MD, Outlook-spezifisch, custom)
+  - Polling alle 60 s (konfigurierbar, `outlook.pollIntervalSeconds`)
+  - 109 neue Tests (499 → 525 grün)
 - [x] App-Reader: Word/Excel/PowerPoint (Spec 0004 Iter. Documents — UIA-only, Office nicht erforderlich; Tests grün, e2e-Smoke gegen Office ausstehend)
 - [x] Trigger-Pipeline (`recall record`) — **komplett, Spec 0005 abgeschlossen**
 - [x] **Async Document Conversion Pipeline (Spec 0007 v1.0 abgeschlossen)**
