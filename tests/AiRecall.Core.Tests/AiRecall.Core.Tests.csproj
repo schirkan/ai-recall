@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.OneNote\AiRecall.AppReader.OneNote.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.AppReader.Pdf\AiRecall.AppReader.Pdf.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.AppReader.Teams\AiRecall.AppReader.Teams.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Trigger\AiRecall.Trigger.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Conversion\AiRecall.Conversion.csproj" />

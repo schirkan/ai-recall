@@ -69,23 +69,24 @@ internal static class TeamsUiaReader
             : title;
 
         // Split on " | " (Teams-Konvention)
-        string namePart;
-        string chatName;
-        TeamsChatKind kind;
-
         var sepIdx = stripped.IndexOf(" | ", StringComparison.Ordinal);
+        string namePart;
+        string formatted;
+
         if (sepIdx > 0)
         {
-            namePart = stripped[..sepIdx].Trim();
-            chatName = stripped[(sepIdx + 3)..].Trim();
+            namePart  = stripped[..sepIdx].Trim();
+            var chatName = stripped[(sepIdx + 3)..].Trim();
+            formatted = $"{namePart} | {chatName}";
         }
         else
         {
-            namePart = stripped.Trim();
-            chatName = stripped.Trim();
+            // Kein Separator — Raw-Title beibehalten, nicht kuenstlich "X | Y" einfuegen.
+            namePart  = stripped.Trim();
+            formatted = stripped.Trim();
         }
 
-        kind = namePart.ToLowerInvariant() switch
+        var kind = namePart.ToLowerInvariant() switch
         {
             "chat"        => TeamsChatKind.OneOnOne,
             "channel"     => TeamsChatKind.Channel,
@@ -94,7 +95,7 @@ internal static class TeamsUiaReader
             _             => TeamsChatKind.Unknown,
         };
 
-        return new TeamsTitleInfo($"{namePart} | {chatName}", kind, kind == TeamsChatKind.Meeting);
+        return new TeamsTitleInfo(formatted, kind, kind == TeamsChatKind.Meeting);
     }
 
     /// <summary>
@@ -170,7 +171,8 @@ internal static class TeamsUiaReader
             return new TeamsContent(
                 BodyMarkdown: sb.ToString().TrimEnd(),
                 SenderSet: senderSet,
-                Source: "teams-uia");
+                Source: "teams-uia")
+            { ChatTitleHint = null };
         }
         catch
         {
@@ -212,8 +214,8 @@ internal static class TeamsUiaReader
     private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 }
 
-/// <summary>Geparstes Window-Title-Resultat.</summary>
-internal sealed record TeamsTitleInfo(string FormattedTitle, TeamsChatKind Kind, bool IsMeeting)
+/// <summary>Geparstes Window-Title-Resultat (public fuer Test-Parameter-Typen).</summary>
+public sealed record TeamsTitleInfo(string FormattedTitle, TeamsChatKind Kind, bool IsMeeting)
 {
     public string ChatTypeLabel => Kind switch
     {
@@ -225,7 +227,8 @@ internal sealed record TeamsTitleInfo(string FormattedTitle, TeamsChatKind Kind,
     };
 }
 
-internal enum TeamsChatKind
+/// <summary>Chat-Typ-Enum (public fuer Test-Parameter-Typen).</summary>
+public enum TeamsChatKind
 {
     Unknown,
     OneOnOne,
@@ -238,4 +241,8 @@ internal enum TeamsChatKind
 internal sealed record TeamsContent(
     string BodyMarkdown,
     IReadOnlyCollection<string> SenderSet,
-    string Source);
+    string Source)
+{
+    /// <summary>Optionaler Chat-Titel (nur vom CDP-Pfad befuellt, UIA leitet ihn aus Window-Title ab).</summary>
+    public string? ChatTitleHint { get; init; }
+}

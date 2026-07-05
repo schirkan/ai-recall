@@ -25,6 +25,7 @@ internal sealed record TeamsHierarchyInfo(
     {
         get
         {
+            if (string.IsNullOrEmpty(ChatId)) return "0";
             var compact = ChatId.Replace("-", string.Empty);
             return compact.Length <= 8 ? compact : compact.Substring(0, 8);
         }
