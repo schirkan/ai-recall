@@ -45,26 +45,26 @@ public sealed class TrayIconController : IDisposable
         };
         _startRecordingItem = new ToolStripMenuItem("▶ Start Recording")
         {
-            ShortcutKeys = Keys.S
+            ShortcutKeys = Keys.Control | Keys.S
         };
         _stopRecordingItem = new ToolStripMenuItem("⏸ Stop Recording")
         {
-            ShortcutKeys = Keys.T,
+            ShortcutKeys = Keys.Control | Keys.T,
             Enabled = false
         };
         _showLogsItem = new ToolStripMenuItem("📋 Live Logviewer…")
         {
-            ShortcutKeys = Keys.L,
+            ShortcutKeys = Keys.Control | Keys.L,
             Enabled = false   // aktiv in Schritt 5 (Spec 0008) — via EnableLogviewer()
         };
         _settingsItem = new ToolStripMenuItem("⚙ Settings…")
         {
-            ShortcutKeys = Keys.Oemcomma,
+            ShortcutKeys = Keys.Control | Keys.Oemcomma,
             Enabled = false   // aktiv in Schritt 6 (Spec 0009) — via EnableSettings()
         };
         _quitItem = new ToolStripMenuItem("🚪 Quit")
         {
-            ShortcutKeys = Keys.Q
+            ShortcutKeys = Keys.Control | Keys.Q
         };
 
         _menu = new ContextMenuStrip();

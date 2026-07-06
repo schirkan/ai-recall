@@ -148,8 +148,17 @@ public sealed class LogviewerWindow : Form
         // Initiale Population + Live-Subscribe
         _session.EventAppended += OnEventAppended;
         _session.Cleared += OnSessionCleared;
-        ApplyFilter();      // populate + filter
+        ApplyFilter();      // populate + filter (no scroll — grid not laid out yet)
         UpdateStatus();
+
+        // Bug-Bash 2026-07-06 I-13: Auto-Scroll erst nach Shown.
+        // Im Konstruktor hat das DataGridView noch RowCount == 0, das Setzen
+        // von FirstDisplayedScrollingRowIndex wuerfe ArgumentOutOfRangeException.
+        // Nach Shown ist die initiale Layout-Pass durch.
+        this.Shown += (_, _) =>
+        {
+            if (_autoScrollCheck.Checked) ScrollToEnd();
+        };
     }
 
     private void OnEventAppended(object? sender, LogEventEntry e)
@@ -226,10 +235,22 @@ public sealed class LogviewerWindow : Form
     {
         if (_bindingList.Count == 0) return;
         var lastIdx = _bindingList.Count - 1;
+        // Bug-Bash 2026-07-06 I-13: Range-Check gegen Grid-RowCount (nicht
+        // BindingList-Count). Vor dem ersten Layout-Pass (z. B. im Konstruktor
+        // oder bevor das Form sichtbar wird) hat das Grid 0 Rows und ein
+        // beliebiger FirstDisplayedScrollingRowIndex > 0 wirft
+        // ArgumentOutOfRangeException.
+        if (lastIdx < 0 || lastIdx >= _grid.RowCount) return;
         _programmaticScrolling = true;
         try
         {
             _grid.FirstDisplayedScrollingRowIndex = lastIdx;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // Defense in Depth: kann in Randfaellen auftreten, wenn das Grid
+            // waehrend eines BeginInvoke-Batches relayoutet wird. Swallow —
+            // naechstes EventAppended versucht es erneut.
         }
         finally
         {
