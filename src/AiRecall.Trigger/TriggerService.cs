@@ -43,6 +43,7 @@ public sealed class TriggerService : ITriggerService
     private readonly Channel<TriggerEvent> _channel;
     private readonly WinEventHookDetector? _winEventHook;
     private readonly HeartbeatThread? _heartbeat;
+    private readonly PeriodicCaptureThread? _periodicCapture;
     private readonly TriggerWorker _worker;
     private readonly ConversionWorker? _conversionWorker;
     private readonly bool _ownsConversionWorker;
@@ -83,6 +84,17 @@ public sealed class TriggerService : ITriggerService
                 _channel.Writer,
                 logWarn: msg => _logger.Warning("Heartbeat: {Msg}", msg),
                 logError: msg => _logger.Error("Heartbeat: {Msg}", msg));
+        }
+
+        // Bug-Bash 2026-07-06 I-23: Periodischer Capture-Trigger. 0 = deaktiviert.
+        // Sinnvolle Werte 3000-10000 ms fuer Video-Streams / Slideshows.
+        if (_config.ScreenRecorder.PeriodicCaptureMs > 0)
+        {
+            _periodicCapture = new PeriodicCaptureThread(
+                _config.ScreenRecorder.PeriodicCaptureMs,
+                _channel.Writer,
+                logWarn: msg => _logger.Warning("PeriodicCapture: {Msg}", msg),
+                logError: msg => _logger.Error("PeriodicCapture: {Msg}", msg));
         }
 
         // ConversionWorker (Spec 0007 Schritt 6):
@@ -158,12 +170,15 @@ public sealed class TriggerService : ITriggerService
         _worker.Start();
         _winEventHook?.Start();
         _heartbeat?.Start();
+        _periodicCapture?.Start();
         _isRunning = true;
         _logger.Information(
-            "TriggerService started (WinEventHook={Hook}, Heartbeat={Hb} @ {HbSec}s)",
+            "TriggerService started (WinEventHook={Hook}, Heartbeat={Hb} @ {HbSec}s, PeriodicCapture={Pc} @ {PcMs}ms)",
             _winEventHook is not null,
             _heartbeat is not null,
-            _config.Trigger.HeartbeatIntervalSeconds);
+            _config.Trigger.HeartbeatIntervalSeconds,
+            _periodicCapture is not null,
+            _config.ScreenRecorder.PeriodicCaptureMs);
     }
 
     /// <inheritdoc />
@@ -174,6 +189,7 @@ public sealed class TriggerService : ITriggerService
         // dann Channel-Completion.
         try { _winEventHook?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "WinEventHook.Stop failed"); }
         try { _heartbeat?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Heartbeat.Stop failed"); }
+        try { _periodicCapture?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "PeriodicCapture.Stop failed"); }
         _channel.Writer.TryComplete();
         try { _worker.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Worker.Stop failed"); }
         _isRunning = false;
@@ -189,6 +205,7 @@ public sealed class TriggerService : ITriggerService
         _worker.Dispose();
         _winEventHook?.Dispose();
         _heartbeat?.Dispose();
+        _periodicCapture?.Dispose();
         if (_ownsConversionWorker)
         {
             _conversionWorker?.Dispose();

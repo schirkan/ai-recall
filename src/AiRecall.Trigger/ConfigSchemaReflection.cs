@@ -62,46 +62,37 @@ public static class ConfigSchemaReflection
     /// <summary>
     /// Returns the top-level editable sections of <paramref name="config"/>:
     /// Capture, ScreenRecorder, Ocr, Logging, AppReader, Trigger, Conversion.
-    /// The <c>AppReader</c> section has nested sub-sections (Outlook, Browser, Notepad, Documents, Pdf).
+    /// Sub-Sections werden rekursiv aufgeloest: jede Property vom Typ einer
+    /// [JsonPropertyName]-POCO-Klasse wird zur eigenen Sub-Section (z. B.
+    /// <c>appReader.browser.cdp</c>, <c>trigger.winEvents</c>).
+    ///
+    /// Bug-Bash 2026-07-06 I-18: Vorher waren Sub-Sub-Konfigs
+    /// (CdpConfig, MarkdownSettings, WinEventSubscription, TriggerBlacklist,
+    /// OneNoteConfig, TeamsConfig) im TreeView unsichtbar — sie waren
+    /// weder Property (wegen IsExpandableConfigType) noch SubSection (harte
+    /// Liste). Jetzt: rekursiv.
     /// </summary>
     public static IReadOnlyList<ConfigSectionDescriptor> GetTopLevelSections(AppConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         var sections = new List<ConfigSectionDescriptor>();
 
-        sections.Add(Make(config.Capture, "Capture", "capture", sectionType: typeof(CaptureConfig)));
-        sections.Add(Make(config.ScreenRecorder, "Screen Recorder", "screenRecorder", sectionType: typeof(ScreenRecorderConfig)));
-        sections.Add(Make(config.Ocr, "OCR", "ocr", sectionType: typeof(OcrConfig)));
-        sections.Add(Make(config.Logging, "Logging", "logging", sectionType: typeof(LoggingConfig)));
-
-        // AppReader mit Sub-Sections
-        var appReader = config.AppReader;
-        var appReaderSubs = new List<ConfigSectionDescriptor>
-        {
-            Make(appReader.Outlook,   "Outlook",    "appReader.outlook",   typeof(OutlookConfig)),
-            Make(appReader.Browser,   "Browser",    "appReader.browser",   typeof(BrowserConfig)),
-            Make(appReader.Notepad,   "Notepad",    "appReader.notepad",   typeof(NotepadConfig)),
-            Make(appReader.Documents, "Documents",  "appReader.documents", typeof(DocumentsConfig)),
-            Make(appReader.Pdf,       "PDF",        "appReader.pdf",       typeof(PdfConfig))
-        };
-        sections.Add(new ConfigSectionDescriptor(
-            name: "appReader",
-            displayName: "App Reader",
-            path: "appReader",
-            sectionType: typeof(AppReaderConfig),
-            instance: appReader,
-            subSections: appReaderSubs,
-            properties: GetEditableProperties(typeof(AppReaderConfig), appReader)));
-
-        sections.Add(Make(config.Trigger, "Trigger", "trigger", sectionType: typeof(TriggerConfig)));
-        sections.Add(Make(config.Conversion, "Conversion", "conversion", sectionType: typeof(ConversionConfig)));
+        sections.Add(BuildSection(config.Capture, "Capture", "capture", typeof(CaptureConfig), parentPath: null));
+        sections.Add(BuildSection(config.ScreenRecorder, "Screen Recorder", "screenRecorder", typeof(ScreenRecorderConfig), parentPath: null));
+        sections.Add(BuildSection(config.Ocr, "OCR", "ocr", typeof(OcrConfig), parentPath: null));
+        sections.Add(BuildSection(config.Logging, "Logging", "logging", typeof(LoggingConfig), parentPath: null));
+        sections.Add(BuildSection(config.AppReader, "App Reader", "appReader", typeof(AppReaderConfig), parentPath: null));
+        sections.Add(BuildSection(config.Trigger, "Trigger", "trigger", typeof(TriggerConfig), parentPath: null));
+        sections.Add(BuildSection(config.Conversion, "Conversion", "conversion", typeof(ConversionConfig), parentPath: null));
 
         return sections;
     }
 
     /// <summary>
     /// Finds a section by hierarchical path (e.g. <c>"appReader"</c> or
-    /// <c>"appReader.browser"</c>). Returns <c>null</c> if not found.
+    /// <c>"appReader.browser.cdp"</c>). Returns <c>null</c> if not found.
+    /// Bug-Bash 2026-07-06 I-18: jetzt rekursiv, da Sub-Sections selbst
+    /// weitere Sub-Sections haben koennen.
     /// </summary>
     public static ConfigSectionDescriptor? FindByPath(AppConfig config, string path)
     {
@@ -110,65 +101,168 @@ public static class ConfigSchemaReflection
 
         foreach (var section in GetTopLevelSections(config))
         {
-            if (section.Path == path) return section;
-            foreach (var sub in section.SubSections)
-            {
-                if (sub.Path == path) return sub;
-            }
+            var hit = FindRecursive(section, path);
+            if (hit is not null) return hit;
         }
         return null;
     }
 
-    private static ConfigSectionDescriptor Make(object instance, string displayName, string name, Type sectionType)
+    private static ConfigSectionDescriptor? FindRecursive(ConfigSectionDescriptor section, string path)
     {
-        return new ConfigSectionDescriptor(
-            name: name,
-            displayName: displayName,
-            path: name,
-            sectionType: sectionType,
-            instance: instance,
-            subSections: Array.Empty<ConfigSectionDescriptor>(),
-            properties: GetEditableProperties(sectionType, instance));
+        if (section.Path == path) return section;
+        foreach (var sub in section.SubSections)
+        {
+            var hit = FindRecursive(sub, path);
+            if (hit is not null) return hit;
+        }
+        return null;
     }
 
-    private static IReadOnlyList<PropertyDescriptor> GetEditableProperties(Type type, object instance)
+    /// <summary>
+    /// Baut eine Section inkl. rekursiver Sub-Sections. Jede Property vom Typ
+    /// einer expandierbaren POCO (siehe <see cref="IsExpandableConfigType"/>)
+    /// wird zur eigenen Sub-Section; die uebrigen Properties landen in
+    /// <see cref="ConfigSectionDescriptor.Properties"/>.
+    /// </summary>
+    /// <param name="parentPath">
+    /// Pfad der Parent-Section (z. B. <c>"appReader"</c>). Bei Top-Level
+    /// Sections <c>null</c> — dann wird <paramref name="name"/> als Pfad verwendet.
+    /// </param>
+    private static ConfigSectionDescriptor BuildSection(
+        object instance, string displayName, string name, Type sectionType, string? parentPath)
     {
+        var path = parentPath is null ? name : parentPath + "." + name;
         var collection = TypeDescriptor.GetProperties(instance);
-        var result = new List<PropertyDescriptor>();
+        var properties = new List<PropertyDescriptor>();
+        var subSections = new List<ConfigSectionDescriptor>();
+
         foreach (PropertyDescriptor? prop in collection)
         {
             if (prop is null) continue;
-            if (prop.IsReadOnly) continue;       // read-only properties nicht editierbar
-            if (prop.PropertyType.IsArray) continue; // Arrays schwierig für PropertyGrid
-            // Sub-Config-Klassen (BrowserConfig, CdpConfig, MarkdownSettings) werden als
-            // Sub-Sections im TreeView angezeigt, NICHT als Property — sonst rekursive
-            // Expansion. Ausnahme: einfache POCOs (z. B. WinEventSubscription, TriggerBlacklist)
-            // werden als Property angezeigt, weil sie keine eigene Section im TreeView haben.
+            if (prop.IsReadOnly) continue;
+            if (prop.PropertyType.IsArray) continue;
+
+            // JSON-Name aus [JsonPropertyName] (camelCase, matches config.json).
+            // Fallback auf Property-Name (PascalCase) wenn Attribut fehlt.
+            var jsonName = prop.GetJsonPropertyName() ?? prop.Name;
+
             if (IsExpandableConfigType(prop.PropertyType))
             {
-                continue;
+                var childInstance = prop.GetValue(instance);
+                if (childInstance is null) continue;
+                var childDisplay = HumanizeName(jsonName);
+                subSections.Add(BuildSection(
+                    childInstance, childDisplay, jsonName, prop.PropertyType, parentPath: path));
             }
-            result.Add(prop);
+            else
+            {
+                properties.Add(prop);
+            }
         }
-        return result;
+
+        return new ConfigSectionDescriptor(
+            name: name,
+            displayName: displayName,
+            path: path,
+            sectionType: sectionType,
+            instance: instance,
+            subSections: subSections,
+            properties: properties);
+    }
+
+    /// <summary>
+    /// Macht aus einem camelCase Property-Namen einen Display-Namen
+    /// (z. B. <c>"winEvents"</c> → <c>"Win Events"</c>, <c>"cdp"</c> → <c>"CDP"</c>).
+    /// </summary>
+    private static string HumanizeName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        // Bekannte Akronyme case-correct
+        var acronyms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "cdp", "CDP" }, { "pdf", "PDF" }, { "ocr", "OCR" }, { "ui", "UI" },
+            { "uia", "UIA" }, { "url", "URL" }, { "uri", "URI" }, { "json", "JSON" }
+        };
+        if (acronyms.TryGetValue(name, out var acr)) return acr;
+
+        // camelCase → "Camel Case": "winEvents" -> "Win Events"
+        var sb = new System.Text.StringBuilder(name.Length + 4);
+        sb.Append(char.ToUpperInvariant(name[0]));
+        for (int i = 1; i < name.Length; i++)
+        {
+            if (char.IsUpper(name[i]) && !char.IsUpper(name[i - 1]))
+                sb.Append(' ');
+            sb.Append(name[i]);
+        }
+        return sb.ToString();
     }
 
     private static bool IsExpandableConfigType(Type type)
     {
-        // Klassen die selbst [JsonPropertyName] Attribute haben und mehrere eigene
-        // editierbare Properties mitbringen — wir expandieren sie als Sub-Section statt
-        // als einzelne PropertyGrid-Zeile. Sub-Sub-Configs (z. B. CdpConfig) bleiben als
-        // einfache Properties sichtbar (BrowserConfig hat Sub-Section für Markdown).
+        // Klassen mit eigenen editierbaren Properties werden als Sub-Section
+        // expandiert statt als einzelne Property angezeigt.
         //
-        // Bug-Bash 2026-07-05 I-6: Hat jetzt alle Checks in einer Funktion
-        // konsolidiert. Die ehemalige zweite Funktion HasConfigAttribute
-        // (PropertyDescriptor-Version) war eine schlampigere Variante dieser
-        // Logik und wurde entfernt.
-        return type.IsClass
-            && type != typeof(string)
-            && !type.IsPrimitive
-            && !type.IsGenericType   // List<>, Dictionary<> etc.
-            && type != typeof(object)
-            && type.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>() is not null;
+        // Heuristik: POCO mit mindestens einer oeffentlichen, schreibbaren
+        // Instanz-Property, deren Typ selbst "einfach" ist (bool, int, string,
+        // enum, List<string>) — dann ist es ein Konfig-Blatt, das wir
+        // expandieren sollten.
+        //
+        // Fruehere Version hat auf [JsonPropertyName] an der Klasse selbst
+        // geprueft; das ist immer null, weil das Attribut an Properties haengt.
+        // Folge: Sub-Sub-Configs (CdpConfig, OutlookConfig, ...) wurden
+        // uebersprungen und waren unsichtbar (Bug-Bash 2026-07-06 I-18).
+        if (!type.IsClass) return false;
+        if (type == typeof(string)) return false;
+        if (type.IsPrimitive) return false;
+        if (type.IsGenericType) return false;   // List<>, Dictionary<> etc.
+        if (type == typeof(object)) return false;
+
+        var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        foreach (var p in props)
+        {
+            if (!p.CanWrite) continue;
+            if (p.GetIndexParameters().Length > 0) continue;
+            if (IsLeafPropertyType(p.PropertyType)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True fuer Property-Typen, die als editierbare Zeile (bool/int/long/string/enum/List&lt;string&gt;)
+    /// gerendert werden. Komplexere Typen (andere POCOs) zaehlen nicht als
+    /// "einfach" und loesen damit keine Section-Expansion der Parent-Klasse aus.
+    /// </summary>
+    /// <summary>
+    /// Liest [JsonPropertyName] aus einem PropertyDescriptor. PropertyDescriptor
+    /// hat dafuer keine direkte API; der zugrundeliegende PropertyInfo schon.
+    /// </summary>
+    private static string? GetJsonPropertyName(this PropertyDescriptor prop)
+    {
+        if (prop is null) return null;
+        // PropertyDescriptor.ComponentType ist der Typ, der den Descriptor besitzt.
+        // Die echte PropertyInfo finden wir ueber den Namen.
+        var pi = prop.ComponentType.GetProperty(prop.Name);
+        if (pi is null) return null;
+        var attr = pi.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>();
+        return attr?.Name;
+    }
+
+    private static bool IsLeafPropertyType(Type type)
+    {
+        if (type == typeof(bool) || type == typeof(int) || type == typeof(long) || type == typeof(string))
+            return true;
+        if (type.IsEnum) return true;
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+        {
+            var arg = type.GetGenericArguments()[0];
+            return arg == typeof(string);
+        }
+        // Bug-Bash 2026-07-06 I-20: Nullable<T> ist ebenfalls ein Leaf
+        // (Checkbox fuer bool?, TextBox fuer int?/long?, TextBox fuer string?).
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>))
+        {
+            return IsLeafPropertyType(Nullable.GetUnderlyingType(type)!);
+        }
+        return false;
     }
 }

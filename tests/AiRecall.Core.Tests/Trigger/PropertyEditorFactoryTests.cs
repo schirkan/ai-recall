@@ -74,6 +74,55 @@ public class PropertyEditorFactoryTests
         Assert.Equal(PropertyEditorFactory.EditorKind.ReadOnly, info.Kind);
     }
 
+    // ----- Nullable<T> (Bug-Bash 2026-07-06 I-20) -----
+
+    [Fact]
+    public void GetEditor_NullableBool_WithValue_ReturnsCheckbox()
+    {
+        var (prop, instance) = MakePropWithInstance("NullableBoolProp", (bool?)true);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
+        Assert.Equal(PropertyEditorFactory.EditorKind.CheckBox, info.Kind);
+        Assert.Equal("true", info.DisplayText);
+    }
+
+    [Fact]
+    public void GetEditor_NullableBool_NullValue_DoesNotShowNullableLabel()
+    {
+        // Regressions-Test: vor dem Fix wurde "(Nullable`1)" angezeigt.
+        var (prop, instance) = MakePropWithInstance("NullableBoolProp", (bool?)null);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
+        Assert.NotEqual(PropertyEditorFactory.EditorKind.ReadOnly, info.Kind);
+        Assert.Equal("null", info.DisplayText);
+        // Beim Save wird der CheckBox "true"/"false" liefern, nicht "null" —
+        // das ist der bekannte Trade-off ohne echtes Tri-State-UI. Der User
+        // sieht also, dass der Wert null war (durch "null"-Label), aber beim
+        // Editieren verliert er den null-Zustand. Fuer MVP akzeptabel.
+        Assert.True((bool?)info.Parser!("false")! == false);
+    }
+
+    [Fact]
+    public void GetEditor_NullableInt_NullValue_EmptyStringReturnsNull()
+    {
+        var (prop, instance) = MakePropWithInstance("NullableIntProp", (int?)null);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
+        Assert.Equal(PropertyEditorFactory.EditorKind.TextBox, info.Kind);
+        Assert.Equal("null", info.DisplayText);
+        Assert.Null(info.Parser!(""));
+        Assert.Null(info.Parser!("null"));
+        Assert.Equal(99, info.Parser!("99"));
+    }
+
+    [Fact]
+    public void GetEditor_NullableEnum_NullValue_EmptyStringReturnsNull()
+    {
+        var (prop, instance) = MakePropWithInstance("NullableEnumProp", (FakeEnum?)null);
+        var info = PropertyEditorFactory.GetEditor(prop, instance);
+        Assert.Equal(PropertyEditorFactory.EditorKind.ComboBox, info.Kind);
+        Assert.Equal("null", info.DisplayText);
+        Assert.Null(info.Parser!(""));
+        Assert.Equal(FakeEnum.A, info.Parser!("A"));
+    }
+
     /// <summary>
     /// I-1 Regressions-Test (Bug-Bash 2026-07-05): Der Editor MUSS die Instance-Werte
     /// sehen, NICHT die Type-Defaults. Wenn das Production-Code-Pattern
@@ -122,6 +171,13 @@ public class PropertyEditorFactoryTests
         public List<string> ListProp { get; set; } = new();
         public Guid GuidProp { get; set; }
         public string ReadOnlyProp => "fixed";
+
+        // Bug-Bash 2026-07-06 I-20: Nullable-Properties fuer Tests der
+        // neuen Null-Behandlung (vorher: "(Nullable`1)" als ReadOnly-Label).
+        public bool? NullableBoolProp { get; set; }
+        public int? NullableIntProp { get; set; }
+        public string? NullableStringProp { get; set; }
+        public FakeEnum? NullableEnumProp { get; set; }
     }
 
     /// <summary>

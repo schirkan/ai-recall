@@ -19,6 +19,7 @@ public sealed class SettingsDialog : Form
     private readonly AppConfig _originalConfig;
     private readonly AppConfig _workingConfig;
     private readonly Action<AppConfig>? _onSave;
+    private readonly SplitContainer _split;
     private readonly TreeView _tree;
     private readonly Panel _editorPanel;
     private readonly ToolStripStatusLabel _statusLabel;
@@ -38,7 +39,13 @@ public sealed class SettingsDialog : Form
         Text = "AiRecall — Settings";
         Width = 900;
         Height = 650;
-        StartPosition = FormStartPosition.CenterParent;
+        // Bug-Bash 2026-07-06 I-UE: Dialog erscheint unten rechts am Bildschirm-
+        // rand mit 20 px Padding (statt zentriert ueber Parent). Funktioniert auch
+        // ohne sichtbares Parent (TrayApp). Form-Groesse wird in OnShown auf
+        // WorkingArea begrenzt, damit das Fenster bei kleinen Bildschirmen nicht
+        // ueber den Rand hinausragt.
+        StartPosition = FormStartPosition.Manual;
+        WindowPlacement.PositionBottomRight(this, padding: 20);
         MinimizeBox = false;
         MaximizeBox = true;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -50,7 +57,7 @@ public sealed class SettingsDialog : Form
         // Zeichen). Stattdessen FixedPanel=Panel1 setzen, dann berechnet
         // WinForms die Breite selbst, und die TreeView bekommt exakt den
         // Platz, den sie braucht. Der Rest geht an Panel2 (Editor-Panel).
-        var split = new SplitContainer
+        _split = new SplitContainer
         {
             Dock = DockStyle.Fill,
             FixedPanel = FixedPanel.Panel1,
@@ -62,7 +69,7 @@ public sealed class SettingsDialog : Form
             // Initialer Wert wird in OnShown an aktuelle Form-Groesse angepasst.
             SplitterDistance = 200
         };
-        Controls.Add(split);
+        Controls.Add(_split);
 
         _tree = new TreeView
         {
@@ -70,7 +77,7 @@ public sealed class SettingsDialog : Form
             HideSelection = false
         };
         _tree.AfterSelect += OnTreeNodeSelected;
-        split.Panel1.Controls.Add(_tree);
+        _split.Panel1.Controls.Add(_tree);
 
         _editorPanel = new Panel
         {
@@ -78,20 +85,24 @@ public sealed class SettingsDialog : Form
             AutoScroll = true,
             Padding = new Padding(12)
         };
-        split.Panel2.Controls.Add(_editorPanel);
+        _split.Panel2.Controls.Add(_editorPanel);
 
         // Bug-Bash 2026-07-06 I-16: Wenn der User den Splitter zieht oder
         // das Fenster resized, muessen die Editoren ihre Breite mit-anpassen.
         // Resize auf _editorPanel reicht, weil SplitContainer seine Panels
         // bei Splitter-Move ebenfalls resized.
-        split.SplitterMoved += (_, _) => RelayoutEditors();
+        _split.SplitterMoved += (_, _) => RelayoutEditors();
         _editorPanel.Resize += (_, _) => RelayoutEditors();
 
-        // StatusBar + Buttons unten
+        // Bug-Bash 2026-07-06 I-19: StatusBar + Buttons liegen jetzt im
+        // split.Panel2 (docked Bottom), nicht mehr im Form selbst. Vorher
+        // ueberlappte das ButtonPanel (Dock=Bottom, z-order-top) den
+        // Resize-Handle unten-rechts. Im SplitContainer ist der Resize-
+        // Grip des Forms jetzt unter dem Panel1, nicht unter den Buttons.
         _statusLabel = new ToolStripStatusLabel();
         var statusStrip = new StatusStrip();
         statusStrip.Items.Add(_statusLabel);
-        Controls.Add(statusStrip);
+        _split.Panel2.Controls.Add(statusStrip);
         statusStrip.Dock = DockStyle.Bottom;
 
         var buttonPanel = new FlowLayoutPanel
@@ -108,7 +119,7 @@ public sealed class SettingsDialog : Form
         _reloadButton = new Button { Text = "↻ Reload", Width = 100, Height = 28 };
         _reloadButton.Click += (_, _) => ReloadFromDisk();
         buttonPanel.Controls.AddRange(new Control[] { _saveButton, _cancelButton, _reloadButton });
-        Controls.Add(buttonPanel);
+        _split.Panel2.Controls.Add(buttonPanel);
 
         // TreeView füllen
         PopulateTree();
@@ -124,18 +135,26 @@ public sealed class SettingsDialog : Form
         var sections = ConfigSchemaReflection.GetTopLevelSections(_workingConfig);
         foreach (var section in sections)
         {
-            var node = new TreeNode(section.DisplayName) { Tag = section };
+            var node = BuildTreeNode(section);
             _tree.Nodes.Add(node);
-            if (section.SubSections.Count > 0)
-            {
-                foreach (var sub in section.SubSections)
-                {
-                    var subNode = new TreeNode(sub.DisplayName) { Tag = sub };
-                    node.Nodes.Add(subNode);
-                }
-            }
         }
         _tree.ExpandAll();
+    }
+
+    /// <summary>
+    /// Bug-Bash 2026-07-06 I-18: Rekursiver Tree-Node-Aufbau. Vorher wurden
+    /// Sub-Sub-Configs (browser.cdp, trigger.winEvents, …) als
+    /// eigenstaendige Top-Level-Knoten behandelt, was zu einer flachen
+    /// Liste mit 15+ Knoten fuehrte. Jetzt: echte Baumstruktur.
+    /// </summary>
+    private static TreeNode BuildTreeNode(ConfigSectionDescriptor section)
+    {
+        var node = new TreeNode(section.DisplayName) { Tag = section };
+        foreach (var sub in section.SubSections)
+        {
+            node.Nodes.Add(BuildTreeNode(sub));
+        }
+        return node;
     }
 
     private void OnTreeNodeSelected(object? sender, TreeViewEventArgs e)
@@ -163,10 +182,19 @@ public sealed class SettingsDialog : Form
         // Bug-Bash 2026-07-06 I-16: Editor-Spalte war fix 360 px breit, ragte
         // bei grosser rechter Seite in Leere und war bei kleiner rechts
         // abgeschnitten.
+        // Bug-Bash 2026-07-06 I-25: Description-Label unter dem Editor.
+        // Bug-Bash 2026-07-06 I-26+UE: Variable Zeilenhoehe. Vorher war
+        // rowHeight=32 fix, aber der Editor ist hoeher (26 px) plus die
+        // optionale Description (16 px) ueberlappte mit der naechsten Zeile.
+        // Jetzt berechnet jede Zeile ihren eigenen Anteil.
         const int padding = 12;
         const int labelColWidth = 200;
         const int editorMinWidth = 240;
-        const int rowHeight = 32;
+        const int editorHeight = 26;
+        const int labelVOffset = 4; // Label sitzt leicht unterhalb der Editor-Oberkante
+        const int descGap = 2;       // Padding zwischen Editor und Description
+        const int descHeight = 16;   // 1-zeilige Description
+        const int rowGap = 10;       // Padding zwischen Zeilen-Ende und naechstem Label
 
         int y = 8;
         var labelFont = new Font(Font, FontStyle.Bold);
@@ -189,26 +217,48 @@ public sealed class SettingsDialog : Form
         foreach (var prop in section.Properties)
         {
             var info = PropertyEditorFactory.GetEditor(prop, section.Instance);
+            var hasDesc = !string.IsNullOrWhiteSpace(prop.Description);
 
             // Label
             var lbl = new Label
             {
                 Text = prop.Name + ":",
-                Location = new Point(labelX, y + 4),
+                Location = new Point(labelX, y + labelVOffset),
                 Width = labelColWidth,
                 Font = labelFont
             };
             _editorPanel.Controls.Add(lbl);
 
-            // Editor
+            // Editor — mit fester Mindesthoehe, damit's anklickbar ist
             var editor = CreateEditor(info, prop);
             editor.Location = new Point(editorX, y);
             editor.Width = editorWidth;
+            editor.Height = editorHeight;
             editor.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _editorPanel.Controls.Add(editor);
             _editors[prop.Name] = editor;
 
-            y += rowHeight;
+            // Description (Bug-Bash 2026-07-06 I-25): kleiner grauer Text unter
+            // dem Editor, gelesen aus [Description]-Attribut der Property.
+            // Fallback: nichts anzeigen.
+            int descY = y + editorHeight + descGap;
+            if (hasDesc)
+            {
+                var descLbl = new Label
+                {
+                    Text = prop.Description!,
+                    Location = new Point(editorX, descY),
+                    Width = editorWidth,
+                    Height = descHeight,
+                    ForeColor = SystemColors.GrayText,
+                    Font = new Font(Font.FontFamily, Font.Size - 1),
+                    AutoEllipsis = true
+                };
+                _editorPanel.Controls.Add(descLbl);
+            }
+
+            // Naechste Zeile: nach Editor + optionaler Description + Padding
+            y += editorHeight + (hasDesc ? descGap + descHeight : 0) + rowGap;
         }
     }
 
@@ -220,10 +270,16 @@ public sealed class SettingsDialog : Form
     private void RelayoutEditors()
     {
         if (_activeSection is null) return;
+        // Werte muessen mit RenderSection synchron sein (Bug-Bash 2026-07-06
+        // I-26+UE: variable Zeilenhoehe).
         const int padding = 12;
         const int labelColWidth = 200;
         const int editorMinWidth = 240;
-        const int rowHeight = 32;
+        const int editorHeight = 26;
+        const int labelVOffset = 4;
+        const int descGap = 2;
+        const int descHeight = 16;
+        const int rowGap = 10;
         const int headerHeight = 30;
         const int startY = 8;
 
@@ -241,15 +297,32 @@ public sealed class SettingsDialog : Form
         foreach (var prop in _activeSection.Properties)
         {
             if (idx >= _editorPanel.Controls.Count) break;
+            var hasDesc = !string.IsNullOrWhiteSpace(prop.Description);
+
+            // Label
             var lbl = _editorPanel.Controls[idx];
-            lbl.Location = new Point(padding, y + 4);
+            lbl.Location = new Point(padding, y + labelVOffset);
             idx++;
+
+            // Editor
             if (idx >= _editorPanel.Controls.Count) break;
             var editor = _editorPanel.Controls[idx];
             editor.Location = new Point(editorX, y);
             editor.Width = editorWidth;
             idx++;
-            y += rowHeight;
+
+            // Description (optional)
+            if (hasDesc
+                && idx < _editorPanel.Controls.Count
+                && _editorPanel.Controls[idx] is Label nextLabel)
+            {
+                nextLabel.Location = new Point(editorX, y + editorHeight + descGap);
+                nextLabel.Width = editorWidth;
+                idx++;
+            }
+
+            // Naechste Zeile
+            y += editorHeight + (hasDesc ? descGap + descHeight : 0) + rowGap;
         }
     }
 
@@ -262,20 +335,16 @@ public sealed class SettingsDialog : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        // Splitter proportional an aktuelle Form-Groesse anpassen.
-        // Wir suchen den SplitContainer rekursiv, weil wir split nicht als
-        // Feld halten (kein weiterer Use-Case).
-        foreach (Control c in Controls)
+        // Bug-Bash 2026-07-06 I-UE: Position nach OnShown erneut anwenden
+        // (Form.Size kann sich durch AutoSize/Resize noch geaendert haben).
+        WindowPlacement.OnShown(this);
+        // Splitter proportional an aktuelle Client-Groesse anpassen.
+        // Bug-Bash 2026-07-06 I-19: split ist jetzt direkt im Feld, nicht
+        // mehr im Form.Controls (Button-Panel ist in Panel2 verschoben).
+        int desired = Math.Max(_split.Panel1MinSize, (int)(_split.ClientSize.Width * 0.30));
+        if (desired < _split.ClientSize.Width - 100)
         {
-            if (c is SplitContainer sc)
-            {
-                int desired = Math.Max(sc.Panel1MinSize, (int)(sc.ClientSize.Width * 0.30));
-                if (desired < sc.ClientSize.Width - 100)
-                {
-                    sc.SplitterDistance = desired;
-                }
-                break;
-            }
+            _split.SplitterDistance = desired;
         }
     }
 
@@ -284,29 +353,48 @@ public sealed class SettingsDialog : Form
         switch (info.Kind)
         {
             case PropertyEditorFactory.EditorKind.CheckBox:
-                var cb = new CheckBox { Checked = bool.Parse(info.DisplayText), Text = "Enabled" };
+                // Bug-Bash 2026-07-06 I-26: fuer Nullable<bool> mit Wert=null
+                // liefert PropertyEditorFactory.DisplayText="null". bool.Parse
+                // wirft dann. "null" => unchecked, "true"/"false" => normal.
+                var cb = new CheckBox
+                {
+                    Checked = info.DisplayText.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    Text = "Enabled"
+                };
                 return cb;
 
             case PropertyEditorFactory.EditorKind.ComboBox:
                 var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-                var enumType = prop.PropertyType;
+                var enumType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+                // Nullable<Enum> hat "null" als erlaubten Wert (siehe PropertyEditorFactory).
+                if (Nullable.GetUnderlyingType(prop.PropertyType) is not null) combo.Items.Add("null");
                 foreach (var name in Enum.GetNames(enumType)) combo.Items.Add(name);
                 combo.SelectedItem = info.DisplayText;
                 return combo;
 
             case PropertyEditorFactory.EditorKind.TextBox:
-                return new TextBox { Text = info.DisplayText };
+                // Bug-Bash 2026-07-06 I-UE: Multiline=false, aber Hoehe explizit
+                // auf Default lassen — RenderSection setzt 26 px. Wir geben
+                // hier nur den Default-Text mit.
+                return new TextBox { Text = info.DisplayText, BorderStyle = BorderStyle.Fixed3D };
 
             case PropertyEditorFactory.EditorKind.ListStringTextBox:
                 return new TextBox
                 {
                     Text = info.DisplayText,
-                    PlaceholderText = "comma-separated values"
+                    PlaceholderText = "comma-separated values",
+                    BorderStyle = BorderStyle.Fixed3D
                 };
 
             case PropertyEditorFactory.EditorKind.ReadOnly:
             default:
-                return new TextBox { Text = info.DisplayText, ReadOnly = true, BackColor = SystemColors.Control };
+                return new TextBox
+                {
+                    Text = info.DisplayText,
+                    ReadOnly = true,
+                    BackColor = SystemColors.Control,
+                    BorderStyle = BorderStyle.Fixed3D
+                };
         }
     }
 

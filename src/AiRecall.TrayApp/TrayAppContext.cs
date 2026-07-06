@@ -1,4 +1,6 @@
 using AiRecall.Core.Configuration;
+using AiRecall.Core.Tessdata;
+using AiRecall.TrayApp.Tessdata;
 using AiRecall.TrayApp.Windows;
 using AiRecall.Trigger;
 using Serilog;
@@ -71,35 +73,92 @@ public sealed class TrayAppContext : ApplicationContext
 
         Log.Information("AiRecall TrayApp ready (config={Path})", UserConfigLocator.GetUserConfigPath());
 
-        // Bug-Bash 2026-07-06 I-14: One-Shot-Ballon, wenn Tesseract konfiguriert
-        // ist aber keine tessdata gefunden wurde. Sonst sieht der User nur
-        // eine Log-Zeile und wundert sich, warum OCR leer bleibt.
-        MaybeWarnAboutMissingTessdata();
+        // Spec 0012: First-Run-Dialog, wenn Tesseract konfiguriert ist und
+        // tessdata für die konfigurierten Sprachen fehlt. Ersetzt das passive
+        // Balloon aus Bug-Bash I-14.
+        MaybeOfferTessdataDownload();
     }
 
-    private void MaybeWarnAboutMissingTessdata()
+    private void MaybeOfferTessdataDownload()
     {
-        if (!string.Equals(_config.Ocr.Engine, "tesseract", StringComparison.OrdinalIgnoreCase)) return;
+        var manager = new TessdataManager();
+        var missing = manager.FindMissingLanguages(_config);
+        if (missing.Count == 0) return;
 
-        var candidates = new[]
+        Log.Warning("Missing tessdata for {Count} language(s): {Langs}",
+            missing.Count, string.Join(", ", missing.Select(m => m.Code)));
+
+        // Beim ersten Start kann das TrayApp-Hauptfenster noch nicht da sein,
+        // NotifyIcon ist aber sichtbar — deshalb Owner=null (Balloon-Auslöser
+        // übernimmt die Aufmerksamkeit). Spec 0012 §Auslöser.
+        using var dialog = new TessdataFirstRunDialog(
+            missing,
+            manager,
+            onPersistNeverAskAgain: disable =>
+            {
+                _config.Ocr.AutoDownloadTessdata = disable;
+                TryPersistOcrConfig();
+            });
+
+        var result = dialog.ShowDialog();
+        switch (dialog.Choice)
         {
-            Path.IsPathRooted(_config.Ocr.TessDataPath)
-                ? _config.Ocr.TessDataPath
-                : Path.Combine(AppContext.BaseDirectory, _config.Ocr.TessDataPath),
-            Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AiRecall", _config.Ocr.TessDataPath),
-        };
-        if (candidates.Any(Directory.Exists)) return;
+            case TessdataFirstRunDialog.DialogChoice.DownloadNow:
+                Log.Information("User chose to download tessdata now (missing was {Count})", missing.Count);
+                break;
+            case TessdataFirstRunDialog.DialogChoice.Later:
+                _trayIcon.ShowBalloon(
+                    title: "AiRecall — OCR deaktiviert",
+                    text: "tessdata-Dateien fehlen weiterhin. Captures laufen ohne OCR.",
+                    icon: ToolTipIcon.Warning,
+                    timeoutMs: 8000);
+                break;
+            case TessdataFirstRunDialog.DialogChoice.NeverAskAgain:
+                Log.Information("User opted out of tessdata auto-download prompt");
+                break;
+        }
+    }
 
-        Log.Warning("No tessdata found. Searched: {Paths}", string.Join(", ", candidates));
-        _trayIcon.ShowBalloon(
-            title: "AiRecall — OCR deaktiviert",
-            text: "tessdata-Dateien fehlen. Captures laufen ohne OCR. " +
-                  "Setup-Hinweise im Log-Viewer oder unter " +
-                  "github.com/tesseract-ocr/tessdata_fast.",
-            icon: ToolTipIcon.Warning,
-            timeoutMs: 10000);
+    /// <summary>
+    /// Persistiert die aktuelle OCR-Konfiguration (mit ggf. geändertem
+    /// <c>autoDownloadTessdata</c>-Flag) zurück in
+    /// <c>%APPDATA%/AiRecall/config.json</c>. Atomar via bestehender
+    /// Settings-Persist-Logik; siehe Spec 0009 §Persistenz.
+    /// </summary>
+    private void TryPersistOcrConfig()
+    {
+        try
+        {
+            var path = UserConfigLocator.GetUserConfigPath();
+            if (!File.Exists(path))
+            {
+                Log.Information("No user config at {Path} yet; nothing to persist (defaults already cover autoDownloadTessdata=false)", path);
+                return;
+            }
+            var json = File.ReadAllText(path);
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = new System.Text.Json.Nodes.JsonObject();
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                root[prop.Name] = System.Text.Json.Nodes.JsonNode.Parse(prop.Value.GetRawText());
+            }
+            var ocr = root["ocr"] as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
+            ocr["autoDownloadTessdata"] = _config.Ocr.AutoDownloadTessdata;
+            root["ocr"] = ocr;
+            var bak = path + ".bak";
+            if (File.Exists(path)) File.Copy(path, bak, overwrite: true);
+            var tmp = path + ".tmp";
+            File.WriteAllText(tmp, root.ToJsonString(new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            }));
+            File.Move(tmp, path, overwrite: true);
+            Log.Information("Persisted ocr.autoDownloadTessdata={Flag}", _config.Ocr.AutoDownloadTessdata);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to persist ocr.autoDownloadTessdata");
+        }
     }
 
     /// <summary>

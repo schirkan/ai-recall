@@ -39,7 +39,10 @@ public sealed class LogviewerWindow : Form
         Text = "AiRecall — Live Logviewer";
         Width = 900;
         Height = 500;
-        StartPosition = FormStartPosition.CenterScreen;
+        // Bug-Bash 2026-07-06 I-UE: Konsistente Platzierung unten rechts
+        // mit 20 px Padding (Settings-Dialog ebenfalls).
+        StartPosition = FormStartPosition.Manual;
+        WindowPlacement.PositionBottomRight(this, padding: 20);
         ShowInTaskbar = true;
 
         // Toolbar
@@ -305,5 +308,13 @@ public sealed class LogviewerWindow : Form
         _session.EventAppended -= OnEventAppended;
         _session.Cleared -= OnSessionCleared;
         base.OnFormClosing(e);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        // Bug-Bash 2026-07-06 I-UE: Position nach OnShown ggf. nachjustieren
+        // (synchron mit Settings-Dialog).
+        WindowPlacement.OnShown(this);
     }
 }

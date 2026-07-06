@@ -82,7 +82,6 @@ public class ConfigLoaderTests : IDisposable
         File.WriteAllText(_configPath, "{}");
         var config = ConfigLoader.Load(_configPath);
         Assert.Equal("capture", config.Capture.RootPath);
-        Assert.Equal("png", config.Capture.ScreenshotFormat);
     }
 
     [Fact]

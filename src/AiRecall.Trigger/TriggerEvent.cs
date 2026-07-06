@@ -21,7 +21,15 @@ public enum TriggerKind
     /// <summary><c>EVENT_SYSTEM_MENUPOPUPSTART</c> — Menü/Kontextmenü geöffnet.</summary>
     MenuPopup,
     /// <summary>Heartbeat-Polling-Fallback (nicht aus WinEventHook).</summary>
-    Heartbeat
+    Heartbeat,
+    /// <summary>
+    /// Periodisches Polling (Spec 0002 §Periodic Capture, Bug-Bash 2026-07-06 I-23).
+    /// Erfasst das aktuelle Foreground-Window in festen Intervallen
+    /// (z. B. 3–10s), auch wenn keine WinEventHook-Events feuern — nuetzlich
+    /// fuer Video-Streams, Slideshows oder andere Inhalte, die sich
+    /// visuell aendern, ohne dass der Window-Titel oder die Hwnd wechselt.
+    /// </summary>
+    Periodic
 }
 
 /// <summary>

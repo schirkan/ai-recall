@@ -40,6 +40,8 @@ public class TriggerEventTests
         Assert.Contains(TriggerKind.Scroll, values);
         Assert.Contains(TriggerKind.MenuPopup, values);
         Assert.Contains(TriggerKind.Heartbeat, values);
+        // Bug-Bash 2026-07-06 I-23: Periodic fuer Video/Slideshow-Capture
+        Assert.Contains(TriggerKind.Periodic, values);
     }
 
     [Fact]

@@ -1,7 +1,6 @@
 {
   "capture": {
-    "rootPath": "capture",
-    "screenshotFormat": "png"
+    "rootPath": "capture"
   },
   "screenRecorder": {
     "throttleMs": 1000,
@@ -28,7 +27,8 @@
       "deu",
       "eng"
     ],
-    "tessDataPath": "tessdata"
+    "tessDataPath": "tessdata",
+    "autoDownloadTessdata": true
   },
   "logging": {
     "level": "info",
@@ -37,7 +37,6 @@
   "appReader": {
     "enabled": true,
     "pluginPath": ".",
-    "maxContentKB": 64,
     "browser": {
       "maxTextLengthKB": 50,
       "cdp": {
@@ -49,7 +48,14 @@
         "unknownTags": "PassThrough",
         "githubFlavored": false,
         "removeComments": true,
-        "whitelistUriSchemes": ["http", "https", "ftp", "ftps", "mailto", "tel"],
+        "whitelistUriSchemes": [
+          "http",
+          "https",
+          "ftp",
+          "ftps",
+          "mailto",
+          "tel"
+        ],
         "smartHrefHandling": false,
         "tableWithoutHeaderRowHandling": "Default",
         "listBulletChar": "*",
@@ -64,10 +70,21 @@
       "enableUiaExtraction": true
     },
     "pdf": {
-      "processes": ["AcroRd32", "Acrobat", "SumatraPDF", "FoxitReader", "PDFXEdit", "msedge", "chrome"]
+      "processes": [
+        "AcroRd32",
+        "Acrobat",
+        "SumatraPDF",
+        "FoxitReader",
+        "PDFXEdit",
+        "msedge",
+        "chrome"
+      ]
     },
     "outlook": {
-      "folders": ["Inbox", "Sent Items"],
+      "folders": [
+        "Inbox",
+        "Sent Items"
+      ],
       "pollIntervalSeconds": 60,
       "ignoreAutoRuleMails": false
     },
@@ -107,7 +124,10 @@
       "menuPopup": true
     },
     "blacklist": {
-      "windowClasses": ["tooltips_class32", "NotifyIconOverflowWindow"],
+      "windowClasses": [
+        "tooltips_class32",
+        "NotifyIconOverflowWindow"
+      ],
       "processes": []
     }
   }

@@ -18,4 +18,15 @@
     <PackageReference Include="Serilog" Version="3.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
   </ItemGroup>
+
+  <!--
+    Embedded Icon-Resources fuer Tray-Menu. Generiert per
+    tools/EmojiIconGen/Program.cs aus den Emoji-Quelltexten — Multi-
+    Resolution .ico (16/24/32/48). Manifest-Name = relativer Pfad mit
+    Punkten, daher "AiRecall.TrayApp.Resources.Icons.X.ico".
+    Gelaen via Assembly.GetManifestResourceStream in EmojiIconFactory.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Icons\*.ico" />
+  </ItemGroup>
 </Project>

@@ -21,16 +21,50 @@ public class ConfigSchemaReflectionTests
     }
 
     [Fact]
-    public void GetTopLevelSections_AppReader_HasFiveSubSections()
+    public void GetTopLevelSections_AppReader_HasAllSubSections()
     {
         var sections = ConfigSchemaReflection.GetTopLevelSections(new AppConfig());
         var appReader = sections.First(s => s.Name == "appReader");
-        Assert.Equal(5, appReader.SubSections.Count);
-        Assert.Contains(appReader.SubSections, s => s.Name == "appReader.outlook");
-        Assert.Contains(appReader.SubSections, s => s.Name == "appReader.browser");
-        Assert.Contains(appReader.SubSections, s => s.Name == "appReader.notepad");
-        Assert.Contains(appReader.SubSections, s => s.Name == "appReader.documents");
-        Assert.Contains(appReader.SubSections, s => s.Name == "appReader.pdf");
+        // Bug-Bash 2026-07-06 I-18: OneNote + Teams sind jetzt auch dabei (Spec 0010/0011).
+        Assert.Equal(7, appReader.SubSections.Count);
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.outlook");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.browser");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.notepad");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.documents");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.pdf");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.onenote");
+        Assert.Contains(appReader.SubSections, s => s.Path == "appReader.teams");
+    }
+
+    [Fact]
+    public void GetTopLevelSections_Recursive_SubSubConfigsAreVisible()
+    {
+        // Bug-Bash 2026-07-06 I-18: CdpConfig, MarkdownSettings,
+        // WinEventSubscription, TriggerBlacklist, HtmlToMarkdownOptions
+        // waren vorher unsichtbar. Jetzt: rekursiv.
+        var sections = ConfigSchemaReflection.GetTopLevelSections(new AppConfig());
+        var browser = sections.First(s => s.Name == "appReader")
+            .SubSections.First(s => s.Path == "appReader.browser");
+        Assert.Contains(browser.SubSections, s => s.Path == "appReader.browser.cdp");
+        Assert.Contains(browser.SubSections, s => s.Path == "appReader.browser.markdown");
+
+        var outlook = sections.First(s => s.Name == "appReader")
+            .SubSections.First(s => s.Path == "appReader.outlook");
+        Assert.Contains(outlook.SubSections, s => s.Path == "appReader.outlook.htmlToMarkdown");
+
+        var trigger = sections.First(s => s.Name == "trigger");
+        Assert.Contains(trigger.SubSections, s => s.Path == "trigger.winEvents");
+        Assert.Contains(trigger.SubSections, s => s.Path == "trigger.blacklist");
+    }
+
+    [Fact]
+    public void FindByPath_SubSubSection_ReturnsDeepSection()
+    {
+        var config = new AppConfig();
+        var section = ConfigSchemaReflection.FindByPath(config, "appReader.browser.cdp");
+        Assert.NotNull(section);
+        Assert.Equal("CDP", section!.DisplayName);
+        Assert.Equal(typeof(CdpConfig), section.SectionType);
     }
 
     [Fact]

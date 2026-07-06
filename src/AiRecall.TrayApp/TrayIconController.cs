@@ -27,6 +27,12 @@ public sealed class TrayIconController : IDisposable
     // Zustandsuebergaengen feuert. StatusRefreshTimer pollt 1/s den Counter
     // und ruft ApplyState, solange der Supervisor laeuft.
     private readonly System.Windows.Forms.Timer _statusRefreshTimer;
+    private readonly MenuImageCache _menuImages = new();
+    // Welcher Tray-Icon-Key aktuell am _notifyIcon haengt. Idempotente
+    // Updates: wir setzen das Icon nur bei State-Wechsel neu (sonst
+    // flackert der Shell-Cache, und FromHandle kann zu HFON-Leak
+    // fuehren).
+    private string? _currentTrayIconKey;
     private bool _disposed;
 
     public event EventHandler? ExitRequested;
@@ -57,35 +63,54 @@ public sealed class TrayIconController : IDisposable
         _supervisor = supervisor ?? throw new ArgumentNullException(nameof(supervisor));
         _configProvider = configProvider ?? throw new ArgumentNullException(nameof(configProvider));
 
-        _statusItem = new ToolStripMenuItem("🔴 Stopped")
+        _statusItem = new ToolStripMenuItem("Stopped")
         {
-            Enabled = false   // Status-Item ist nicht klickbar
+            Enabled = false,   // Status-Item ist nicht klickbar
+            Image = _menuImages.GetOrAdd("status-stopped", () => _menuImages.GetOrAddEmbeddedIcon("status-stopped.ico").ToBitmap())
         };
-        _startRecordingItem = new ToolStripMenuItem("▶ Start Recording")
+        _startRecordingItem = new ToolStripMenuItem("Start Recording")
         {
-            ShortcutKeys = Keys.Control | Keys.S
+            ShortcutKeys = Keys.Control | Keys.S,
+            Image = _menuImages.GetOrAdd("start", () => _menuImages.GetOrAddEmbeddedIcon("start.ico").ToBitmap())
         };
-        _stopRecordingItem = new ToolStripMenuItem("⏸ Stop Recording")
+        _stopRecordingItem = new ToolStripMenuItem("Stop Recording")
         {
             ShortcutKeys = Keys.Control | Keys.T,
-            Enabled = false
+            Enabled = false,
+            Image = _menuImages.GetOrAdd("stop", () => _menuImages.GetOrAddEmbeddedIcon("stop.ico").ToBitmap())
         };
-        _showLogsItem = new ToolStripMenuItem("📋 Live Logviewer…")
+        _showLogsItem = new ToolStripMenuItem("Live Logviewer…")
         {
             ShortcutKeys = Keys.Control | Keys.L,
-            Enabled = false   // aktiv in Schritt 5 (Spec 0008) — via EnableLogviewer()
+            Enabled = false,   // aktiv in Schritt 5 (Spec 0008) — via EnableLogviewer()
+            Image = _menuImages.GetOrAdd("logs", () => _menuImages.GetOrAddEmbeddedIcon("logs.ico").ToBitmap())
         };
-        _settingsItem = new ToolStripMenuItem("⚙ Settings…")
+        _settingsItem = new ToolStripMenuItem("Settings…")
         {
             ShortcutKeys = Keys.Control | Keys.Oemcomma,
-            Enabled = false   // aktiv in Schritt 6 (Spec 0009) — via EnableSettings()
+            Enabled = false,   // aktiv in Schritt 6 (Spec 0009) — via EnableSettings()
+            Image = _menuImages.GetOrAdd("settings", () => _menuImages.GetOrAddEmbeddedIcon("settings.ico").ToBitmap())
         };
-        _quitItem = new ToolStripMenuItem("🚪 Quit")
+        _quitItem = new ToolStripMenuItem("Quit")
         {
-            ShortcutKeys = Keys.Control | Keys.Q
+            ShortcutKeys = Keys.Control | Keys.Q,
+            // Bug-Bash 2026-07-06 I-UE: Quit-Icon wird jetzt aus "x"-Emoji
+            // gerendert statt aus embedded quit.ico. EmojiIconFactory nutzt
+            // den gleichen COLR/CPAL-Pfad wie bei anderen Menu-Icons — falls
+            // der User spaeter weitere Menu-Icons auf Emoji umstellt, bleibt
+            // der Code konsistent. Grosse=SmallIconSize skaliert sauber
+            // mit HiDPI (16/24/32).
+            Image = _menuImages.GetOrAdd(
+                "quit-emoji",
+                () => EmojiIconFactory.RenderBitmap("❌", SystemInformation.SmallIconSize.Height))
         };
 
         _menu = new ContextMenuStrip();
+        // Kein ImageScalingSize-Override: WinForms waehlt den Default-Slot
+        // aus SystemInformation.SmallIconSize (16x16 @ 100% DPI, 24x24
+        // @ 150%, 32x32 @ 200%). Das matched die RenderBitmap(size:16)-
+        // Bitmaps bei Standard-DPI 1:1 und skaliert proportional bei HiDPI.
+        // Fruehere Override-Versuche haben das Layout verschlechtert.
         _menu.Items.AddRange(new ToolStripItem[]
         {
             _statusItem,
@@ -99,9 +124,14 @@ public sealed class TrayIconController : IDisposable
             _quitItem
         });
 
+        // Tray-Icon = Capture-Indikator (Multi-Resolution .ico aus Embedded
+        // Resource). Running -> 👁️ (Eye), sonst -> ⚫ (Black Circle). Die
+        // .ico-Dateien werden vom EmojiIconGen-Tool generiert und ueber
+        // AiRecall.TrayApp.csproj als EmbeddedResource eingebunden — kein
+        // GDI+-Runtime-Rendering, daher zuverlaessig fuer NotifyIcon.
         _notifyIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = ResolveTrayIcon(_supervisor.State),
             Text = "AiRecall",
             Visible = true,
             ContextMenuStrip = _menu
@@ -217,9 +247,13 @@ public sealed class TrayIconController : IDisposable
     private void ApplyState(TrayIconState state)
     {
         if (_disposed) return;
-        _statusItem.Text = $"{state.IconGlyph} {state.StatusText}";
+        _statusItem.Text = state.StatusText;
+        _statusItem.Image = _menuImages.GetOrAdd(
+            $"status-{state.IconGlyph}",
+            () => _menuImages.GetOrAddEmbeddedIcon(StateGlyphToResource(state.IconGlyph)).ToBitmap());
         _startRecordingItem.Enabled = state.StartEnabled;
         _stopRecordingItem.Enabled = state.StopEnabled;
+        UpdateTrayIcon();
         _notifyIcon.Text = TruncateForTooltip(state.TooltipText, 63);
         Log.Debug("TrayIcon state applied: {StatusText} (start={Start}, stop={Stop})",
             state.StatusText, state.StartEnabled, state.StopEnabled);
@@ -228,6 +262,46 @@ public sealed class TrayIconController : IDisposable
     /// <summary>NotifyIcon.Text is limited to 63 chars on Windows; truncate gracefully.</summary>
     private static string TruncateForTooltip(string text, int maxLen)
         => text.Length <= maxLen ? text : text[..(maxLen - 1)] + "…";
+
+    /// <summary>
+    /// Liefert das Tray-<see cref="Icon"/> fuer den aktuellen
+    /// <see cref="TriggerState"/> aus dem Embedded-Resource-Cache.
+    /// Running -> tray-recording.ico (👁️), alles andere -> tray-idle.ico
+    /// (⚫). Bei Crashed bewusst Idle, weil die Aufnahme nicht laeuft.
+    /// </summary>
+    private Icon ResolveTrayIcon(TriggerState state)
+    {
+        var key = state == TriggerState.Running ? "tray-recording.ico" : "tray-idle.ico";
+        return _menuImages.GetOrAddEmbeddedIcon(key);
+    }
+
+    /// <summary>
+    /// Aktualisiert das Tray-Icon idempotent. Wir setzen das Icon nur
+    /// bei State-Wechsel neu, weil NotifyIcon sonst den HFON-Cache
+    /// staendig invalidiert und das Shell-Paint stoert.
+    /// </summary>
+    private void UpdateTrayIcon()
+    {
+        var key = _supervisor.State == TriggerState.Running ? "tray-recording.ico" : "tray-idle.ico";
+        if (_currentTrayIconKey == key) return;
+        _notifyIcon.Icon = ResolveTrayIcon(_supervisor.State);
+        _currentTrayIconKey = key;
+    }
+
+    /// <summary>
+    /// Mappt das <see cref="TrayIconState.IconGlyph"/> auf den
+    /// Embedded-Resource-Namen der .ico-Datei. Die Status-Glyphen
+    /// (🔴/🟡/🟢/⚠) sind fix in TrayIconState codiert — hier nur die
+    /// Uebersetzung auf den Asset-Namen.
+    /// </summary>
+    private static string StateGlyphToResource(string glyph) => glyph switch
+    {
+        "🔴" => "status-stopped.ico",
+        "🟡" => "status-starting.ico",
+        "🟢" => "status-running.ico",
+        "⚠" => "status-crashed.ico",
+        _ => "status-stopped.ico"
+    };
 
     public void Dispose()
     {
@@ -239,7 +313,16 @@ public sealed class TrayIconController : IDisposable
         _notifyIcon.DoubleClick -= OnDoubleClick;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        // Items vor Menu-Dispose von ihren Images trennen, sonst doppelte
+        // Freigabe (Menu.Dispose laeuft ueber die Images).
+        _statusItem.Image = null;
+        _startRecordingItem.Image = null;
+        _stopRecordingItem.Image = null;
+        _showLogsItem.Image = null;
+        _settingsItem.Image = null;
+        _quitItem.Image = null;
         _menu.Dispose();
+        _menuImages.Dispose();
         Log.Information("TrayIconController disposed");
     }
 }

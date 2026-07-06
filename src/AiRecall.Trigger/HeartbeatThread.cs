@@ -1,34 +1,23 @@
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 
 namespace AiRecall.Trigger;
 
 /// <summary>
-/// Periodisches Heartbeat-Polling (Spec 0005 §Trigger-Quellen, sekundär).
+/// Periodisches Heartbeat-Polling (Spec 0005 §Trigger-Quellen, sekundaer).
 ///
-/// Ruft alle <see cref="IntervalSeconds"/> <c>GetForegroundWindow</c> auf und
-/// schreibt ein <see cref="TriggerEvent"/> mit <see cref="TriggerKind.Heartbeat"/>
-/// in den Channel. Dient als Fallback, falls WinEventHook-Events verloren gehen
-/// (Sleep/Resume, schneller User-Session-Wechsel, hohe Systemlast).
+/// Duenner Wrapper um <see cref="PollThread"/> fuer Backwards-Compat
+/// (Bug-Bash 2026-07-06 I-24). Heartbeat laeuft alle ~30s (Default) als
+/// Fallback fuer verlorene WinEventHook-Events (Sleep/Resume, schneller
+/// Session-Wechsel, hohe Systemlast).
 ///
 /// <see cref="IntervalSeconds"/> = 0 deaktiviert den Heartbeat komplett
 /// (kein Thread wird gestartet).
 /// </summary>
 public sealed class HeartbeatThread : IDisposable
 {
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
+    private readonly PollThread _inner;
 
-    private readonly int _intervalSeconds;
-    private readonly ChannelWriter<TriggerEvent> _writer;
-    private readonly Action<string>? _logWarn;
-    private readonly Action<string>? _logError;
-
-    private Thread? _thread;
-    private CancellationTokenSource? _cts;
-    private bool _disposed;
-
-    public int IntervalSeconds => _intervalSeconds;
+    public int IntervalSeconds => _inner.IntervalMs / 1000;
 
     public HeartbeatThread(
         int intervalSeconds,
@@ -36,77 +25,18 @@ public sealed class HeartbeatThread : IDisposable
         Action<string>? logWarn = null,
         Action<string>? logError = null)
     {
-        _intervalSeconds = Math.Max(0, intervalSeconds);
-        _writer = writer;
-        _logWarn = logWarn;
-        _logError = logError;
+        // IntervalSeconds -> IntervalMs; Math.Max(0, ...) sitzt im PollThread.
+        _inner = new PollThread(
+            intervalMs: intervalSeconds * 1000,
+            writer: writer,
+            triggerKind: TriggerKind.Heartbeat,
+            threadName: "AiRecall.Heartbeat",
+            logPrefix: "Heartbeat",
+            logWarn: logWarn,
+            logError: logError);
     }
 
-    /// <summary>Startet den Heartbeat-Thread. Idempotent. Tut nichts, wenn IntervalSeconds = 0.</summary>
-    public void Start()
-    {
-        if (_disposed) throw new ObjectDisposedException(nameof(HeartbeatThread));
-        if (_intervalSeconds <= 0) return; // disabled
-        if (_thread is not null) return;
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
-        _thread = new Thread(() => Loop(token))
-        {
-            IsBackground = true,
-            Name = "AiRecall.Heartbeat"
-        };
-        _thread.Start();
-    }
-
-    /// <summary>Stoppt den Heartbeat-Thread.</summary>
-    public void Stop()
-    {
-        if (_disposed) return;
-        _cts?.Cancel();
-        _thread?.Join(TimeSpan.FromSeconds(2));
-        _thread = null;
-        _cts?.Dispose();
-        _cts = null;
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        Stop();
-        _disposed = true;
-    }
-
-    private void Loop(CancellationToken token)
-    {
-        try
-        {
-            while (!token.IsCancellationRequested)
-            {
-                // Cancellation-aware Sleep: WaitHandle.WaitOne(timeout) reagiert
-                // auf Token-Cancel und blockiert sonst für das Intervall.
-                if (token.WaitHandle.WaitOne(TimeSpan.FromSeconds(_intervalSeconds)))
-                {
-                    // Wait-Handle signalisiert = CancellationToken wurde gecancelt
-                    break;
-                }
-
-                try
-                {
-                    var hwnd = GetForegroundWindow();
-                    if (hwnd == IntPtr.Zero) continue;
-
-                    var ev = new TriggerEvent(hwnd, TriggerKind.Heartbeat, DateTimeOffset.Now);
-                    _writer.TryWrite(ev);
-                }
-                catch (Exception ex)
-                {
-                    _logWarn?.Invoke($"Heartbeat poll failed: {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logError?.Invoke($"Heartbeat loop crashed: {ex}");
-        }
-    }
+    public void Start() => _inner.Start();
+    public void Stop() => _inner.Stop();
+    public void Dispose() => _inner.Dispose();
 }
