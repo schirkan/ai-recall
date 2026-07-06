@@ -24,17 +24,33 @@ public sealed class OcrEngine : IDisposable
                 $"OCR engine '{config.Engine}' is not supported. Only 'tesseract' is available in MVP1.");
         }
 
-        var tessDataPath = Path.IsPathRooted(config.TessDataPath)
-            ? config.TessDataPath
-            : Path.Combine(AppContext.BaseDirectory, config.TessDataPath);
+        // Bug-Bash 2026-07-06 I-14: Mehrere Suchpfade probieren statt nur dem
+        // konfigurierten. Reihenfolge: explizit konfigurierter Pfad (absolut
+        // oder relativ zu BaseDirectory) > %LOCALAPPDATA%\AiRecall\tessdata
+        // (Standard-Drop-In fuer manuelles Setup) > BaseDirectory\tessdata.
+        // So findet Tesseract tessdata auch wenn es nicht neben der EXE liegt.
+        var candidatePaths = new List<string>();
+        if (Path.IsPathRooted(config.TessDataPath))
+        {
+            candidatePaths.Add(config.TessDataPath);
+        }
+        else
+        {
+            candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, config.TessDataPath));
+            candidatePaths.Add(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AiRecall", config.TessDataPath));
+        }
 
-        if (!Directory.Exists(tessDataPath))
+        var tessDataPath = candidatePaths.FirstOrDefault(Directory.Exists);
+        if (tessDataPath is null)
         {
             throw new DirectoryNotFoundException(
-                $"Tessdata directory not found: {tessDataPath}. " +
+                $"Tessdata directory not found. Searched: {string.Join(", ", candidatePaths)}. " +
                 "Download language files (e.g. deu.traineddata, eng.traineddata) from " +
-                "https://github.com/tesseract-ocr/tessdata_fast and place them in that folder. " +
-                "Or run 'recall active-window --no-ocr' to skip OCR.");
+                "https://github.com/tesseract-ocr/tessdata_fast and place them in " +
+                $"one of these folders, or set ocr.tessDataPath in config.json. " +
+                "Or set ocr.engine=\"none\" in config.json to skip OCR entirely.");
         }
 
         var langs = string.Join("+", config.Languages);

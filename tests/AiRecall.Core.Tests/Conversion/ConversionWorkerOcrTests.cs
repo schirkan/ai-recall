@@ -80,16 +80,14 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
-        var content = File.ReadAllText(contentPath);
-        Assert.Contains("## Document content", content);
-        Assert.Contains("Document content here", content);
-        Assert.Contains("## OCR Content", content);
-        Assert.Contains("Hello from OCR", content);
-
+        // Bug-Bash I-17: Content landet in der Haupt-MD (kein .conversion.md).
         var md = File.ReadAllText(mdPath);
+        Assert.Contains("## Document content", md);
+        Assert.Contains("Document content here", md);
+        Assert.Contains("## OCR Content", md);
+        Assert.Contains("Hello from OCR", md);
         Assert.Contains("conversion: \"done\"", md);
-        Assert.Contains("ocr=ok,fake", md); // conversionSteps steht im Haupt-MD-Frontmatter
+        Assert.Contains("ocr=ok,fake", md); // conversionSteps im Frontmatter
     }
 
     [Fact]
@@ -105,12 +103,10 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
-        var content = File.ReadAllText(contentPath);
-        Assert.DoesNotContain("## OCR Content", content); // keine Section bei leerem OCR
-        Assert.Contains("## Document content", content);
-
+        // Bug-Bash I-17: Content in Haupt-MD, kein .conversion.md.
         var md = File.ReadAllText(mdPath);
+        Assert.DoesNotContain("## OCR Content", md); // keine Section bei leerem OCR
+        Assert.Contains("## Document content", md);
         Assert.Contains("ocr=ok,empty,fake", md);
     }
 
@@ -164,10 +160,10 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
-        var content = File.ReadAllText(contentPath);
-        Assert.DoesNotContain("## OCR Content", content);
-        Assert.Contains("## Document content", content);
+        // Bug-Bash I-17: Content in Haupt-MD, kein .conversion.md.
+        var md = File.ReadAllText(mdPath);
+        Assert.DoesNotContain("## OCR Content", md);
+        Assert.Contains("## Document content", md);
     }
 
     // ----- App-Reader-UIA-Content (Spec 0007 Schritt 7) -----
@@ -187,12 +183,10 @@ public class ConversionWorkerOcrTests : IDisposable
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker);
 
-        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
-        var convContent = File.ReadAllText(contentPath);
-        Assert.Contains("## App Reader Content (UIA)", convContent);
-        Assert.Contains(uiaText, convContent);
-
+        // Bug-Bash I-17: UIA-Content landet in der Haupt-MD.
         var updatedMd = File.ReadAllText(mdPath);
+        Assert.Contains("## App Reader Content (UIA)", updatedMd);
+        Assert.Contains(uiaText, updatedMd);
         Assert.Contains("appreader=ok,uia", updatedMd);
     }
 }

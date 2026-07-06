@@ -106,8 +106,17 @@ public static class CaptureWriter
     {
         if (!File.Exists(mdPath)) return;
 
-        var content = File.ReadAllText(mdPath);
-        var lines = content.Split('\n').ToList();
+        // Bug-Bash 2026-07-06 I-17: ReadAllText+Split('\n') hinterliess
+        // Trailing-\r auf CRLF-Dateien, was mit AppendLine zu \r\r\n fuehrte
+        // und "Leerzeilen im Frontmatter" erzeugte. StreamReader mit
+        // detectEncodingFromByteOrderMarks=false liest die Zeilen direkt
+        // korrekt (ohne Trailing-\r).
+        var lines = new List<string>();
+        using (var reader = new StreamReader(mdPath))
+        {
+            string? line;
+            while ((line = reader.ReadLine()) != null) lines.Add(line);
+        }
 
         // Finde Frontmatter-Bereich (zwischen erstem --- und zweitem ---)
         int startIdx = -1, endIdx = -1;
@@ -134,14 +143,68 @@ public static class CaptureWriter
         if (converterUsed != null)
             UpdateOrAddFrontmatterField(frontmatter, "converterUsed", converterUsed);
 
-        // Schreibe zurueck
+        // Schreibe zurueck. Bug-Bash 2026-07-06 I-17: Split('\n') auf einer
+        // CRLF-Datei hinterlaesst an jeder Zeile ein Trailing-\r, das mit
+        // AppendLine (das nochmal \r\n anhaengt) zu \r\r\n fuehrt — das wurde
+        // bisher als "Leerzeile im Frontmatter" sichtbar. Wir normalisieren
+        // auf LF beim Einlesen.
         var sb = new StringBuilder();
         sb.AppendLine("---");
-        foreach (var line in frontmatter) sb.AppendLine(line);
+        foreach (var line in frontmatter) sb.AppendLine(line.TrimEnd('\r'));
         sb.AppendLine("---");
         for (int i = endIdx + 1; i < lines.Count; i++) sb.AppendLine(lines[i].TrimEnd('\r'));
 
         File.WriteAllText(mdPath, sb.ToString(), new UTF8Encoding(false));
+    }
+
+    /// <summary>
+    /// Schreibt die Konvertierungs-Sektionen (Document / App-Reader / OCR)
+    /// in den Body der bestehenden Capture-MD-Datei. Ersetzt den
+    /// <c>_(conversion pending)_</c>-Platzhalter
+    /// durch den assemblierten Markdown-Content.
+    ///
+    /// Bug-Bash 2026-07-06 I-17: Vorher hat der ConversionWorker ein
+    /// separates <c>*.conversion.md</c> geschrieben. Das fuehrte zu zwei
+    /// Dateien pro Capture, doppelte OCR-Section, und der Original-MD
+    /// behielt den Pending-Platzhalter. Jetzt: ein File pro Capture,
+    /// Content landet direkt unter <c>## Content</c>.
+    /// </summary>
+    /// <param name="sections">Bereits gerenderte Markdown-Sektionen
+    /// (z. B. <c>## Document content ...</c>, <c>## OCR Content ...</c>).</param>
+    public static void WriteConversionContent(string mdPath, IEnumerable<string> sections)
+    {
+        if (!File.Exists(mdPath)) return;
+        var content = File.ReadAllText(mdPath);
+
+        // CRLF normalisieren, damit Replace/IndexOf robust funktioniert.
+        content = content.Replace("\r\n", "\n");
+
+        const string placeholder = "_(conversion pending)_";
+        var body = string.Join("\n\n", sections);
+        string updated;
+        if (content.Contains(placeholder))
+        {
+            updated = content.Replace(placeholder, body);
+        }
+        else
+        {
+            // Fallback: Platzhalter wurde bereits ersetzt (z. B. bei
+            // doppeltem Enqueue). Content-Section unter ## Content
+            // einfuegen, falls vorhanden, sonst anhaengen.
+            const string header = "## Content";
+            var headerIdx = content.IndexOf('\n' + header + '\n', StringComparison.Ordinal);
+            if (headerIdx >= 0)
+            {
+                var insertAt = headerIdx + 1 + header.Length + 1;
+                updated = content.Insert(insertAt, "\n" + body + "\n");
+            }
+            else
+            {
+                updated = content.TrimEnd() + "\n\n## Content\n\n" + body + "\n";
+            }
+        }
+
+        File.WriteAllText(mdPath, updated, new UTF8Encoding(false));
     }
 
     private static void UpdateOrAddFrontmatterField(List<string> frontmatter, string key, string value)
@@ -223,7 +286,7 @@ public static class CaptureWriter
         sb.AppendLine();
         sb.AppendLine("## Content");
         sb.AppendLine();
-        sb.AppendLine("_(conversion pending — async via ConversionWorker)_");
+        sb.AppendLine("_(conversion pending)_");
         return sb.ToString();
     }
 

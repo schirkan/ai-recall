@@ -44,11 +44,23 @@ public sealed class SettingsDialog : Form
         FormBorderStyle = FormBorderStyle.Sizable;
         ShowInTaskbar = false;
 
-        // SplitContainer: links TreeView, rechts Editor-Panel
+        // SplitContainer: links TreeView, rechts Editor-Panel.
+        // Bug-Bash 2026-07-06 I-16: SplitterDistance als fixer Pixelwert war
+        // zu breit fuer die TreeView (die Section-Namen sind oft nur 4-12
+        // Zeichen). Stattdessen FixedPanel=Panel1 setzen, dann berechnet
+        // WinForms die Breite selbst, und die TreeView bekommt exakt den
+        // Platz, den sie braucht. Der Rest geht an Panel2 (Editor-Panel).
         var split = new SplitContainer
         {
             Dock = DockStyle.Fill,
-            SplitterDistance = 220
+            FixedPanel = FixedPanel.Panel1,
+            // Panel1MinSize als Sicherheitsnetz: TreeView braucht min. ~140 px
+            // fuer die laengsten Section-Namen wie "screenRecorder".
+            Panel1MinSize = 140,
+            // SplitterWidth etwas geraumiger fuers Dragging
+            SplitterWidth = 6,
+            // Initialer Wert wird in OnShown an aktuelle Form-Groesse angepasst.
+            SplitterDistance = 200
         };
         Controls.Add(split);
 
@@ -67,6 +79,13 @@ public sealed class SettingsDialog : Form
             Padding = new Padding(12)
         };
         split.Panel2.Controls.Add(_editorPanel);
+
+        // Bug-Bash 2026-07-06 I-16: Wenn der User den Splitter zieht oder
+        // das Fenster resized, muessen die Editoren ihre Breite mit-anpassen.
+        // Resize auf _editorPanel reicht, weil SplitContainer seine Panels
+        // bei Splitter-Move ebenfalls resized.
+        split.SplitterMoved += (_, _) => RelayoutEditors();
+        _editorPanel.Resize += (_, _) => RelayoutEditors();
 
         // StatusBar + Buttons unten
         _statusLabel = new ToolStripStatusLabel();
@@ -138,15 +157,29 @@ public sealed class SettingsDialog : Form
         _editorPanel.Controls.Clear();
         _editors.Clear();
 
+        // Layout-Konstanten. Statt fixer Pixel-X-Offsets berechnen wir
+        // Label-Spalte und Editor-Spalte relativ zur aktuellen Panel-Breite,
+        // damit beim Splitter-Drag oder Fenster-Resize nichts ueberlappt.
+        // Bug-Bash 2026-07-06 I-16: Editor-Spalte war fix 360 px breit, ragte
+        // bei grosser rechter Seite in Leere und war bei kleiner rechts
+        // abgeschnitten.
+        const int padding = 12;
+        const int labelColWidth = 200;
+        const int editorMinWidth = 240;
+        const int rowHeight = 32;
+
         int y = 8;
         var labelFont = new Font(Font, FontStyle.Bold);
+        var labelX = padding;
+        var editorX = labelX + labelColWidth + padding;
+        var editorWidth = Math.Max(editorMinWidth, _editorPanel.ClientSize.Width - editorX - padding);
 
         // Section-Header
         var header = new Label
         {
             Text = section.DisplayName,
             Font = new Font(Font.FontFamily, 12, FontStyle.Bold),
-            Location = new Point(8, y),
+            Location = new Point(labelX, y),
             AutoSize = true
         };
         _editorPanel.Controls.Add(header);
@@ -161,20 +194,88 @@ public sealed class SettingsDialog : Form
             var lbl = new Label
             {
                 Text = prop.Name + ":",
-                Location = new Point(8, y + 4),
-                Width = 200,
+                Location = new Point(labelX, y + 4),
+                Width = labelColWidth,
                 Font = labelFont
             };
             _editorPanel.Controls.Add(lbl);
 
             // Editor
             var editor = CreateEditor(info, prop);
-            editor.Location = new Point(220, y);
-            editor.Width = 360;
+            editor.Location = new Point(editorX, y);
+            editor.Width = editorWidth;
+            editor.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             _editorPanel.Controls.Add(editor);
             _editors[prop.Name] = editor;
 
-            y += 32;
+            y += rowHeight;
+        }
+    }
+
+    /// <summary>
+    /// Editor-Panel neu layouten, wenn das Form skaliert wird (Splitter
+    /// bewegt, Fenster resized). Labels bleiben linksbuendig fix, Editoren
+    /// dehnen sich rechts mit.
+    /// </summary>
+    private void RelayoutEditors()
+    {
+        if (_activeSection is null) return;
+        const int padding = 12;
+        const int labelColWidth = 200;
+        const int editorMinWidth = 240;
+        const int rowHeight = 32;
+        const int headerHeight = 30;
+        const int startY = 8;
+
+        int editorX = padding + labelColWidth + padding;
+        int editorWidth = Math.Max(editorMinWidth, _editorPanel.ClientSize.Width - editorX - padding);
+
+        int y = startY;
+        // Index 0 ist der Header
+        if (_editorPanel.Controls.Count > 0)
+        {
+            _editorPanel.Controls[0].Location = new Point(padding, y);
+            y += headerHeight;
+        }
+        int idx = 1;
+        foreach (var prop in _activeSection.Properties)
+        {
+            if (idx >= _editorPanel.Controls.Count) break;
+            var lbl = _editorPanel.Controls[idx];
+            lbl.Location = new Point(padding, y + 4);
+            idx++;
+            if (idx >= _editorPanel.Controls.Count) break;
+            var editor = _editorPanel.Controls[idx];
+            editor.Location = new Point(editorX, y);
+            editor.Width = editorWidth;
+            idx++;
+            y += rowHeight;
+        }
+    }
+
+    /// <summary>
+    /// Beim ersten Anzeigen den Splitter proportional setzen (~30% fuer
+    /// TreeView, Rest fuer Editor). FixedPanel=Panel1 sorgt dafuer, dass
+    /// der User die TreeView-Groesse nicht versehentlich auf null druecken
+    /// kann.
+    /// </summary>
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        // Splitter proportional an aktuelle Form-Groesse anpassen.
+        // Wir suchen den SplitContainer rekursiv, weil wir split nicht als
+        // Feld halten (kein weiterer Use-Case).
+        foreach (Control c in Controls)
+        {
+            if (c is SplitContainer sc)
+            {
+                int desired = Math.Max(sc.Panel1MinSize, (int)(sc.ClientSize.Width * 0.30));
+                if (desired < sc.ClientSize.Width - 100)
+                {
+                    sc.SplitterDistance = desired;
+                }
+                break;
+            }
         }
     }
 

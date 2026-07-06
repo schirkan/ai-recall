@@ -22,11 +22,29 @@ public sealed class TrayIconController : IDisposable
     private readonly ToolStripMenuItem _quitItem;
     private readonly TriggerSupervisor _supervisor;
     private readonly Func<AppConfig> _configProvider;
+    // Bug-Bash 2026-07-06 I-15: Capture-Counter aktualisiert sich waehrend
+    // 'Running' nicht mehr von selbst, weil StateChanged nur bei
+    // Zustandsuebergaengen feuert. StatusRefreshTimer pollt 1/s den Counter
+    // und ruft ApplyState, solange der Supervisor laeuft.
+    private readonly System.Windows.Forms.Timer _statusRefreshTimer;
     private bool _disposed;
 
     public event EventHandler? ExitRequested;
     public event EventHandler? ShowLogviewerRequested;
     public event EventHandler? ShowSettingsRequested;
+
+    /// <summary>
+    /// Zeigt eine Balloon-Tip am Tray-Icon an. Wird vom TrayAppContext fuer
+    /// nicht-blockierende User-Hinweise verwendet (z. B. OCR-Init-Fehler).
+    /// </summary>
+    public void ShowBalloon(string title, string text, ToolTipIcon icon = ToolTipIcon.Warning, int timeoutMs = 8000)
+    {
+        if (_disposed) return;
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = text;
+        _notifyIcon.BalloonTipIcon = icon;
+        _notifyIcon.ShowBalloonTip(timeoutMs);
+    }
 
     /// <summary>Enables the "Live Logviewer" menu item (call after LogviewerWindow is ready).</summary>
     public void EnableLogviewer() => _showLogsItem.Enabled = true;
@@ -89,6 +107,17 @@ public sealed class TrayIconController : IDisposable
             ContextMenuStrip = _menu
         };
 
+        // Bug-Bash 2026-07-06 I-15: 1s-Tick zum Capture-Counter-Refresh.
+        // Wird in OnSupervisorStateChanged gesteuert (Start/Stop) statt im
+        // Timer selbst, damit der Refresh exakt an die Lifecycle-Phasen
+        // gekoppelt ist.
+        _statusRefreshTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 1000
+        };
+        _statusRefreshTimer.Tick += (_, _) => RefreshStatus();
+        _statusRefreshTimer.Start();
+
         // Supervisor -> UI
         _supervisor.StateChanged += OnSupervisorStateChanged;
         ApplyState(TrayIconState.FromSupervisor(
@@ -137,8 +166,17 @@ public sealed class TrayIconController : IDisposable
 
     private void OnSupervisorStateChanged(object? sender, TriggerStateChangedEventArgs e)
     {
+        // Beim Stop die letzte Counter-Synchronisation noch einmal forcieren,
+        // damit der Status nicht "Running — N captures" einfriert, nachdem
+        // der Timer gleich pausiert.
+        RefreshStatus();
+    }
+
+    private void RefreshStatus()
+    {
+        if (_disposed) return;
         var state = TrayIconState.FromSupervisor(
-            e.NewState,
+            _supervisor.State,
             captureCount: (int)(_supervisor.Service?.CaptureCount ?? 0),
             crashCount: _supervisor.CrashCount);
         ApplyState(state);
@@ -195,6 +233,8 @@ public sealed class TrayIconController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _statusRefreshTimer.Stop();
+        _statusRefreshTimer.Dispose();
         _supervisor.StateChanged -= OnSupervisorStateChanged;
         _notifyIcon.DoubleClick -= OnDoubleClick;
         _notifyIcon.Visible = false;

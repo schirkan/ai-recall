@@ -70,6 +70,36 @@ public sealed class TrayAppContext : ApplicationContext
         _trayIcon.EnableSettings();
 
         Log.Information("AiRecall TrayApp ready (config={Path})", UserConfigLocator.GetUserConfigPath());
+
+        // Bug-Bash 2026-07-06 I-14: One-Shot-Ballon, wenn Tesseract konfiguriert
+        // ist aber keine tessdata gefunden wurde. Sonst sieht der User nur
+        // eine Log-Zeile und wundert sich, warum OCR leer bleibt.
+        MaybeWarnAboutMissingTessdata();
+    }
+
+    private void MaybeWarnAboutMissingTessdata()
+    {
+        if (!string.Equals(_config.Ocr.Engine, "tesseract", StringComparison.OrdinalIgnoreCase)) return;
+
+        var candidates = new[]
+        {
+            Path.IsPathRooted(_config.Ocr.TessDataPath)
+                ? _config.Ocr.TessDataPath
+                : Path.Combine(AppContext.BaseDirectory, _config.Ocr.TessDataPath),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AiRecall", _config.Ocr.TessDataPath),
+        };
+        if (candidates.Any(Directory.Exists)) return;
+
+        Log.Warning("No tessdata found. Searched: {Paths}", string.Join(", ", candidates));
+        _trayIcon.ShowBalloon(
+            title: "AiRecall — OCR deaktiviert",
+            text: "tessdata-Dateien fehlen. Captures laufen ohne OCR. " +
+                  "Setup-Hinweise im Log-Viewer oder unter " +
+                  "github.com/tesseract-ocr/tessdata_fast.",
+            icon: ToolTipIcon.Warning,
+            timeoutMs: 10000);
     }
 
     /// <summary>

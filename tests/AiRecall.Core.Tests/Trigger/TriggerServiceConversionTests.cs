@@ -116,9 +116,16 @@ public class TriggerServiceConversionTests
     public void ConversionWorker_TesseractInitFails_FallsBackToNullOcrEngine()
     {
         // Default-Config hat ocr.engine="tesseract" aber kein tessdata → OcrEngine wirft
-        // → TriggerService muss auf NullOcrEngine fallen (sonst wirft der ctor)
+        // → TriggerService muss auf NullOcrEngine fallen (sonst wirft der ctor).
+        // Bug-Bash 2026-07-06 I-14: OcrEngine sucht jetzt in mehreren Pfaden
+        // (u. a. %LOCALAPPDATA%\AiRecall\tessdata). Damit der Test auf jeder
+        // Maschine deterministisch scheitert (nicht von lokalen tessdata-
+        // Ordnern abhaengt), zeigen wir TessDataPath auf einen garantiert
+        // nicht existenten Pfad.
         var (logger, sink) = NewLogger();
-        using var svc = new TriggerService(NewConfig(), logger,
+        var c = NewConfig();
+        c.Ocr.TessDataPath = Path.Combine(Path.GetTempPath(), $"tessdata-nonexistent-{Guid.NewGuid():N}");
+        using var svc = new TriggerService(c, logger,
             enableWinEventHook: false, enableHeartbeat: false);
 
         Assert.NotNull(svc.ConversionWorker);

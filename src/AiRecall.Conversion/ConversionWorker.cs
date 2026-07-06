@@ -1,4 +1,3 @@
-using System.Text;
 using System.Threading.Channels;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Persistence;
@@ -154,7 +153,9 @@ public sealed class ConversionWorker : IDisposable
         }
 
         var content = await File.ReadAllTextAsync(mdPath, ct);
-        var frontmatter = ParseFrontmatter(content);
+        // Bug-Bash 2026-07-06 I-17: Bei CRLF-Dateien split-on-'\n' Trailing-\r
+        // auf jeder Zeile, was Werte mit '\r' versaut. Vorher normalisieren.
+        var frontmatter = ParseFrontmatter(content.Replace("\r\n", "\n"));
 
         var screenshotFile = frontmatter.GetValueOrDefault("screenshot");
         var filePath = frontmatter.GetValueOrDefault("filePath");
@@ -252,24 +253,14 @@ public sealed class ConversionWorker : IDisposable
             steps.Add("ocr=skip,no-screenshot");
         }
 
-        // 3) Content-MD schreiben + Frontmatter update
-        //    Output-Datei: *.conversion.md (App-Reader schreibt *.content.md sync
-        //    in TriggerWorker; Schritt 7 wird App-Reader duenn-refactoren und
-        //    beide Quellen in *.content.md mergen).
+        // 3) Content in die Original-MD-Datei schreiben (in-place unter
+        //    "## Content"), Frontmatter-Update mit Status.
+        //    Bug-Bash 2026-07-06 I-17: Vorher wurde ein separates
+        //    *.conversion.md erzeugt, der Original-MD behielt den Pending-
+        //    Platzhalter. Jetzt: ein File pro Capture.
         if (anyStep)
         {
-            var dir = Path.GetDirectoryName(mdPath);
-            var baseName = Path.GetFileNameWithoutExtension(mdPath);
-            var contentPath = Path.Combine(dir!, baseName + ".conversion.md");
-            var contentBody = new StringBuilder();
-            contentBody.AppendLine("---");
-            contentBody.AppendLine($"timestamp: {DateTimeOffset.Now:O}");
-            contentBody.AppendLine($"source: \"conversion-worker\"");
-            contentBody.AppendLine($"sourceMd: \"{Path.GetFileName(mdPath)}\"");
-            contentBody.AppendLine("---");
-            contentBody.AppendLine();
-            foreach (var s in sections) contentBody.AppendLine(s);
-            await File.WriteAllTextAsync(contentPath, contentBody.ToString(), new UTF8Encoding(false), ct);
+            CaptureWriter.WriteConversionContent(mdPath, sections);
         }
 
         // 4) Frontmatter-Update

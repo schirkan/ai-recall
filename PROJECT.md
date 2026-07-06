@@ -160,41 +160,41 @@ Ausführlich: `specs/0001-vision.md`
 
 ## Project Files
 
-| Datei/Ordner | Zweck |
-|---|---|
-| `LICENSE` | MIT-Lizenztext |
-| `README.md` | GitHub-Readme (Status, Features, Quick Start, Architektur, OCR-Setup) |
-| `DECISIONS.md` | Architektur- und Stack-Entscheidungen mit Datum/Begründung |
-| `.gitignore` | Generische + .NET + Capture/Laufzeit-Ausschlüsse |
-| `PROJECT.md` | Diese Datei — Current Status, Project Files |
-| `AiRecall.sln` | Solution mit 8 Projekten |
-| `global.json` | .NET SDK-Pin (8.0.422, `latestFeature`) |
-| `specs/` | Spezifikationen, Roadmaps |
-| `specs/0001-vision.md` | Vision + Roadmap MVP1/MVP2/MVP3 |
-| `specs/0002-mvp1-scope.md` | MVP1-Scope, User Stories, Architektur, Config |
-| `specs/0003-active-window.md` | `recall active-window` Command-Spec |
-| `specs/0004-app-reader.md` | App-Reader-Architektur (eine DLL pro App, Outlook-Mail-Log) |
-| `specs/0005-trigger-pipeline.md` | Trigger-Pipeline (WinEventHook + Heartbeat + Worker) |
-| `specs/0006-mvp2-tray-exe.md` | MVP2 Tray-Icon-EXE (v1.0 abgeschlossen, inkl. 0008+0009) |
-| `specs/0007-async-conversion.md` | Async Document Conversion Pipeline (v1.0 abgeschlossen) |
-| `specs/0008-live-logviewer.md` | Live Logviewer Window (v1.0 abgeschlossen) |
-| `specs/0009-settings-dialog.md` | Settings-Dialog JSON-Editor (v1.0 abgeschlossen) |
-| `specs/0010-onenote-app-reader.md` | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only) |
-| `specs/0011-teams-app-reader.md` | Teams App-Reader (Spec 0011, Modern Teams only, UIA + CDP opt-in, 3-Strategy-Auflösung) |
-| `src/` | .NET-Solution-Projekte |
-| `src/AiRecall.Core/` | Models, Configuration, Persistence, Util, Windows |
-| `src/AiRecall.ScreenCapture/` | Win32 Window/Screenshot/OCR (kein Trigger mehr) |
-| `src/AiRecall.Trigger/` | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service** |
-| `src/AiRecall.Conversion/` | **Async Document Conversion (Spec 0007)**: `DocumentConverter` + `ConversionWorker` + `IOcrEngine`/`TesseractOcrEngineAdapter`/`NullOcrEngine` |
-| `src/AiRecall.AppReader.Documents/` | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only |
-| `src/AiRecall.TrayApp/` | **MVP2 Tray-Icon-EXE (Spec 0006 v1.0)**: `NotifyIcon` + `TriggerSupervisor`-Wiring + `LogviewerWindow` (Spec 0008) + `SettingsDialog` (Spec 0009) |
-| `src/AiRecall.AppReader.Base/` | `IAppReader`-Interface + Basisklassen |
-| `src/AiRecall.AppReader.{Browser,Outlook,OneNote,Teams,Documents,Notepad,Explorer}/` | App-Reader-DLLs |
-| `src/AiRecall.Cli/` | `recall`-Kommando + Serilog-Setup + Default-Config |
-| `tests/AiRecall.Core.Tests/` | xUnit-Tests für Core + Trigger + App-Reader + Conversion (416 Tests) |
-| `capture/` | (Laufzeit, gitignored) Screenshots + MD-Extraktionen |
-| `logs/` | (Laufzeit, gitignored) Serilog Rolling-Logs |
-| `tessdata/` | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell) |
+| Datei/Ordner                                                                         | Zweck                                                                                                                                             |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LICENSE`                                                                            | MIT-Lizenztext                                                                                                                                    |
+| `README.md`                                                                          | GitHub-Readme (Status, Features, Quick Start, Architektur, OCR-Setup)                                                                             |
+| `DECISIONS.md`                                                                       | Architektur- und Stack-Entscheidungen mit Datum/Begründung                                                                                        |
+| `.gitignore`                                                                         | Generische + .NET + Capture/Laufzeit-Ausschlüsse                                                                                                  |
+| `PROJECT.md`                                                                         | Diese Datei — Current Status, Project Files                                                                                                       |
+| `AiRecall.sln`                                                                       | Solution mit 8 Projekten                                                                                                                          |
+| `global.json`                                                                        | .NET SDK-Pin (8.0.422, `latestFeature`)                                                                                                           |
+| `specs/`                                                                             | Spezifikationen, Roadmaps                                                                                                                         |
+| `specs/0001-vision.md`                                                               | Vision + Roadmap MVP1/MVP2/MVP3                                                                                                                   |
+| `specs/0002-mvp1-scope.md`                                                           | MVP1-Scope, User Stories, Architektur, Config                                                                                                     |
+| `specs/0003-active-window.md`                                                        | `recall active-window` Command-Spec                                                                                                               |
+| `specs/0004-app-reader.md`                                                           | App-Reader-Architektur (eine DLL pro App, Outlook-Mail-Log)                                                                                       |
+| `specs/0005-trigger-pipeline.md`                                                     | Trigger-Pipeline (WinEventHook + Heartbeat + Worker)                                                                                              |
+| `specs/0006-mvp2-tray-exe.md`                                                        | MVP2 Tray-Icon-EXE (v1.0 abgeschlossen, inkl. 0008+0009)                                                                                          |
+| `specs/0007-async-conversion.md`                                                     | Async Document Conversion Pipeline (v1.0 abgeschlossen)                                                                                           |
+| `specs/0008-live-logviewer.md`                                                       | Live Logviewer Window (v1.0 abgeschlossen)                                                                                                        |
+| `specs/0009-settings-dialog.md`                                                      | Settings-Dialog JSON-Editor (v1.0 abgeschlossen)                                                                                                  |
+| `specs/0010-onenote-app-reader.md`                                                   | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only)                                                   |
+| `specs/0011-teams-app-reader.md`                                                     | Teams App-Reader (Spec 0011, Modern Teams only, UIA + CDP opt-in, 3-Strategy-Auflösung)                                                           |
+| `src/`                                                                               | .NET-Solution-Projekte                                                                                                                            |
+| `src/AiRecall.Core/`                                                                 | Models, Configuration, Persistence, Util, Windows                                                                                                 |
+| `src/AiRecall.ScreenCapture/`                                                        | Win32 Window/Screenshot/OCR (kein Trigger mehr)                                                                                                   |
+| `src/AiRecall.Trigger/`                                                              | **Trigger-Pipeline-DLL (Spec 0005): WinEventHook + Heartbeat + Worker + Service**                                                                 |
+| `src/AiRecall.Conversion/`                                                           | **Async Document Conversion (Spec 0007)**: `DocumentConverter` + `ConversionWorker` + `IOcrEngine`/`TesseractOcrEngineAdapter`/`NullOcrEngine`    |
+| `src/AiRecall.AppReader.Documents/`                                                  | **Word/Excel/PowerPoint-Reader** (Spec 0004 Iter. Documents) — UIA-only                                                                           |
+| `src/AiRecall.TrayApp/`                                                              | **MVP2 Tray-Icon-EXE (Spec 0006 v1.0)**: `NotifyIcon` + `TriggerSupervisor`-Wiring + `LogviewerWindow` (Spec 0008) + `SettingsDialog` (Spec 0009) |
+| `src/AiRecall.AppReader.Base/`                                                       | `IAppReader`-Interface + Basisklassen                                                                                                             |
+| `src/AiRecall.AppReader.{Browser,Outlook,OneNote,Teams,Documents,Notepad,Explorer}/` | App-Reader-DLLs                                                                                                                                   |
+| `src/AiRecall.Cli/`                                                                  | `recall`-Kommando + Serilog-Setup + Default-Config                                                                                                |
+| `tests/AiRecall.Core.Tests/`                                                         | xUnit-Tests für Core + Trigger + App-Reader + Conversion (416 Tests)                                                                              |
+| `capture/`                                                                           | (Laufzeit, gitignored) Screenshots + MD-Extraktionen                                                                                              |
+| `logs/`                                                                              | (Laufzeit, gitignored) Serilog Rolling-Logs                                                                                                       |
+| `tessdata/`                                                                          | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell)                                                                                          |
 
 ## Konventionen
 
@@ -228,4 +228,5 @@ Folgen `projects/PROJECT-RULES.md`:
 6. **Spec 0007 Folge-Iterationen (nach v1.0)**:
    - PDF-Verschlüsselung-Handling + mehrseitige Dokumente
    - OCR-Preprocessing (Binarization/Deskew) optional
-   - `*.conversion.md` ↔ `*.content.md` Vereinheitlichung (Schritt 7 nutzt `*.conversion.md` als Trennung zum App-Reader)
+   - ✅ `*.conversion.md` ↔ `*.content.md` Vereinheitlichung (Bug-Bash I-17, 2026-07-06): ConversionWorker schreibt Document/OCR/UIA in-place in die Capture-MD unter `## Content` (ersetzt Pending-Platzhalter). Kein separates `*.conversion.md` mehr. Ein MD pro Capture.
+7. **OCR tessdata-Packaging** (nach Bug-Bash I-14): Auto-Download von `deu.traineddata`+`eng.traineddata` beim ersten Start in `%LOCALAPPDATA%\AiRecall\tessdata`, oder tessdata-Files in den Installer bündeln.

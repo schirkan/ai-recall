@@ -37,7 +37,7 @@ public class ConversionWorkerTests : IDisposable
     private static WindowInfo Win(string title) =>
         new(IntPtr.Zero, title, 1234, "WINWORD", true, new WindowRect(0, 0, 100, 100));
 
-    private (string mdPath, string pngPath) CreatePendingCapture(string title, string? filePath, string contentText = "Hallo Welt")
+    private (string mdPath, string pngPath) CreatePendingCapture(string title, string? filePath)
     {
         var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
         var captureRoot = _tempDir;
@@ -53,14 +53,10 @@ public class ConversionWorkerTests : IDisposable
             File.WriteAllText(item.MarkdownPath, content);
         }
 
-        // Content fuer OCR injizieren (fuer Schritt 4 spaeter)
-        if (!string.IsNullOrEmpty(contentText))
-        {
-            var content = File.ReadAllText(item.MarkdownPath);
-            content = content.Replace("_(conversion pending — async via ConversionWorker)_",
-                $"```\n{contentText}\n```");
-            File.WriteAllText(item.MarkdownPath, content);
-        }
+        // Bug-Bash 2026-07-06 I-17: Den "_(conversion pending)_"-Platzhalter
+        // NICHT mehr vorab befuellen. Der Worker schreibt den Content jetzt
+        // in-place in die Haupt-MD (Replace auf den Platzhalter). Wenn er
+        // weg waere, wuerde der Fallback-Pfad eine zweite Kopie einfuegen.
 
         return (item.MarkdownPath, item.ScreenshotPath);
     }
@@ -136,15 +132,14 @@ public class ConversionWorkerTests : IDisposable
         // Assert
         Assert.True(worker.CompletedCount >= 1, $"Expected >=1 completed, got {worker.CompletedCount}");
 
-        // Content-MD existiert
-        var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
-        Assert.True(File.Exists(contentPath), $"Expected content-MD at {contentPath}");
-        var content = File.ReadAllText(contentPath);
-        Assert.Contains("Hello from source.txt", content);
-        Assert.Contains("## Document content", content);
+        // Bug-Bash 2026-07-06 I-17: Content wird jetzt in-place in der
+        // Capture-MD unter "## Content" assembliert (kein .conversion.md mehr).
+        var updatedMd = File.ReadAllText(mdPath);
+        Assert.Contains("Hello from source.txt", updatedMd);
+        Assert.Contains("## Document content", updatedMd);
+        Assert.DoesNotContain("_(conversion pending)_", updatedMd);
 
         // Frontmatter updated
-        var updatedMd = File.ReadAllText(mdPath);
         Assert.Contains("conversion: \"done\"", updatedMd);
         Assert.Contains("conversionSteps:", updatedMd);
         Assert.Contains("doc=ok", updatedMd);
@@ -153,13 +148,14 @@ public class ConversionWorkerTests : IDisposable
     [Fact]
     public async Task EnqueueAsync_NoFilePath_NoContentGenerated_StillCompletes()
     {
-        // Ohne filePath: kein Document-Conversion, kein Content-MD, status=ok mit skip
+        // Ohne filePath: kein Document-Conversion, status=ok mit skip
         var (mdPath, _) = CreatePendingCapture("no file", filePath: null);
 
         using var worker = new ConversionWorker(Cfg(), Logger());
         await worker.EnqueueAsync(mdPath);
         await WaitForPending(worker, expectedZero: true, timeoutMs: 5000);
 
+        // Bug-Bash I-17: kein separates .conversion.md mehr
         var contentPath = Path.ChangeExtension(mdPath, ".conversion.md");
         Assert.False(File.Exists(contentPath));
 
