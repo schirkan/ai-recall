@@ -409,10 +409,15 @@ Channel<AudioTranscriptionTask>
    ▼
 TranscriptionWorker (Background-Task, max. N parallel)
    │
-   ├─ ITranscriptionProvider.TranscribeAsync(...)
+   ├─ MonoMixer.Mix(mic, loopback) ──▶ combined-mono.wav  (transient)
+   │
+   ├─ ITranscriptionProvider.TranscribeAsync(combined-mono.wav, ...)
+   │       (Azure Speech oder Deepgram, Diarization im Provider)
+   │
+   ├─ MetadataUpdater.FinalizeAsync(meta.md, result)
    │
    ▼
-meta.md (transcript_status: done + Transcript appended)
+meta.md (transcript_status: done + Transcript appended, rohe Provider-Speaker-IDs S0/S1/...)
 ```
 
 ### Provider-Auswahl (Martin-Direktive 2026-07-07 Update 3)
@@ -478,7 +483,7 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - **Endpoint**: `https://{region}.api.cognitive.microsoft.com/`
 - **Auth**: API-Key im Header `Ocp-Apim-Subscription-Key`
 - **API-Call**: `SpeechConfig.FromSubscription(key, region)` →
-  `AudioConfig.FromWavFileInput(combinedStereoPath)` (siehe §5.4 Stereo-Concatenation) →
+  `AudioConfig.FromWavFileInput(combinedMonoPath)` (siehe §5.4 Mono-Mix) →
   `SpeechRecognizer.RecognizeOnceAsync()` mit `SpeakerDiarization` enabled
 - **Response-Format**: `SpeechRecognitionResult` mit `SpeakerId` pro Word
 - **Segmentierung**: Gruppierung aufeinanderfolgender Words mit gleichem `SpeakerId`
@@ -490,7 +495,7 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - **Endpoint**: `https://api.deepgram.com/v1/listen`
 - **Auth**: API-Key im Header `Authorization: Token {key}`
 - **Query-Params**: `model=nova-2`, `language={lang}`, `diarize=true`, `smart_format=true`
-- **Request-Body**: `combined-stereo.wav` als Multipart-File (siehe §5.4 Stereo-Concatenation)
+- **Request-Body**: `combined-mono.wav` als Multipart-File (siehe §5.4 Mono-Mix)
 - **Response-Format**: JSON mit `results.utterances[]` (jedes Utterance hat `speaker`, `start`, `end`, `transcript`)
 - **Fehler**: HTTP 401 → Invalid-Key-Marker; HTTP 429 → Rate-Limit-Backoff
 
@@ -501,24 +506,30 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - DeepgramTranscriptionProvider-Tests (~8): Mock-HTTP-Response, Utterance-Parse, Fehler-Pfade, Retry
 - SettingsDialog-Transcription-Tab-Tests (~5): Provider-Liste, Test-Connection-Button, Validation, Save-Reload
 
-### §5.4 Stereo-Concatenation (Multi-Task-tauglich)
+### §5.4 Mono-Mix (Provider-Audio-Input, Multi-Task-tauglich)
 
 **Martin-Direktive 2026-07-07 Update 4:** _„Beachte, dass der background worker
 auch parallel multi tasking laufen kann. Also kein fixer dateiname im temp ordner."_
+**Martin-Direktive 2026-07-07 Update 5:** _„Streiche das rms. Diarization macht der Provider."_
 
-**Architektur:** Das kombinierte Stereo-File wird im **Meeting-Ordner** (nicht
-im OS-Temp) abgelegt — pro Task ein eigener Ordner, kein Collision-Risiko:
+**Architektur:** Vor dem ASR-Call werden `mic.wav` und `loopback.wav` zu
+**Mono gemischt** (sample-weise Summe, geclippt auf [-1, 1]). Der
+kombinierte Mono-Stream ist der einzige Audio-Input für den Provider;
+**Diarization läuft komplett im Provider**, wir machen auf unserer Seite
+keine Speaker-Analyse.
+
+**File-Layout pro Meeting:**
 
 ```
 %APPDATA%/AiRecall/audio/yyyy-MM-dd/HHmmss-{meetingIdShort}/
   mic.wav                       # dauerhaft persistiert
   loopback.wav                  # dauerhaft persistiert
-  combined-stereo.wav           # transient, gelöscht nach Transkription
+  combined-mono.wav             # transient, gelöscht nach Transkription
   meta.md                       # dauerhaft persistiert
 ```
 
-**Lifecycle von `combined-stereo.wav`:**
-- **Create** im Meeting-Ordner vor ASR-Call (Worker iteriert Mono → Stereo)
+**Lifecycle von `combined-mono.wav`:**
+- **Create** im Meeting-Ordner vor ASR-Call (Worker mischt Mono → Mono)
 - **Delete** nach erfolgreicher Transkription (im `finally`-Block des Worker-Tasks)
 - **Keep on Failure** bei Worker-Fehler (Debug-Evidence) — User löscht manuell oder
   Cleanup-Job räumt nach 7 Tagen auf
@@ -531,16 +542,16 @@ im OS-Temp) abgelegt — pro Task ein eigener Ordner, kein Collision-Risiko:
 **Algorithmus (Pseudo-Code):**
 
 ```csharp
-public sealed class StereoConcatenator
+public sealed class MonoMixer
 {
     /// <summary>
     /// Liest mic.wav (Mono) und loopback.wav (Mono), schreibt
-    /// combined-stereo.wav (Stereo: links=mic, rechts=loopback) in den
+    /// combined-mono.wav (Mono: Summe beider Samples, geclippt) in den
     /// selben Meeting-Ordner.
     /// </summary>
-    public string Concatenate(MeetingRecordingPaths paths)
+    public string Mix(MeetingRecordingPaths paths)
     {
-        var stereoPath = Path.Combine(paths.Folder, "combined-stereo.wav");
+        var monoPath = Path.Combine(paths.Folder, "combined-mono.wav");
         using var mic = new WaveFileReader(paths.MicPath);
         using var loop = new WaveFileReader(paths.LoopbackPath);
 
@@ -552,8 +563,8 @@ public sealed class StereoConcatenator
         if (mic.SampleCount != loop.SampleCount)
             throw new InvalidOperationException($"Length mismatch: mic={mic.SampleCount}, loop={loop.SampleCount}");
 
-        var stereoFormat = WaveFormat.CreateIeeeFloatWaveFormat(mic.WaveFormat.SampleRate, 2);
-        using var writer = new WaveFileWriter(stereoPath, stereoFormat);
+        var monoFormat = WaveFormat.CreateIeeeFloatWaveFormat(mic.WaveFormat.SampleRate, 1);
+        using var writer = new WaveFileWriter(monoPath, monoFormat);
 
         var micBuf = new float[mic.WaveFormat.SampleRate / 10];   // 100 ms chunks
         var loopBuf = new float[mic.WaveFormat.SampleRate / 10];
@@ -563,159 +574,23 @@ public sealed class StereoConcatenator
             loop.Read(loopBuf, 0, read);
             for (int i = 0; i < read; i++)
             {
-                // Left = mic, Right = loopback
-                writer.WriteSample(micBuf[i]);
-                writer.WriteSample(loopBuf[i]);
+                // Summe beider Kanäle, geclippt auf [-1, 1] (verhindert Clipping-Artefakte)
+                float mixed = Math.Clamp(micBuf[i] + loopBuf[i], -1f, 1f);
+                writer.WriteSample(mixed);
             }
         }
-        return stereoPath;
+        return monoPath;
     }
 }
 ```
 
-**Stereo-Concatenation-Tests (~6):**
-- Concatenate_ValidMonoFiles_ProducesStereo
-- Concatenate_SampleRateMismatch_Throws
-- Concatenate_ChannelsMismatch_Throws
-- Concatenate_LengthMismatch_Throws
-- Concatenate_PreservesAudioContent (Bit-genau-Round-Trip-Test)
-- Concatenate_ParallelTasks_NoFilenameCollision (zwei parallele Tasks auf
+**Mono-Mix-Tests (~5):**
+- Mix_ValidMonoFiles_ProducesMono (Format-Validation)
+- Mix_SampleRateMismatch_Throws
+- Mix_LengthMismatch_Throws
+- Mix_SumAndClip_PreventsClippingArtifacts (z. B. mic=0.7 + loop=0.7 → mixed=1.0, nicht 1.4)
+- Mix_ParallelTasks_NoFilenameCollision (zwei parallele Tasks auf
   unterschiedlichen Meeting-Ordnern, kein File-Lock-Error)
-
-### §5.5 Cross-Channel-Correlation (Local-vs-Remote-Mapping)
-
-Nach Provider-Diarization (S0, S1, S2, ...) wird mit Hilfe des
-Cross-Channel-RMS-Verhältnisses der **lokale User** identifiziert und
-die übrigen Speaker als `Remote-1`, `Remote-2`, ... gelabelt.
-
-**Grundidee:**
-- Lokaler User spricht ins Mikrofon → Mic-Kanal hat **hohe** Energie
-- Remote-User sprechen → nur Loopback-Kanal hat **hohe** Energie
-- Loopback nimmt System-Audio auf, das alle Stimmen (lokal + remote) enthält
-
-**RMS-Verhältnis-Formel (pro Zeitfenster w, z. B. 100 ms):**
-
-```
-RMS(w)         = sqrt( (1/N) · Σ_{i ∈ w} x[i]² )
-r(w)           = RMS_mic(w) / ( RMS_mic(w) + RMS_loopback(w) + ε )
-```
-
-- `N` = Anzahl Samples im Fenster (1600 bei 16 kHz / 100 ms)
-- `ε = 1e-9` als Schutz gegen Division durch 0
-- `r ∈ [0, 1]`
-
-**Intuition (Beispiel-Szenarien):**
-
-| Szenario | RMS_mic | RMS_loopback | r | Klassifikation |
-| - | - | - | - | - |
-| Lokaler User spricht | 0.20 | 0.08 (Playback) | **0.71** | Mic dominiert → Local |
-| Remote-User Bob spricht | 0.005 (still) | 0.15 | **0.03** | Loopback dominiert → Remote |
-| Beide gleichzeitig | 0.18 | 0.14 | **0.56** | Übergang — Provider-Diarization entscheidet |
-| Stille | 0.003 | 0.003 | ~0.5 | undefiniert (VAD-Filter) |
-
-**Schwellwerte (MVP 3):**
-- `r > 0.6` → Mic dominiert → Segment von `localSpeaker` als „Local"
-- `r < 0.4` → Loopback dominiert → Segment von Remote-Speaker als „Remote-N"
-- `0.4 ≤ r ≤ 0.6` → Übergang, Provider-Diarization entscheidet allein
-
-**Algorithmus (Pseudo-Code):**
-
-```csharp
-public sealed class SpeakerRoleAssigner
-{
-    /// <summary>
-    /// Mappt Provider-Speaker-IDs auf Local/Remote-N via
-    /// Cross-Channel-RMS-Verhältnis.
-    /// </summary>
-    public SpeakerRoleMap AssignRoles(
-        IReadOnlyList<TranscriptionSegment> segments,
-        string micPath,
-        string loopbackPath)
-    {
-        // 1. RMS-Verhältnis pro Zeitfenster berechnen (100 ms)
-        var ratios = ComputeRmsRatios(micPath, loopbackPath, windowMs: 100);
-
-        // 2. Pro Segment: avg(r) über Segment-Zeitfenster
-        var segmentAvgRatio = segments.ToDictionary(
-            s => s,
-            s => AverageRatioForSegment(ratios, s.Start, s.End));
-
-        // 3. Pro Provider-Speaker: avg(r) über alle seine Segmente
-        var speakerAvgRatio = segments
-            .GroupBy(s => s.Speaker)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Average(s => segmentAvgRatio[s]));
-
-        // 4. Höchstes avg(r) → Local
-        var localSpeakerId = speakerAvgRatio
-            .OrderByDescending(kv => kv.Value)
-            .First().Key;
-
-        // 5. Andere sortiert nach Häufigkeit → Remote-1, Remote-2, ...
-        var remoteSpeakers = speakerAvgRatio
-            .Where(kv => kv.Key != localSpeakerId)
-            .OrderByDescending(kv => segments.Count(s => s.Speaker == kv.Key))
-            .Select((kv, i) => new KeyValuePair<string, string>(kv.Key, $"Remote-{i + 1}"))
-            .ToDictionary(kv => kv.Key, kv => kv.Value);
-
-        return new SpeakerRoleMap(localSpeakerId, remoteSpeakers);
-    }
-
-    private static double[] ComputeRmsRatios(string micPath, string loopPath, int windowMs)
-    {
-        using var mic = new WaveFileReader(micPath);
-        using var loop = new WaveFileReader(loopPath);
-        int windowSamples = mic.WaveFormat.SampleRate * windowMs / 1000;
-        var micBuf = new float[windowSamples];
-        var loopBuf = new float[windowSamples];
-        var ratios = new List<double>();
-
-        int read;
-        while ((read = mic.Read(micBuf, 0, micBuf.Length)) > 0)
-        {
-            loop.Read(loopBuf, 0, read);
-            double rmsMic = Math.Sqrt(micBuf.Take(read).Average(s => s * s));
-            double rmsLoop = Math.Sqrt(loopBuf.Take(read).Average(s => s * s));
-            double r = rmsMic / (rmsMic + rmsLoop + 1e-9);
-            ratios.Add(r);
-        }
-        return ratios.ToArray();
-    }
-}
-
-public sealed record SpeakerRoleMap(
-    string LocalSpeakerId,
-    IReadOnlyDictionary<string, string> RemoteSpeakerIds  // "S1" → "Remote-1", ...
-);
-```
-
-**Output-MD-Format (nach Rolle-Lookup):**
-
-```markdown
-**[00:00:00 → 00:00:03] Local:** Hallo zusammen
-**[00:00:03 → 00:00:06] Remote-1:** Hi, ich bin Bob
-**[00:00:06 → 00:00:10] Local:** Schön dich zu sehen
-```
-
-**Edge Cases (akzeptiert in MVP 3, v0.4 mit VAD/Frequency-Analysis):**
-- Lokaler User auf Mute, Stimme echot im System-Audio → Mic still, Loopback hat Stimme → r ≈ 0, fälschlich als Remote klassifiziert
-- Hintergrund-Musik auf Loopback → fälschlich als Remote klassifiziert
-- Simultanes Sprechen beider Seiten → r mittig, Provider-Diarization entscheidet
-
-**Cross-Channel-Correlation-Tests (~12):**
-- ComputeRmsRatios_SilentAudio_ReturnsMidpoint (r ≈ 0.5)
-- ComputeRmsRatios_MicOnly_ReturnsHighRatio (r > 0.7)
-- ComputeRmsRatios_LoopbackOnly_ReturnsLowRatio (r < 0.2)
-- ComputeRmsRatios_BothActive_ReturnsMidRatio (r ≈ 0.5)
-- ComputeRmsRatios_DifferentSampleRates_Throws
-- AssignRoles_LocalUserSpeaks_Most_IdentifiesLocal (avg r ≈ 0.7 → Local)
-- AssignRoles_RemoteUserSpeaks_Only_IdentifiesRemote (avg r ≈ 0.03 → Remote-N)
-- AssignRoles_MultipleSpeakers_Remote1AndRemote2 (3 Speaker, einer lokal, zwei remote)
-- AssignRoles_NoSpeech_AllUndefined (alle r undefiniert, kein Local)
-- AssignRoles_DurationMapping_CorrectWindowAlignment (Segment vs Window)
-- AssignRoles_PersistenceFailure_Throws
-- AssignRoles_PerformanceTest_OneHourMeeting (60 min Audio in <5 s verarbeitet)
 
 ### Provider-Interface
 
@@ -743,10 +618,8 @@ public sealed record TranscriptionResult(
     IReadOnlyList<TranscriptionSegment> Segments,
     string ProviderName,
     TimeSpan AudioDuration,
-    int SpeakerCount,
-    string? LocalSpeakerId,                  // Provider-ID des Local-Users (z. B. "S1"); null wenn unklar
-    IReadOnlyList<string> RemoteSpeakerIds,  // sortiert nach Häufigkeit, z. B. ["S2", "S3"]
-    SpeakerRoleMap? RoleMap,                 // Cross-Channel-Correlation-Ergebnis (siehe §5.5)
+    int SpeakerCount,                        // Anzahl unterschiedlicher Provider-Speaker-IDs
+    IReadOnlyList<string> SpeakerLabels,     // z. B. ["S0", "S1", "S2"] — rohe Provider-IDs
     string? ErrorMessage                     // null bei Erfolg
 );
 
@@ -786,18 +659,24 @@ public sealed record AudioTranscriptionTask(
 );
 ```
 
-## 6. Diarization (Pflicht)
+## 6. Diarization (Pflicht, durch Provider)
 
-**Entscheidung:** Diarization ist in MVP 3 nicht optional. Provider, der kein
-Diarization liefert, wird abgelehnt (Worker markiert `transcript_status: failed`
-mit Begründung „provider does not support diarization").
+**Martin-Direktive 2026-07-07 Update 5:** _„Streiche das rms. Diarization macht der Provider."_
 
-**Azure Speech** und **Deepgram** liefern beide Diarization nativ — kein Custom-Modell
-nötig. Konfiguration in `TranscriptionConfig.MaxSpeakers`.
+**Architektur:** Diarization läuft **komplett im Provider** (Azure Speech oder
+Deepgram). Wir machen **keine eigene Speaker-Analyse** auf unserer Seite —
+kein RMS-Cross-Channel-Correlation, keine Local/Remote-Mapping.
 
-### Speaker-Labels
+**Provider-Auswahl-Kriterium:** Diarization ist nicht optional. Provider, der
+kein Diarization liefert, wird abgelehnt (Worker markiert
+`transcript_status: failed` mit Begründung „provider does not support
+diarization"). **Azure Speech** und **Deepgram** liefern beide Diarization
+nativ — kein Custom-Modell nötig.
 
-- v0.3: Speaker werden mit `"S1"`, `"S2"`, ... benannt (anonyme IDs)
+### Speaker-Labels (aus Provider, roh)
+
+- Provider liefert Speaker-IDs direkt: `S0`, `S1`, `S2`, ... (anonyme IDs)
+- Wir geben diese **roh** in der MD aus — keine Local/Remote-N Unterscheidung
 - Reale Namen (z. B. „Alice", „Bob"): **Out-of-Scope v0.3**, v0.4 über Outlook-Kalender
   + Contact-Match (siehe §1 Ausbaustufe v0.4)
 
@@ -813,14 +692,14 @@ nötig. Konfiguration in `TranscriptionConfig.MaxSpeakers`.
 ## Transkription
 
 **Provider:** azure-speech
-**Speaker:** 3 (S1, S2, S3)
+**Speaker:** 3 (S0, S1, S2)
 **Sprache:** deu
 
-**[00:00:12 → 00:00:18] S1:** Hallo, können alle mich hören?
+**[00:00:12 → 00:00:18] S0:** Hallo, können alle mich hören?
 
-**[00:00:19 → 00:00:24] S2:** Ja, ich bin dabei.
+**[00:00:19 → 00:00:24] S1:** Ja, ich bin dabei.
 
-**[00:00:25 → 00:00:42] S1:** Gut, dann fangen wir an mit dem Daily Standup.
+**[00:00:25 → 00:00:42] S0:** Gut, dann fangen wir an mit dem Daily Standup.
 ```
 
 ## 7. Transkription in MD-Datei schreiben
@@ -867,7 +746,7 @@ src/AiRecall.Core/Audio/                    (NEU)
   IAudioDeviceProvider.cs
   AudioDeviceProvider.cs                    # MMDeviceEnumerator-Wrapper
   AudioDeviceInfo.cs                        # record
-  StereoConcatenator.cs                     # Mono → Stereo (Update 4)
+  MonoMixer.cs                              # Mono + Mono → Mono (Update 5, vorher StereoConcatenator)
 
 src/AiRecall.Core/Transcription/            (NEU)
   ITranscriptionProvider.cs
@@ -884,8 +763,7 @@ src/AiRecall.AppReader.Teams/               (ERWEITERT, Spec 0011)
 src/AiRecall.Conversion/Transcription/      (NEU)
   TranscriptionWorker.cs                    # analog ConversionWorker
   AudioTranscriptionTask.cs
-  SpeakerRoleAssigner.cs                    # Cross-Channel-Correlation (Update 4)
-  SpeakerRoleMap.cs                         # Record Local/Remote-Mapping
+  # SpeakerRoleAssigner und SpeakerRoleMap ENTFALLEN (Update 5: Provider macht Diarization)
 
 src/AiRecall.TrayApp/Audio/                 (NEU)
   AudioRecorderSession.cs                   # Orchestrator: Detection → Recording → MD → Worker
@@ -953,7 +831,7 @@ Diese Funktionalität ist jetzt vollständig in `TeamsAppReader` (Spec 0011).
    - Device-Liste, Test-Button (auch bei `audio.enabled=false`),
      Validation, Save-Reload
 
-Total: ~109 neue Tests (Ziel MVP 3 v0.3: 674 → **~783**)
+Total: ~91 neue Tests (Ziel MVP 3 v0.3: 674 → **~765**)
 
 ## TBD / Offene Punkte (Martin-Entscheidung)
 
@@ -1000,6 +878,15 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
 
 ## Update-Log
 
+- **2026-07-07 (Update 5, nach Martin-Feedback)** — **„Streiche das rms. Diarization macht der Provider."**
+  Komplette Vereinfachung: §5.5 Cross-Channel-Correlation (RMS) ersatzlos
+  gestrichen. §5.4 von Stereo-Concatenation auf Mono-Mix reduziert
+  (`combined-mono.wav` statt `combined-stereo.wav`). Datenmodell
+  `TranscriptionResult` schlanker (kein `LocalSpeakerId`, kein
+  `RemoteSpeakerIds`, kein `RoleMap` mehr — nur `SpeakerLabels`). Output-MD
+  zeigt rohe Provider-Speaker-IDs (S0, S1, S2). Komponenten
+  `SpeakerRoleAssigner`/`SpeakerRoleMap`/`StereoConcatenator` entfernt,
+  ersetzt durch `MonoMixer`. Test-Plan von ~109 zurück auf ~91 Tests.
 - **2026-07-07 (Update 4, nach Martin-Feedback)** — Stereo-Concatenation als
   Pre-Processing vor ASR-Call. `combined-stereo.wav` wird im Meeting-Ordner
   abgelegt (nicht im OS-Temp), pro Task eindeutig — Martin-Direktive
@@ -1009,6 +896,7 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
   `r(w) = RMS_mic / (RMS_mic + RMS_loopback + ε)`. Neue Komponenten
   `StereoConcatenator` + `SpeakerRoleAssigner`, Datenmodell erweitert um
   `LocalSpeakerId`/`RemoteSpeakerIds`/`SpeakerRoleMap`, ~18 neue Tests.
+  **Komplett durch Update 5 ersetzt.**
 - **2026-07-07 (Update 3, nach Martin-Feedback)** — Beide Provider (Azure Speech
   + Deepgram) werden **parallel implementiert**, Auswahl im Settings-Dialog
   (neuer Tab „Transcription"). v0.4 Outlook-Kalender-Integration **explizit
