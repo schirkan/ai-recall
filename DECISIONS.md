@@ -5,6 +5,133 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-07 — MVP 3 Audio Notes (Spec 0013, v0.3 nach Martin-Feedback)
+
+**Anlass:** Martins Anforderungsliste 2026-07-07 (Telegram-Topic „AI Recall",
+8 Punkte):
+1. Automatische Teams-Meeting-Start-Erkennung (Process + Window-Title)
+2. Background-Audio-Recording mit zwei Kanälen
+3. Mikrofon + Speaker-Loopback
+4. Audio-Devices in Settings auswählbar
+5. MD-Datei mit Metadaten neben Audio
+6. Background-Worker transkribiert nach Ende (Provider noch offen)
+7. Diarization als Pflicht
+8. Transkription in MD-Datei (analog OCR-Pattern aus Spec 0007 / Bug-Bash I-17)
+
+**Update 3 (2026-07-07, später):** Martin-Direktive _„Beide provider
+implementieren. Auswahl in settingsdialog."_ → **Beide Provider werden
+parallel implementiert** (Azure Speech via SDK, Deepgram via REST),
+Auswahl zur Laufzeit via `TranscriptionConfig.Provider` im neuen
+Settings-Tab „Transcription". Martin bestätigt: _„V0.4 erst nach 0.3"_
+→ Outlook-Kalender-Integration explizit auf nach v0.3-Abnahme verschoben.
+Damit sind alle offenen Punkte geklärt.
+
+**Update 2 (2026-07-07, später):** Martin-Direktive _„Teams Meeting Detection
+soll über einen App Reader getriggert werden"_ → Architektur grundlegend
+geändert. Statt separatem `IMeetingDetector` wird der bestehende
+`TeamsAppReader` (Spec 0011) als Trigger-Quelle erweitert. 6 von 8 TBDs
+geklärt; verbleibend: Provider-Auswahl (Azure Speech vs. Deepgram),
+Kalender-Lookup (v0.4).
+
+**Ergebnis:** `specs/0013-audio-notes-mvp3.md` als Skeleton v0.3 angelegt
+(~28 KB, vollständige Sektionen + Datenmodell + Konfiguration + TDD-Plan
++ 2 verbleibende TBD-Punkte für Martin).
+
+### Architektur-Entscheidungen
+
+| # | Thema | Entscheidung | Begründung |
+|---|-------|--------------|------------|
+| 1 | Teams-Meeting-Erkennung | **Teams App Reader (Spec 0011) als Trigger-Quelle** | Martin-Direktive 2026-07-07. Spec 0011 hat bereits `TeamsChatKind.Meeting` (Enum) + `TeamsTitleInfo.IsMeeting` (Bool-Flag) + Title-Parser für `"Meeting \| Daily Standup - Microsoft Teams"`. Neues Event `MeetingStateChanged` auf `TeamsAppReader` macht `false→true`/`true→false`-Übergänge für `TriggerSupervisor` sichtbar. **Separater `IMeetingDetector`/`TeamsMeetingDetector` verworfen** — würde Parsing-Logik duplizieren. |
+| 2 | Trigger-Debounce | **30 s Mindest-Meeting-Dauer, sonst verworfen** | Verhindert Aufnahme von 5-Sekunden-Test-Meetings oder schnellen Tab-Wechseln. Konfigurierbar via `appReader.teams.minMeetingDurationSeconds`. Implementierung in `AudioRecorderSession` (nicht im App Reader). |
+| 3 | Audio-Encoding | **PCM 16-bit, 16 kHz, Mono, WAV-Container** | Martin-Direktive 2026-07-07 (Punkt 2: „pcm"). Whisper-Standard-Eingabe, keine Resampling-Latenz, Azure Speech + Deepgram akzeptieren beide direkt. Opus-File als Alternative verworfen (Martin-Entscheidung). |
+| 4 | Container-Layout | **Zwei separate Mono-Files (`mic.wav` + `loopback.wav`)** statt Stereo-Mix | Stereo-Mix würde Diarization erschweren (welcher Speaker in welcher Spur?). Zwei separate Spuren erlauben getrennte Pre-Processing-Pipelines. Nachteil: ~doppelter Speicher (~30 MB/h). |
+| 5 | Persistenz-Layout | `%APPDATA%/AiRecall/audio/yyyy-MM-dd/HHmmss-{meetingIdShort}/{mic,loopback,meta}.*` | Pro Meeting ein eigener Ordner, analog `capture/yyyy-MM-dd/`-Pattern. `meetingIdShort` = erste 8 Hex-Zeichen eines SHA256(Process + StartedAt-Tag) — deterministisch, deduplizierbar. |
+| 6 | MD-Pattern | **Eine `meta.md` pro Meeting**, Frontmatter + Transcript in-place angehängt | Analog OCR-Pattern (Bug-Bash I-17, Spec 0007): Content wird in-place in die MD-Datei geschrieben, keine separaten Files. Frontmatter-Feld `transcript_status: pending\|partial\|done\|failed` als Idempotenz-Marker. |
+| 7 | Audio-Devices in Settings | **Neuer Tab „Audio" im SettingsDialog** (Spec 0009-Foundation), Test-Button funktioniert **immer** (auch bei `audio.enabled=false`) | Martin-Direktive 2026-07-07 (Punkt 4: „nein — keine Prüfung"). Settings-Dialog hat bereits dynamische Tab-Generierung via `ConfigSchemaReflection` (Spec 0009 v1.0). Test-Button unabhängig von Master-Switch, damit User Devices validieren kann bevor er `audio.enabled=true` setzt. |
+| 8 | Transcription-Worker | **Eigener `TranscriptionWorker` analog `ConversionWorker`** (Spec 0007-Pattern) | Gleiche Architektur: `Channel<AudioTranscriptionTask>` + Background-Task + max-N-parallel. Identisches Enqueue-/Finalize-/Idempotenz-Pattern. Neue DLL `AiRecall.Conversion.Transcription`. |
+| 9 | Provider-Interface | **`ITranscriptionProvider` mit `TranscribeAsync(micPath, loopbackPath, options, progress, ct)`** | Provider-Austauschbar (Azure Speech, Deepgram). Diarization-Verpflichtung im Interface, nicht in jedem Provider. |
+| 10 | Diarization | **Pflicht, nicht optional** | Martin-Direktive 2026-07-07 (implizit aus Punkt 7). Provider ohne Diarization werden vom Worker abgelehnt → `transcript_status: failed`. **Sowohl Azure Speech als auch Deepgram liefern Diarization nativ** — keine Custom-Modelle nötig. |
+| 11 | Speaker-Labels | **„S1", „S2", ... (anonyme IDs)** in v0.3 | Reale Namen-Mapping als v0.4 über Outlook-Kalender-Lookup + Contact-Match (siehe Punkt 13). |
+| 12 | Transcription-Provider (Auswahl) | **Beide implementiert** — Azure Speech + Deepgram parallel, Auswahl via `TranscriptionConfig.Provider` im Settings-Dialog (Tab „Transcription") | Martin-Direktive 2026-07-07 Update 3 (Punkt 1: „Beide provider implementieren. Auswahl in settingsdialog"). Azure Speech via `Microsoft.CognitiveServices.Speech` SDK, Deepgram via REST + `HttpClient`. Beide Cloud, beide mit nativer Diarization. Azure ~$1/h, Deepgram ~$0.26/h (Pay-as-you-go). Provider-Key in `TranscriptionConfig.ProviderApiKey` als Klartext in `%APPDATA%` (siehe Punkt 6). |
+| 13 | Outlook-Kalender-Integration | **Ausbaustufe v0.4** — NICHT v0.3 | Martin-Direktive 2026-07-07 (Punkt 7: „ausbaustufe: im outlook kalender einem teams termin zur aktuellen uhrzeit suchen und termin-metadaten übernehmen"). v0.3 befüllt nur `topic` (aus Title-Parser); v0.4 ergänzt `participants`, `description`, `calendar_appointment_id`, `organizer` per Outlook-COM-Suche. Architektur-Vorbereitung in v0.3 durch optional befüllbare `MeetingMetadata`-Felder in der MD-Frontmatter. |
+
+### Martin-Direktiven 2026-07-07 (Übersicht)
+
+| # | Thema | Direktive | Auswirkung |
+| - | - | - | - |
+| A | Trigger-Architektur | „über einen App Reader" | Teams App Reader (Spec 0011) erweitern um `MeetingStateChanged`-Event; separater Detector verworfen |
+| B | Provider | „azure speech oder deepgram" | WhisperX/faster-whisper/OpenAI raus aus Spec; Kandidaten-Liste auf 2 Cloud-Provider |
+| C | Encoding | „pcm" | Opus als Alternative gestrichen; PCM-16-WAV Mono 16 kHz fix |
+| D | Off-Hours | „immer" | Kein Nacht/Wochenende-Skip |
+| E | Laptop-Mode | „nein — keine Prüfung" | Kein Battery-Aware-Recording |
+| F | Disk-Quota | „nein — keine Prüfung" | Keine Auto-Rotation; User-Verantwortung |
+| G | Encryption | „nein, keine Verschlüsselung" | OS-Bitlocker/EFS ausreichend; kein App-seitiges Crypto |
+| H | Kalender-Integration | „Ausbaustufe" | v0.4-Spec folgt; v0.3 nur Topic |
+| I | Trigger-Robustheit | „erst mal egal" | Teams-Reload/Network-Drop = Recording stoppt; kein Re-Init in v0.3 |
+| J | Provider-Implementierung (Update 3) | „Beide provider implementieren" | Azure Speech + Deepgram parallel implementiert; Auswahl via Settings-Dialog |
+| K | v0.4 Roadmap (Update 3) | „V0.4 erst nach 0.3" | Outlook-Kalender-Integration explizit nach v0.3-Abnahme verschoben, nicht parallel |
+
+### Verworfen / Out-of-Scope v0.3
+
+- **IMeetingDetector / TeamsMeetingDetector als separate Komponente** — Martin-Direktive
+  Trigger via App Reader. Architektur erlaubt späteres Hinzufügen via weiterem App Reader
+  (z. B. `ZoomAppReader` für Zoom-Meetings).
+- **Andere Meeting-Apps** (Zoom, Discord, Webex, Slack Huddles) — Folge-Cluster.
+- **Stereo-Mix-Container** — Diarization-Pipeline braucht separate Spuren.
+- **Live-Transkription während Meeting** — nur Post-Meeting in v0.3.
+- **Multi-Language Auto-Detect** — Default-Sprache pro Recording (`TranscriptionConfig.DefaultLanguage`).
+- **Speaker-Mapping auf reale Namen** — v0.4 (über Outlook-Kalender + Contact-Match).
+- **Audio-Pre-Processing** (Noise-Suppression, AGC, Echo-Cancellation) — v0.4.
+- **Aufnahme-Indikator** (Tray-LED, Animation) — nice-to-have, nicht MVP.
+- **Reine Audio-Spike-Detection** für Trigger — zu viele False-Positives.
+- **Opus-Encoding** — Martin hat PCM final entschieden.
+- **Lokale Whisper-Modelle (WhisperX, faster-whisper)** — Martin hat Cloud-only entschieden.
+- **OpenAI Whisper API** — scheidet aus, da kein Diarization.
+
+### Offene Punkte für Martin (verbleibend)
+
+**Keine offenen Punkte mehr.** Alle Martin-Direktiven 2026-07-07 (Update 1-3) sind in Spec 0013 v0.3 angewandt:
+
+| # | Direktive | Status |
+| - | - | - |
+| A | Trigger via App Reader | ✅ Spec 0011-Erweiterung dokumentiert |
+| B | Provider: Azure oder Deepgram | ✅ **Beide implementiert**, Auswahl via Settings |
+| C | Encoding: PCM | ✅ PCM-16-WAV Mono 16 kHz fix |
+| D | Off-Hours: immer | ✅ Kein Nacht/Wochenende-Skip |
+| E | Laptop-Mode: keine Prüfung | ✅ Kein Battery-Aware-Check |
+| F | Disk-Quota: keine Prüfung | ✅ Keine Auto-Rotation |
+| G | Encryption: keine | ✅ OS-Bitlocker/EFS ausreichend |
+| H | Kalender: Ausbaustufe | ✅ v0.4 nach v0.3-Abnahme (Martin-Direktive Update 3) |
+| I | Trigger-Robustheit: egal | ✅ Teams-Reload stoppt Recording, kein Re-Init in v0.3 |
+| J | Beide Provider implementieren | ✅ Azure Speech + Deepgram parallel |
+| K | v0.4 nach v0.3 | ✅ Explizit nach v0.3-Abnahme, nicht parallel |
+
+### Folge-Cluster (v0.4+, erst nach v0.3-Abnahme — Martin-Direktive Update 3)
+
+- **Outlook-Kalender-Integration** (Martin-Direktive 2026-07-07): Suche nach Outlook-`Appointment` mit `IsOnlineMeeting==true` und `Start <= DetectedAt <= End`; Metadaten (Participants, Description, CalendarAppointmentId, Organizer) in laufende `meta.md` nachtragen. **Wird erst nach v0.3-Abnahme begonnen** (Martin: „V0.4 erst nach 0.3").
+- Speaker-Mapping auf reale Namen (über Outlook-Kalender + Contact-Match)
+- Audio-Pre-Processing (Noise-Suppression, AGC, Echo-Cancellation via WebRTC-Audio-Processing-Library)
+- Multi-Meeting-Recording (mehrere Teams-Accounts gleichzeitig)
+- Auto-Wiki MVP 4 (auf Audio-Notes-Infrastruktur aufbauend)
+
+### Tests
+
+- TDD-Plan in Spec 0013 §Tests: ~91 neue Tests (Ziel: 674 → ~765)
+- AudioRecorder (15), AudioDeviceProvider (8),
+  **Teams-App-Reader-Erweiterung** (8, ersetzt MeetingDetector-Tests),
+  **TriggerSupervisor-Audio-Wiring** (6, neu), TranscriptionWorker (12),
+  Provider-Stub (6), MD-Generator (8), Settings-Audio-Tab (5)
+
+### Verwandte Specs
+
+- `specs/0005-trigger-pipeline.md` — TriggerEvent-Infrastruktur (wiederverwendet)
+- `specs/0007-async-conversion.md` — ConversionWorker-Pattern (1:1 übernommen)
+- `specs/0009-settings-dialog.md` — Settings-Tab-Foundation (AudioConfig-POCOs)
+- `specs/0011-teams-app-reader.md` — **Trigger-Quelle** (TeamsChatKind.Meeting + IsMeeting + neues MeetingStateChanged-Event)
+- `specs/0012-tessdata-first-run.md` — Modal-Dialog-Stil (nicht direkt relevant)
+
+---
+
 ## 2026-07-05 — Teams App-Reader (Spec 0011)
 
 Spec 0011 ist mit Commits `ec4631e` ... `237b457` abgeschlossen (Cluster 1–5;
