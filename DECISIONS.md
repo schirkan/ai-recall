@@ -18,6 +18,33 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 7. Diarization als Pflicht
 8. Transkription in MD-Datei (analog OCR-Pattern aus Spec 0007 / Bug-Bash I-17)
 
+**Update 8 (2026-07-07, später):** Martin-Direktive _„Es muss auch automatisch
+erkannt werden, wann ein Meeting endet, um die Aufnahme zu stoppen.
+Generell sollte die Aufnahme in einem eigenen thread laufen, bis das stopp
+Signal kommt. Dann werden die Audio Dateien geschrieben und die md datei
+verlinkt beide. Der background worker liest diese dann später ein und startet
+das transkript. Um das Meeting ende zu erkennen muss regelmäßig nach dem
+Meeting Fenster gesucht werden."_ → Architektonische Erweiterung um
+**Polling-basierte Anwesenheitserkennung** + **Recording-Lifecycle mit eigenem
+Thread + Stop-Signal + MD-Stub-Pattern**. Neuer `MeetingPresencePoller` in
+`src/AiRecall.Trigger/` ruft alle 5 s `TeamsAppReader.TryGetActiveMeetingAsync()`
+auf und feuert `PresenceChanged` bei Edge-Detection (false→true = Started,
+true→false = Ended). Polling ist **alleinige Quelle** für Start/Stop in v0.3;
+Event-driven `MeetingStateChanged` aus Spec 0011/Update 2 bleibt im Code,
+wird aber NICHT vom `TriggerSupervisor` abonniert. Selbst-heilend, robust
+gegen verlorene Events (Teams-Reload, Network-Drop, UI-Crash). Aufnahme läuft
+in eigenem Thread (`RecordingSession` via `Task.Run`), Stop via
+`CancellationToken` (kein Thread.Abort). Beim Stop: Buffer-Snapshots →
+`mic.wav` + `loopback.wav` schreiben → `meta.md` Status `recorded` mit
+`audio_files`-Links setzen → Live-Enqueue im Worker. MD-Stub-Pattern:
+`meta.md` zweistufig geschrieben (Start = `recording`, Stop = `recorded`),
+neues Frontmatter-Feld `worker_task_enqueued` für Crash-Recovery-Scan des
+`TranscriptionWorker`. Neue Komponenten: `MeetingPresencePoller`,
+`RecordingSession`, `MeetingPresenceStateChangedEventArgs`,
+`MeetingPresenceSnapshot`, `MetaMdLifecycleManager`, `MetaMdFrontmatter`,
+`MeetingRecordingPaths`. Tests-Plan erweitert um ~18 neue Tests (~91 → ~109).
+Martin-Direktiven-Status: 10 Direktiven (A–P) abgehakt.
+
 **Update 7 (2026-07-07, später):** Martin-Direktive _„Azure speech auch
 mit stereo nutzen."_ → Annahme „Azure Speech downmixt intern auf Mono"
 aus Update 6 entfernt. Azure Speech verarbeitet das Stereo-File nativ
@@ -98,6 +125,7 @@ Kalender-Lookup (v0.4).
 | 12 | Transcription-Provider (Auswahl) | **Beide implementiert** — Azure Speech + Deepgram parallel, Auswahl via `TranscriptionConfig.Provider` im Settings-Dialog (Tab „Transcription") | Martin-Direktive 2026-07-07 Update 3 (Punkt 1: „Beide provider implementieren. Auswahl in settingsdialog"). Azure Speech via `Microsoft.CognitiveServices.Speech` SDK, Deepgram via REST + `HttpClient`. Beide Cloud, beide mit nativer Diarization. Azure ~$1/h, Deepgram ~$0.26/h (Pay-as-you-go). Provider-Key in `TranscriptionConfig.ProviderApiKey` als Klartext in `%APPDATA%` (siehe Punkt 6). |
 | 13 | Outlook-Kalender-Integration | **Ausbaustufe v0.4, nach v0.3-Abnahme** | Martin-Direktive 2026-07-07 (Punkt 7: „ausbaustufe") + Update 3 („V0.4 erst nach 0.3"). v0.3 befüllt nur `topic` (aus Title-Parser); v0.4 ergänzt `participants`, `description`, `calendar_appointment_id`, `organizer` per Outlook-COM-Suche. Architektur-Vorbereitung in v0.3 durch optional befüllbare `MeetingMetadata`-Felder in der MD-Frontmatter. |
 | 14 | Stereo-Concatenation (Update 6, finale Form) | **`combined-stereo.wav` im Meeting-Ordner** (links = mic, rechts = loopback) — beide Kanäle erhalten, Diarization komplett im Provider | Martin-Direktive 2026-07-07 Update 6: „Nutze weiterhin stereo mit beiden Kanälen." Mono-Mix (Update 5) zurückgenommen. Begründung: Deepgram kann Multi-Channel-Diarization nutzen, Azure Speech downmixt intern. Beide Kanäle bleiben erhalten für v0.4 (Per-Channel-Re-Transkription, Audio-Pre-Processing). RMS-Analyse bleibt gestrichen (Update 5). Komponente `StereoConcatenator`. |
+| 15 | Polling + Recording-Lifecycle (Update 8) | **Polling-basierte Anwesenheitserkennung** (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection) als alleinige v0.3-Quelle für Start/Stop. **Recording in eigenem Thread** (`RecordingSession` via `Task.Run`), Stop via `CancellationToken`. **MD-Stub-Pattern**: `meta.md` zweistufig (Start = `recording`, Stop = `recorded` mit Audio-Links), Frontmatter-Feld `worker_task_enqueued` für Recovery-Scan. | Martin-Direktive 2026-07-07 Update 8: „Es muss auch automatisch erkannt werden, wann ein Meeting endet … regelmäßig nach dem Meeting Fenster gesucht werden" + „Aufnahme in einem eigenen thread … Audio Dateien geschrieben und die md datei verlinkt beide … background worker liest diese dann später ein". Polling ist selbst-heilend, robust gegen verlorene Events (Teams-Reload, Network-Drop, UI-Crash). Neue Komponenten: `MeetingPresencePoller`, `RecordingSession`, `MetaMdLifecycleManager`, `MetaMdFrontmatter`, `MeetingPresenceStateChangedEventArgs`, `MeetingPresenceSnapshot`, `MeetingRecordingPaths`. Event-driven `MeetingStateChanged` aus Spec 0011/Update 2 bleibt im Code für v0.4-Verbesserung (schnellere Reaktion < 100 ms), wird aber in v0.3 NICHT vom `TriggerSupervisor` abonniert. Tests-Plan: ~91 → ~109 neue Tests. |
 
 ### Martin-Direktiven 2026-07-07 (Übersicht)
 
@@ -118,6 +146,7 @@ Kalender-Lookup (v0.4).
 | M | Diarization (Update 5) | „Streiche das rms. Diarization macht der Provider" | RMS-Cross-Channel-Correlation komplett raus; Diarization läuft im Provider, wir geben rohe Speaker-IDs (S0, S1, S2) weiter |
 | N | Stereo erhalten (Update 6) | „Nutze weiterhin stereo mit beiden Kanälen" | Mono-Mix aus Update 5 zurückgenommen; Stereo-Concatenation mit beiden Kanälen als finaler Pre-Processing-Schritt |
 | O | Azure Speech auch mit Stereo (Update 7) | „Azure speech auch mit stereo nutzen" | Azure Speech verarbeitet Stereo nativ (kein interner Downmix); Response enthält `ChannelId` zusätzlich zu `SpeakerId`. Beide Provider bekommen das gleiche `combined-stereo.wav` |
+| P | Meeting-Ende-Erkennung + Recording-Lifecycle (Update 8) | „Es muss auch automatisch erkannt werden, wann ein Meeting endet, um die Aufnahme zu stoppen … Um das Meeting ende zu erkennen muss regelmäßig nach dem Meeting Fenster gesucht werden" + „Generell sollte die Aufnahme in einem eigenen thread laufen, bis das stopp Signal kommt. Dann werden die Audio Dateien geschrieben und die md datei verlinkt beide. Der background worker liest diese dann später ein und startet das transkript" | **Polling-basierte Anwesenheitserkennung** (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection) als alleinige Quelle für Start/Stop in v0.3; Event-driven `MeetingStateChanged` aus Spec 0011/Update 2 bleibt im Code, wird aber NICHT vom `TriggerSupervisor` abonniert. **Recording-Lifecycle**: Aufnahme läuft in eigenem Thread (`RecordingSession` via `Task.Run`), Stop via `CancellationToken`, kein Thread.Abort. Beim Stop: Buffer-Snapshots → `mic.wav` + `loopback.wav` schreiben → `meta.md` Status `recorded` mit `audio_files`-Links setzen → Live-Enqueue im Worker. **MD-Stub-Pattern**: `meta.md` zweistufig geschrieben (Start = `recording`, Stop = `recorded`), Frontmatter-Feld `worker_task_enqueued` für Crash-Recovery-Scan. Neue Komponenten: `MeetingPresencePoller`, `RecordingSession`, `MetaMdLifecycleManager`. |
 
 ### Verworfen / Out-of-Scope v0.3
 
@@ -157,6 +186,7 @@ Kalender-Lookup (v0.4).
 | M | Diarization (Update 5) | ✅ RMS ersatzlos gestrichen, Provider macht Diarization, rohe Speaker-IDs |
 | N | Stereo mit beiden Kanälen (Update 6) | ✅ Stereo-Concatenation final, Mono-Mix aus Update 5 zurückgenommen |
 | O | Azure Speech auch Stereo (Update 7) | ✅ Beide Provider bekommen gleiches Stereo-File, Azure nativ ohne Downmix |
+| P | Event-driven Meeting-Detection als v0.3-Trigger (Update 8) | ✅ Polling-only in v0.3, Event-driven `MeetingStateChanged` bleibt im Code für v0.4 (schnellere Reaktion < 100 ms), Polling als selbst-heilender Fallback |
 
 ### Folge-Cluster (v0.4+, erst nach v0.3-Abnahme — Martin-Direktive Update 3)
 

@@ -133,15 +133,112 @@ ist die Event-Variante. Beide tragen dieselben Informationen, die
   `appReader.teams.minMeetingDurationSeconds` (Default: 30).
 - Verhindert Aufnahme von 5-Sekunden-Test-Meetings oder schnellen Tab-Wechseln.
 - Implementierung: `AudioRecorderSession` trackt `StartedAt`; wenn
-  `MeetingStateChanged(IsActive=false)` innerhalb von 30 s kommt, wird
+  `PresenceChanged(IsActive=false)` innerhalb von 30 s kommt, wird
   der Recording-Ordner verworfen (kein WAV, keine MD, kein Worker-Task).
 
-### Meeting-Ende-Erkennung
+### Meeting-Anwesenheitserkennung — Polling (Update 8)
 
-| Quelle | Wann feuert `IsActive=false`? |
+**Martin-Direktive 2026-07-07 Update 8:** _„Es muss auch automatisch erkannt
+werden, wann ein Meeting endet, um die Aufnahme zu stoppen … Um das Meeting
+ende zu erkennen muss regelmäßig nach dem Meeting Fenster gesucht werden."_
+
+**Architektur:** Der **Polling-basierte `MeetingPresencePoller`** ist die
+**alleinige Quelle** für `Start`/`Stop`-Signale in v0.3. Er ruft periodisch
+`TeamsAppReader.TryGetActiveMeetingAsync(ct)` auf und vergleicht das Ergebnis
+mit dem letzten bekannten Zustand (Edge-Detection: false→true = Started,
+true→false = Ended). Nur bei **Zustandswechsel** wird ein Event gefeuert.
+
+| Eigenschaft | Wert |
 | - | - |
-| `TeamsAppReader` | Title verliert „Meeting \|"-Prefix ODER CDP zeigt keinen aktiven Call mehr |
-| Manueller User-Stop | Tray-Menu „Stop Recording" (Force-Ende) |
+| Intervall | **5 s** (Default, konfigurierbar via `appReader.teams.presencePollIntervalSeconds`) |
+| Thread | **Dedizierter Polling-Thread** (`Task.Run` beim `StartAsync`) |
+| Quelle | `TeamsAppReader.TryGetActiveMeetingAsync(ct)` — liest CDP / UIA / Title |
+| Trigger | **Edge-Detection** — Event feuert nur bei Zustandswechsel (nicht alle 5 s) |
+| Logging | Jeder Poll + jeder Edge-Wechsel auf `Debug`-Level |
+
+**Warum Polling und nicht Event-driven:**
+- Events vom App Reader können verloren gehen (Teams-Reload, Network-Drop,
+  UI-Crash, App-Hang)
+- Polling ist **selbst-heilend** — nächster Poll sieht den aktuellen Zustand
+- Polling-Intervall 5 s ist kurz genug, um max. 5 s Verzögerung beim Stop
+  zu haben (akzeptabel für Audio-Aufnahme)
+- Konfigurierbar, falls User höhere Latenz toleriert und CPU-Last reduzieren
+  will (z. B. 10–30 s)
+
+**Wiring in `TriggerSupervisor` (ersetzt Event-driven Detection):**
+
+```csharp
+public sealed class TriggerSupervisor : ITriggerService
+{
+    private readonly MeetingPresencePoller _poller;   // NEU (Update 8)
+    private readonly AudioRecorderSessionFactory _audioFactory;
+
+    public Task StartAsync(CancellationToken ct)
+    {
+        _poller.PresenceChanged += OnPresenceChanged;  // NICHT _teamsReader.MeetingStateChanged
+        await _poller.StartAsync(ct);
+        // ... existing trigger wiring
+    }
+
+    private void OnPresenceChanged(object? sender, MeetingPresenceStateChangedEventArgs e)
+    {
+        if (e.IsActive) _audioFactory.StartOrAttach(e);
+        else _audioFactory.EndSession(e.ChatIdShort);
+    }
+}
+```
+
+**Neue Komponenten:**
+
+```csharp
+public sealed class MeetingPresencePoller : IAsyncDisposable
+{
+    private readonly TeamsAppReader _reader;
+    private readonly TimeSpan _interval;
+    private CancellationTokenSource? _cts;
+    private Task? _loop;
+
+    public event EventHandler<MeetingPresenceStateChangedEventArgs>? PresenceChanged;
+
+    public Task StartAsync(CancellationToken ct);
+    public async Task StopAsync(CancellationToken ct);
+}
+
+public sealed record MeetingPresenceStateChangedEventArgs(
+    bool IsActive,             // false -> true = Started, true -> false = Ended
+    string? Topic,             // z. B. "Daily Standup" (aus Title-Parser)
+    string? WindowTitle,       // Voll-Title für Diagnose
+    string? ChatIdShort,       // SHA256(Title+Process+StartedAt) -> 8 hex
+    DateTimeOffset DetectedAt
+);
+```
+
+**`TeamsAppReader`-Erweiterung (Spec 0011):**
+
+```csharp
+public sealed class TeamsAppReader : IAppReader, IDisposable
+{
+    /// <summary>
+    /// Synchroner Snapshot der aktuellen Meeting-Anwesenheit.
+    /// true = Meeting-Fenster ist aktiv (Title hat "Meeting |"-Prefix ODER
+    /// CDP zeigt aktiven Call), false = kein Meeting erkannt.
+    /// </summary>
+    public Task<MeetingPresenceSnapshot> TryGetActiveMeetingAsync(CancellationToken ct);
+}
+
+public sealed record MeetingPresenceSnapshot(
+    bool IsActive,
+    string? Topic,
+    string? WindowTitle,
+    string? ChatIdShort
+);
+```
+
+**Status v0.3 vs. v0.4:**
+- `MeetingStateChanged`-Event aus Spec 0011/Update 2 bleibt im Code, wird
+  aber in v0.3 **nicht** vom `TriggerSupervisor` abonniert (Polling-only)
+- v0.4 kann Event-driven Detection zusätzlich nutzen (für sofortige Reaktion,
+  < 100 ms statt 5 s Polling-Latenz), Polling bleibt als Fallback
 
 ### Konfiguration (Erweiterung von `TeamsConfig`)
 
@@ -159,6 +256,11 @@ public sealed class TeamsConfig
     [Description("Mindestdauer (Sekunden), ab der ein erkanntes Meeting aufgezeichnet wird. Kuerzer = verworfen.")]
     [JsonPropertyName("minMeetingDurationSeconds")]
     public int MinMeetingDurationSeconds { get; set; } = 30;
+
+    /// <summary>Polling-Intervall fuer MeetingPresencePoller in Sekunden (Update 8).</summary>
+    [Description("Polling-Intervall (Sekunden), in dem der MeetingPresencePoller das Teams-Fenster prueft. Niedrigere Werte = schnellere Stop-Erkennung, hoehere Werte = weniger CPU-Last. Default 5.")]
+    [JsonPropertyName("presencePollIntervalSeconds")]
+    public int PresencePollIntervalSeconds { get; set; } = 5;
 }
 ```
 
@@ -238,6 +340,118 @@ public sealed record MeetingRecordingPaths(
     string MetadataPath    // ".../meta.md"
 );
 ```
+
+### Recording-Lifecycle (Eigener Thread + Stop-Signal, Update 8)
+
+**Martin-Direktive 2026-07-07 Update 8:** _„Generell sollte die Aufnahme in
+einem eigenen thread laufen, bis das stopp Signal kommt. Dann werden die
+Audio Dateien geschrieben und die md datei verlinkt beide. Der background
+worker liest diese dann später ein und startet das transkript."_
+
+**Threading-Modell:**
+
+| Thread | Verantwortlich |
+| - | - |
+| UI-Thread | TrayApp, Settings, User-Interaktion |
+| **Polling-Thread** (dediziert) | `MeetingPresencePoller` Polling-Loop (5 s) |
+| **NAudio-Capture-Thread Mic** | `WasapiCapture` intern (Audio-Callback) |
+| **NAudio-Capture-Thread Loopback** | `WasapiLoopbackCapture` intern (Audio-Callback) |
+| **Recording-Coordinator-Thread** | `RecordingSession.RecordLoopAsync` (Buffer-Sammlung) |
+| Background-Worker-Thread | `TranscriptionWorker` (eine Task pro Recording) |
+
+Die Audio-Aufnahme läuft in **drei voneinander entkoppelten Threads**:
+- NAudio erzeugt pro Capture-Stream einen eigenen Thread (Audio-Callback)
+- `RecordingSession` läuft in eigenem Background-Task und sammelt Buffer
+
+**Stop-Signal-Flow (Polling → Recording-Ende):**
+
+```
+Polling-Thread (alle 5 s)
+  ↓ TeamsAppReader.TryGetActiveMeetingAsync()
+  ↓ → IsActive = false
+  ↓ PresenceChanged-Event feuert
+  ↓
+TriggerSupervisor.OnPresenceChanged
+  ↓ _audioFactory.EndSession(chatIdShort)
+  ↓
+RecordingSession.StopAsync(ct)
+  ↓ CancellationToken.Cancel()
+  ↓
+Recording-Coordinator-Thread
+  ↓ Task.Delay wirft OperationCanceledException
+  ↓ → NAudio StopRecording()
+  ↓ → Buffer-Snapshots erstellen
+  ↓ → WAV-Files schreiben (mic.wav, loopback.wav)
+  ↓ → meta.md Status: recorded
+  ↓
+TranscriptionWorker.Enqueue(AudioTranscriptionTask)
+  ↓ (Worker liest meta.md + Audio-Files asynchron)
+```
+
+**Wichtige Eigenschaften:**
+
+- **Eigener Thread:** Aufnahme läuft NIEMALS auf UI-Thread oder Polling-Thread
+- **Stop-Signal via CancellationToken:** sauber, kein Thread.Abort, keine Race-Conditions
+- **File-Write beim Stop, nicht live:** keine Fragmentierung, eine WAV pro Meeting
+- **MD-Stub wird beim Stop erzeugt:** verlinkt beide Audio-Files (`mic.wav`, `loopback.wav`)
+- **Background-Worker liest MD-Stub später:** entkoppelt Recording von Transkription
+
+**File-Layout beim Recording-Stop:**
+
+```
+%APPDATA%/AiRecall/audio/yyyy-MM-dd/HHmmss-{meetingIdShort}/
+  mic.wav                       # erzeugt beim Stop, dauerhaft persistiert
+  loopback.wav                  # erzeugt beim Stop, dauerhaft persistiert
+  meta.md                       # erzeugt beim Stop mit Status "recorded"
+  # combined-stereo.wav wird HIER transient erzeugt (Update 4),
+  # NICHT im OS-Temp (Martin-Direktive: "kein fixer dateiname im temp ordner")
+```
+
+**RecordingSession-API:**
+
+```csharp
+public sealed class RecordingSession : IAsyncDisposable
+{
+    private readonly CancellationTokenSource _cts = new();
+    private Task? _recordingTask;
+
+    public string MeetingIdShort { get; }
+    public string? Folder { get; private set; }
+    public RecordingState State { get; private set; }   // Created | Recording | Recorded | Failed
+
+    /// <summary>
+    /// Startet die Aufnahme im eigenen Background-Thread.
+    /// Schreibt initiales meta.md mit Status "recording".
+    /// </summary>
+    public void Start(DateTimeOffset startedAt, string topic, string windowTitle);
+
+    /// <summary>
+    /// Stoppt die Aufnahme (CancellationToken-basiert).
+    /// Schreibt finale WAV-Files (mic.wav, loopback.wav) +
+    /// aktualisiert meta.md auf Status "recorded".
+    /// Gibt die Pfade zurück für TranscriptionWorker.
+    /// </summary>
+    public async Task<MeetingRecordingPaths> StopAsync();
+
+    /// <summary>
+    /// Force-Stop (User-Tray-Menu "Stop Recording" oder Crash).
+    /// Wie StopAsync, aber ohne 30-s-Debounce.
+    /// </summary>
+    public async Task<MeetingRecordingPaths> ForceStopAsync();
+}
+```
+
+**Buffer-Strategie:**
+
+- NAudio `DataAvailable`-Event sammelt Bytes in `List<byte>` (in-Memory)
+- Bei kurzen Meetings (< 1 h): komplett in RAM (~120 MB × 2 Streams = 240 MB max)
+- Bei langen Meetings: ggf. auf Ring-Buffer mit Disk-Spilling ausweichen (v0.4)
+- Beim Stop: `List<byte>.ToArray()` → `WaveFileWriter` schreibt einmalig WAV
+
+**Idempotenz:**
+- Doppelter `Start()` für gleiche `chatIdShort` → no-op (return existing Session)
+- `StopAsync()` ohne `Start()` → wirft `InvalidOperationException`
+- `ForceStopAsync()` während laufender Aufnahme → wie `StopAsync`, ohne Debounce
 
 ## 3. Audio-Devices in Settings auswählbar
 
@@ -337,32 +551,44 @@ Schlüssel für Persistenz. `FriendlyName` kann sich beim Replug ändern.
 
 **Entscheidung:** Eigene `meta.md` pro Meeting, **parallel** zu `mic.wav` und `loopback.wav`.
 
-### Initialer Inhalt (direkt nach Meeting-Start)
+### Initialer Inhalt (direkt nach Meeting-Start, Update 8)
+
+**Martin-Direktive 2026-07-07 Update 8:** _„Dann werden die Audio Dateien geschrieben
+und die md datei verlinkt beide."_
+
+`meta.md` wird beim **Recording-Start** (Status `recording`) und beim
+**Recording-Stop** (Status `recorded`) **zweistufig** geschrieben:
+
+**Stufe 1 — beim Start (Status `recording`):**
 
 ```markdown
 ---
+schema: ai-recall/meeting-recording/v1
 type: audio-meeting
-source: teams
-meetingId: a1b2c3d4
-started: 2026-07-07T09:00:00+02:00
-ended: 2026-07-07T09:45:00+02:00
-duration: 45m12s
+status: recording              # recording → recorded → transcribed (Update 8)
+meeting_id_short: a1b2c3d4
+started_at: 2026-07-07T22:00:00+02:00
+ended_at: null
+duration_seconds: null
 topic: Daily Standup
+trigger_source: polling         # Update 8 (Polling als Trigger-Quelle)
 mic_device: Microphone (Realtek High Definition Audio)
 loopback_device: Speakers (Realtek High Definition Audio)
 sample_rate: 16000
 bits_per_sample: 16
-transcript_status: pending        # pending | partial | done | failed
+audio_files: []                  # leer waehrend recording, befuellt beim Stop
+transcript_status: pending       # pending | partial | done | failed
 diarization: required
-provider: ""                       # azure-speech | deepgram | ... (nach Auswahl)
+provider: ""                     # azure-speech | deepgram (nach Worker-Auswahl)
 language: deu
-participants: []                   # leer in v0.3, gefüllt in v0.4 via Outlook-Kalender
-calendar_appointment_id: null      # null in v0.3, gefüllt in v0.4
+participants: []                 # leer in v0.3, gefuellt in v0.4 via Outlook-Kalender
+calendar_appointment_id: null    # null in v0.3, gefuellt in v0.4
+worker_task_enqueued: false      # Update 8: wird beim Recording-Stop auf true gesetzt
 ---
 
 # Meeting: Daily Standup
 
-**Aufnahme-Status:** läuft
+**Aufnahme-Status:** läuft seit 2026-07-07T22:00:00+02:00
 
 ## Teilnehmer
 
@@ -370,22 +596,124 @@ calendar_appointment_id: null      # null in v0.3, gefüllt in v0.4
 
 ## Audio-Files
 
-- Mikrofon: `mic.wav` (~22.5 MB)
-- Speaker-Loopback: `loopback.wav` (~22.5 MB)
+- *(Audio-Files werden beim Meeting-Ende geschrieben und hier verlinkt)*
 
 ## Transkription
 
 Wird im Hintergrund verarbeitet, sobald das Meeting beendet ist.
 ```
 
-### `transcript_status`-Lifecycle
+**Stufe 2 — beim Stop (Status `recorded`, Audio-Links verlinkt):**
 
-| Status | Wann | Bedeutung |
-| - | - | - |
-| `pending` | Direkt nach Meeting-Start | Aufnahme läuft, kein Transkript |
-| `partial` | Nach Meeting-Ende, Transcription-Worker hat begonnen | Worker arbeitet |
-| `done` | Transkription erfolgreich abgeschlossen | Transkriptions-Sektion vorhanden |
-| `failed` | Worker-Fehler (Provider-Down, File-Corruption) | Fehlertext in `## Transcription`-Sektion |
+```markdown
+---
+schema: ai-recall/meeting-recording/v1
+type: audio-meeting
+status: recorded                # recording → recorded → transcribed (Update 8)
+meeting_id_short: a1b2c3d4
+started_at: 2026-07-07T22:00:00+02:00
+ended_at: 2026-07-07T22:45:00+02:00
+duration_seconds: 2700
+topic: Daily Standup
+trigger_source: polling
+mic_device: Microphone (Realtek High Definition Audio)
+loopback_device: Speakers (Realtek High Definition Audio)
+sample_rate: 16000
+bits_per_sample: 16
+audio_files:                     # Update 8: verlinkt beim Recording-Stop
+  - mic.wav
+  - loopback.wav
+transcript_status: pending       # Aenderung folgt durch Worker
+diarization: required
+provider: ""                     # wird durch Worker befuellt
+language: deu
+participants: []
+calendar_appointment_id: null
+worker_task_enqueued: true       # Update 8: true nach Enqueue im TranscriptionWorker
+---
+
+# Meeting: Daily Standup
+
+**Aufnahme-Status:** beendet um 2026-07-07T22:45:00+02:00 (Dauer 45m)
+
+## Teilnehmer
+
+- (Liste wird in v0.4 per Outlook-Kalender-Lookup befüllt)
+
+## Audio-Files
+
+- Mikrofon: [`mic.wav`](mic.wav) (PCM 16 kHz Mono 16-bit, ~51,5 MB)
+- Speaker-Loopback: [`loopback.wav`](loopback.wav) (PCM 16 kHz Mono 16-bit, ~51,5 MB)
+
+## Transkription
+
+*(wird vom Background-Worker verarbeitet — diese MD-Datei wird automatisch gefunden und aktualisiert)*
+```
+
+### `status`-Lifecycle (Update 8)
+
+**Martin-Direktive 2026-07-07 Update 8:** _„Der background worker liest diese dann
+später ein und startet das transkript."_
+
+| Status | Wer setzt | Wann | Bedeutung |
+| - | - | - | - |
+| `recording` | `RecordingSession.Start` | Direkt nach Folder-Create + Initial-MD | Aufnahme läuft |
+| `recorded` | `RecordingSession.StopAsync` | Nach File-Write (mic.wav + loopback.wav) | Audio persistiert, bereit für Worker |
+| `transcribed` | `TranscriptionWorker` | Nach erfolgreicher Transkription | Transkriptions-Sektion vollständig |
+| `failed` | `TranscriptionWorker` | Bei Worker-Fehler (Provider-Down, File-Corruption) | Fehlertext in `## Transcription`-Sektion |
+
+**`worker_task_enqueued` (Update 8):**
+- `false` während `recording`
+- `true` ab `RecordingSession.StopAsync` nach Enqueue im `TranscriptionWorker`
+- `TranscriptionWorker` sucht beim Start nach allen `meta.md` mit
+  `status=recorded AND worker_task_enqueued=false` und enqueued diese als
+  Recovery nach Crash/Restart (Defensive Idempotenz)
+
+### Worker-Discovery (Update 8)
+
+Der `TranscriptionWorker` findet seine Tasks auf zwei Wegen:
+
+**Pfad 1 — Live-Enqueue (Hauptpfad):**
+- `RecordingSession.StopAsync` ruft direkt `TranscriptionWorker.Enqueue(task)`
+- Task wird sofort verarbeitet (wenn Worker-Slot frei)
+
+**Pfad 2 — Recovery-Scan (Crash-Recovery):**
+- Beim `TranscriptionWorker.StartAsync` (z. B. nach App-Restart)
+- Scannt `audio/yyyy-MM-dd/*/meta.md` rekursiv
+- Filter: `status=recorded AND worker_task_enqueued=false`
+- Enqueued alle gefundenen Tasks (Idempotenz über `worker_task_enqueued`)
+
+```csharp
+public sealed class TranscriptionWorker : IAsyncDisposable
+{
+    public async Task ScanForPendingRecordingsAsync(CancellationToken ct)
+    {
+        var audioRoot = _config.StorageRoot;     // "audio"
+        var pendingDirs = Directory.EnumerateDirectories(audioRoot, "*", SearchOption.AllDirectories)
+            .Where(dir => File.Exists(Path.Combine(dir, "meta.md")))
+            .Where(dir =>
+            {
+                var meta = ParseFrontmatter(Path.Combine(dir, "meta.md"));
+                return meta.Status == "recorded" && meta.WorkerTaskEnqueued == false;
+            });
+
+        foreach (var dir in pendingDirs)
+        {
+            var meta = ParseFrontmatter(Path.Combine(dir, "meta.md"));
+            Enqueue(new AudioTranscriptionTask(
+                Folder: dir,
+                MicPath: Path.Combine(dir, "mic.wav"),
+                LoopbackPath: Path.Combine(dir, "loopback.wav"),
+                MetadataPath: Path.Combine(dir, "meta.md"),
+                Options: BuildOptionsFromConfig(),
+                EnqueuedAt: DateTimeOffset.Now
+            ));
+            // Setze worker_task_enqueued=true (atomar mit Task-Enqueue)
+            await SetWorkerTaskEnqueuedFlagAsync(Path.Combine(dir, "meta.md"), ct);
+        }
+    }
+}
+```
 
 ## 5. Background-Worker für Transkription
 
@@ -761,12 +1089,18 @@ Aufnahme wird nur das initiale Frontmatter geschrieben.
 ## Komponenten-Plan
 
 ```
+src/AiRecall.Trigger/                       (NEU, Update 8)
+  MeetingPresencePoller.cs                  # Polling-Loop (5s) auf TeamsAppReader
+  MeetingPresenceStateChangedEventArgs.cs   # Polling-Edge-Event
+
 src/AiRecall.Core/Audio/                    (NEU)
   IAudioRecorder.cs
   WasapiAudioRecorder.cs                    # NAudio-basierte Implementierung
   IAudioDeviceProvider.cs
   AudioDeviceProvider.cs                    # MMDeviceEnumerator-Wrapper
   AudioDeviceInfo.cs                        # record
+  RecordingSession.cs                       # NEU (Update 8): eigener Thread + Stop + File-Write
+  MeetingRecordingPaths.cs                  # NEU (Update 8): Folder + WAV-Pfade
   StereoConcatenator.cs                     # Mono + Mono → Stereo (Update 6, ersetzt MonoMixer aus Update 5)
 
 src/AiRecall.Core/Transcription/            (NEU)
@@ -777,13 +1111,16 @@ src/AiRecall.Core/Transcription/            (NEU)
   TranscriptionProgress.cs
   TranscriptionQueue.cs                     # Channel<>-Wrapper
 
-src/AiRecall.AppReader.Teams/               (ERWEITERT, Spec 0011)
-  TeamsAppReader.cs                         # +MeetingStateChanged-Event + IsActive-Tracking
-  MeetingStateChangedEventArgs.cs           # NEU
+src/AiRecall.AppReader.Teams/               (ERWEITERT, Spec 0011 + Update 8)
+  TeamsAppReader.cs                         # +TryGetActiveMeetingAsync (Update 8) + MeetingStateChanged-Event
+  MeetingPresenceSnapshot.cs                # NEU (Update 8): Sync-Snapshot fuer Polling
+  MeetingStateChangedEventArgs.cs           # bestehend aus Spec 0011/Update 2
 
 src/AiRecall.Conversion/Transcription/      (NEU)
-  TranscriptionWorker.cs                    # analog ConversionWorker
+  TranscriptionWorker.cs                    # analog ConversionWorker + ScanForPendingRecordings (Update 8)
   AudioTranscriptionTask.cs
+  MetaMdLifecycleManager.cs                 # NEU (Update 8): status-Updates + Audio-Links
+  MetaMdFrontmatter.cs                      # NEU (Update 8): record
   # SpeakerRoleAssigner und SpeakerRoleMap ENTFALLEN (Update 5: Provider macht Diarization)
 
 src/AiRecall.TrayApp/Audio/                 (NEU)
@@ -804,7 +1141,13 @@ src/AiRecall.TrayApp/Transcription/         (NEU)
 - `src/AiRecall.Trigger/MeetingDetector/TeamsMeetingDetector.cs`
 - `src/AiRecall.Trigger/MeetingDetector/MeetingEvent.cs`
 
-Diese Funktionalität ist jetzt vollständig in `TeamsAppReader` (Spec 0011).
+Diese Funktionalität ist jetzt vollständig in `TeamsAppReader` (Spec 0011) +
+`MeetingPresencePoller` (Update 8).
+
+**Verworfen (gegenüber Update 2):**
+- Event-driven `MeetingStateChanged` als v0.3-Trigger → ersetzt durch Polling
+  (Update 8), Event bleibt im Code, wird in v0.3 NICHT vom `TriggerSupervisor`
+  abonniert
 
 ## Konfiguration — Übersicht
 
@@ -824,6 +1167,7 @@ Diese Funktionalität ist jetzt vollständig in `TeamsAppReader` (Spec 0011).
 | `transcription` | `maxSpeakers` | `8` | Cap gegen Endlos-Splits |
 | `appReader.teams` | `autoRecordMeetings` | `true` | Trigger-Switch |
 | `appReader.teams` | `minMeetingDurationSeconds` | `30` | Mindestlänge, sonst verworfen |
+| `appReader.teams` | `presencePollIntervalSeconds` | `5` | Update 8: Polling-Intervall für MeetingPresencePoller |
 
 ## Tests (TDD-Plan, Ziel MVP 3: +X Tests, aktuell 674)
 
@@ -851,8 +1195,29 @@ Diese Funktionalität ist jetzt vollständig in `TeamsAppReader` (Spec 0011).
 8. **SettingsDialog-Audio-Tab-Tests** (~5)
    - Device-Liste, Test-Button (auch bei `audio.enabled=false`),
      Validation, Save-Reload
+9. **MeetingPresencePoller-Tests (Update 8)** (~6)
+   - Polling-Loop feuert `PresenceChanged` bei Edge-Detection (false→true, true→false)
+   - Kein Event bei stabilem Zustand (alle 5 s „true" → kein erneutes Event)
+   - Polling-Intervall wird korrekt eingehalten (FakeTimer)
+   - Exception in `TeamsAppReader` wird gefangen, Loop läuft weiter
+   - StopAsync bricht Loop sauber ab
+   - Mehrere Edge-Wechsel in Folge feuern mehrere Events
+10. **RecordingSession-Tests (Update 8)** (~7)
+    - Start erstellt Meeting-Folder + initiale `meta.md` mit Status `recording`
+    - Stop schreibt finale WAV-Files + setzt Status `recorded` + `audio_files`-Liste
+    - Buffer-Sammlung: simulierte Audio-Bytes landen in korrekten Files
+    - Force-Stop ohne Debounce (auch innerhalb 30 s)
+    - Doppelter Start für gleiche `chatIdShort` → no-op (Idempotenz)
+    - StopAsync ohne Start → `InvalidOperationException`
+    - Dispose bricht laufende Aufnahme ab und gibt Resourcen frei
+11. **MetaMdLifecycleManager-Tests (Update 8)** (~5)
+    - Status-Übergang `recording` → `recorded` schreibt korrektes Frontmatter
+    - Audio-Links werden beim `recorded`-Übergang eingefügt
+    - `worker_task_enqueued`-Flag wird atomar mit Task-Enqueue gesetzt
+    - Recovery-Scan findet alle `status=recorded AND worker_task_enqueued=false` Tasks
+    - Idempotenz: doppeltes Enqueue für gleichen Task wird verhindert
 
-Total: ~91 neue Tests (Ziel MVP 3 v0.3: 674 → **~765**)
+Total: ~109 neue Tests (Ziel MVP 3 v0.3: 674 → **~783**)
 
 ## TBD / Offene Punkte (Martin-Entscheidung)
 
@@ -876,6 +1241,8 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
 | 6 | Encryption at Rest | **Keine App-seitige Verschlüsselung** (OS-Bitlocker/EFS ausreichend) |
 | 7 | Kalender-Integration | **Ausbaustufe v0.4, erst nach v0.3-Abnahme** (Outlook-Kalender-Suche, Teilnehmer/Title/Description übernehmen) |
 | 8 | Trigger-Robustheit | **Akzeptable-Lücken in v0.3** (Teams-Reload / Network-Drop = Recording stoppt, kein Re-Init) |
+| 9 | Meeting-Ende-Erkennung (Update 8) | **Polling alle 5 s** (`MeetingPresencePoller`) — Edge-Detection, Event nur bei Zustandswechsel |
+| 10 | Recording-Lifecycle (Update 8) | **Eigener Thread + Stop-Signal via CancellationToken + MD-Stub beim Stop mit Audio-Links + Worker liest MD-Stub später** |
 
 ## Nicht-Ziele (MVP 3 explizit ausschließen)
 
@@ -898,6 +1265,60 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
 - `specs/0012-tessdata-first-run.md` — Modal-Dialog-Stil (nicht direkt relevant)
 
 ## Update-Log
+
+- **2026-07-07 (Update 8, nach Martin-Feedback)** — **„Es muss auch automatisch
+  erkannt werden, wann ein Meeting endet, um die Aufnahme zu stoppen.
+  Generell sollte die Aufnahme in einem eigenen thread laufen, bis das
+  stopp Signal kommt. Dann werden die Audio Dateien geschrieben und die
+  md datei verlinkt beide. Der background worker liest diese dann später
+  ein und startet das transkript. Um das Meeting ende zu erkennen muss
+  regelmäßig nach dem Meeting Fenster gesucht werden."**
+
+  Architektonische Erweiterung um **Polling-basierte Anwesenheitserkennung**
+  + **Recording-Lifecycle mit eigenem Thread + Stop-Signal + MD-Stub-Pattern**.
+
+  **Was neu ist:**
+  - **§1 erweitert um „Polling-basierte Meeting-Anwesenheitserkennung"** —
+    Neuer `MeetingPresencePoller` in `src/AiRecall.Trigger/` ruft alle 5 s
+    `TeamsAppReader.TryGetActiveMeetingAsync()` auf und feuert `PresenceChanged`
+    bei Edge-Detection (false→true = Started, true→false = Ended). Polling
+    ist **alleinige Quelle** für Start/Stop in v0.3; Event-driven
+    `MeetingStateChanged` aus Spec 0011/Update 2 bleibt im Code, wird aber
+    NICHT vom `TriggerSupervisor` abonniert. Selbst-heilend, robust gegen
+    verlorene Events (Teams-Reload, Network-Drop, UI-Crash).
+  - **§2 erweitert um „Recording-Lifecycle (Eigener Thread + Stop-Signal)"** —
+    Threading-Modell dokumentiert: NAudio-Capture-Thread ×2 +
+    Recording-Coordinator-Thread (eigener Background-Task via `Task.Run`).
+    Stop-Signal via `CancellationToken`, kein Thread.Abort. Beim Stop:
+    Buffer-Snapshots erstellen → `mic.wav` + `loopback.wav` schreiben →
+    `meta.md` Status `recorded` mit `audio_files`-Links setzen.
+    Neue Komponente `RecordingSession` in `src/AiRecall.Core/Audio/`.
+  - **§4 erweitert um Status-Lifecycle** — Neue Status-Werte
+    `recording` → `recorded` → `transcribed` → `failed`. `meta.md` wird
+    zweistufig geschrieben: Stufe 1 beim Start (`recording`, leere
+    `audio_files`), Stufe 2 beim Stop (`recorded`, `audio_files` befüllt
+    mit `mic.wav` + `loopback.wav`). Neues Frontmatter-Feld
+    `worker_task_enqueued` für Recovery-Scan nach Crash.
+  - **§5 erweitert um „Worker-Discovery"** — TranscriptionWorker findet
+    seine Tasks auf zwei Wegen: Pfad 1 Live-Enqueue beim Stop,
+    Pfad 2 Recovery-Scan beim Worker-Start für `status=recorded AND
+    worker_task_enqueued=false`. Idempotenz via atomarem Flag-Set.
+    Neue Komponente `MetaMdLifecycleManager` in `src/AiRecall.Conversion/Transcription/`.
+  - **Komponenten-Plan erweitert** — `MeetingPresencePoller`,
+    `MeetingPresenceStateChangedEventArgs`, `RecordingSession`,
+    `MeetingRecordingPaths`, `MetaMdLifecycleManager`, `MetaMdFrontmatter`,
+    `MeetingPresenceSnapshot`.
+  - **Tests-Plan erweitert** — ~18 neue Tests (Polling-Loop, Recording-Session,
+    MetaMdLifecycle), gesamt jetzt ~109 neue Tests, Ziel 674 → ~783.
+
+  **Was bleibt unverändert:**
+  - Stereo-Concatenation (Update 6/7)
+  - RMS-Analyse gestrichen (Update 5)
+  - Rohe Provider-Speaker-IDs im Output (Update 5)
+  - Beide Provider Azure Speech + Deepgram parallel (Update 3)
+  - v0.4 Outlook-Kalender nach v0.3-Abnahme (Update 3)
+
+  **Martin-Direktiven-Status:** 10 Direktiven (1-10) abgehakt.
 
 - **2026-07-07 (Update 7, nach Martin-Feedback)** — **„Azure speech auch mit stereo nutzen."**
   Annahme „Azure Speech downmixt intern auf Mono" aus Update 6 entfernt.
