@@ -18,6 +18,18 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 7. Diarization als Pflicht
 8. Transkription in MD-Datei (analog OCR-Pattern aus Spec 0007 / Bug-Bash I-17)
 
+**Update 4 (2026-07-07, später):** Martin-Direktive _„Beachte, dass der
+background worker auch parallel multi tasking laufen kann. Also kein
+fixer dateiname im temp ordner"_ → Stereo-Concatenation als Pre-Processing
+vor ASR-Call. `combined-stereo.wav` wird im **Meeting-Ordner** abgelegt
+(pro Task eindeutig, kein OS-Temp-Fix-Name) — keine Collision bei
+parallelen Worker-Tasks. Plus Frage _„Wie wird das Transkript
+zusammengefügt?"_ → **Cross-Channel-Correlation (RMS-Verhältnis)**
+mappt Provider-Speaker-IDs auf Local/Remote-N. Neue Komponenten
+`StereoConcatenator` + `SpeakerRoleAssigner`. Datenmodell erweitert um
+`LocalSpeakerId`/`RemoteSpeakerIds`/`SpeakerRoleMap`. ~18 neue Tests
+(Stereo + RMS-Correlation).
+
 **Update 3 (2026-07-07, später):** Martin-Direktive _„Beide provider
 implementieren. Auswahl in settingsdialog."_ → **Beide Provider werden
 parallel implementiert** (Azure Speech via SDK, Deepgram via REST),
@@ -53,7 +65,8 @@ Kalender-Lookup (v0.4).
 | 10 | Diarization | **Pflicht, nicht optional** | Martin-Direktive 2026-07-07 (implizit aus Punkt 7). Provider ohne Diarization werden vom Worker abgelehnt → `transcript_status: failed`. **Sowohl Azure Speech als auch Deepgram liefern Diarization nativ** — keine Custom-Modelle nötig. |
 | 11 | Speaker-Labels | **„S1", „S2", ... (anonyme IDs)** in v0.3 | Reale Namen-Mapping als v0.4 über Outlook-Kalender-Lookup + Contact-Match (siehe Punkt 13). |
 | 12 | Transcription-Provider (Auswahl) | **Beide implementiert** — Azure Speech + Deepgram parallel, Auswahl via `TranscriptionConfig.Provider` im Settings-Dialog (Tab „Transcription") | Martin-Direktive 2026-07-07 Update 3 (Punkt 1: „Beide provider implementieren. Auswahl in settingsdialog"). Azure Speech via `Microsoft.CognitiveServices.Speech` SDK, Deepgram via REST + `HttpClient`. Beide Cloud, beide mit nativer Diarization. Azure ~$1/h, Deepgram ~$0.26/h (Pay-as-you-go). Provider-Key in `TranscriptionConfig.ProviderApiKey` als Klartext in `%APPDATA%` (siehe Punkt 6). |
-| 13 | Outlook-Kalender-Integration | **Ausbaustufe v0.4** — NICHT v0.3 | Martin-Direktive 2026-07-07 (Punkt 7: „ausbaustufe: im outlook kalender einem teams termin zur aktuellen uhrzeit suchen und termin-metadaten übernehmen"). v0.3 befüllt nur `topic` (aus Title-Parser); v0.4 ergänzt `participants`, `description`, `calendar_appointment_id`, `organizer` per Outlook-COM-Suche. Architektur-Vorbereitung in v0.3 durch optional befüllbare `MeetingMetadata`-Felder in der MD-Frontmatter. |
+| 13 | Outlook-Kalender-Integration | **Ausbaustufe v0.4, nach v0.3-Abnahme** | Martin-Direktive 2026-07-07 (Punkt 7: „ausbaustufe") + Update 3 („V0.4 erst nach 0.3"). v0.3 befüllt nur `topic` (aus Title-Parser); v0.4 ergänzt `participants`, `description`, `calendar_appointment_id`, `organizer` per Outlook-COM-Suche. Architektur-Vorbereitung in v0.3 durch optional befüllbare `MeetingMetadata`-Felder in der MD-Frontmatter. |
+| 14 | Stereo-Concatenation + RMS-Cross-Channel-Correlation (Update 4) | **Stereo-File im Meeting-Ordner** (nicht OS-Temp) + **RMS-Verhältnis** für Local/Remote-Mapping | Martin-Direktive 2026-07-07 Update 4: (a) „kein fixer dateiname im temp ordner" → `combined-stereo.wav` im Meeting-Ordner, pro Task eindeutig. (b) Frage „wie wird das Transkript zusammengefügt?" → Cross-Channel-Correlation: `r(w) = RMS_mic / (RMS_mic + RMS_loopback + ε)` pro 100 ms-Fenster. Speaker mit höchstem avg-r → „Local", andere → „Remote-N". Datenmodell erweitert um `LocalSpeakerId`/`RemoteSpeakerIds`/`SpeakerRoleMap`. |
 
 ### Martin-Direktiven 2026-07-07 (Übersicht)
 
@@ -70,6 +83,8 @@ Kalender-Lookup (v0.4).
 | I | Trigger-Robustheit | „erst mal egal" | Teams-Reload/Network-Drop = Recording stoppt; kein Re-Init in v0.3 |
 | J | Provider-Implementierung (Update 3) | „Beide provider implementieren" | Azure Speech + Deepgram parallel implementiert; Auswahl via Settings-Dialog |
 | K | v0.4 Roadmap (Update 3) | „V0.4 erst nach 0.3" | Outlook-Kalender-Integration explizit nach v0.3-Abnahme verschoben, nicht parallel |
+| L | Concurrency / Multi-Task (Update 4) | „parallel multi tasking … kein fixer dateiname im temp ordner" | `combined-stereo.wav` im Meeting-Ordner (nicht OS-Temp); pro Task eindeutig, keine Collision |
+| M | Speaker-Role-Mapping (Update 4) | „Wie wird das Transkript zusammengefügt?" | Stereo-File-Concatenation + Cross-Channel-Correlation (RMS-Verhältnis) → Provider-Speaker-IDs werden auf Local/Remote-N gemappt |
 
 ### Verworfen / Out-of-Scope v0.3
 
@@ -90,7 +105,7 @@ Kalender-Lookup (v0.4).
 
 ### Offene Punkte für Martin (verbleibend)
 
-**Keine offenen Punkte mehr.** Alle Martin-Direktiven 2026-07-07 (Update 1-3) sind in Spec 0013 v0.3 angewandt:
+**Keine offenen Punkte mehr.** Alle Martin-Direktiven 2026-07-07 (Update 1-4) sind in Spec 0013 v0.3 angewandt:
 
 | # | Direktive | Status |
 | - | - | - |
@@ -105,6 +120,8 @@ Kalender-Lookup (v0.4).
 | I | Trigger-Robustheit: egal | ✅ Teams-Reload stoppt Recording, kein Re-Init in v0.3 |
 | J | Beide Provider implementieren | ✅ Azure Speech + Deepgram parallel |
 | K | v0.4 nach v0.3 | ✅ Explizit nach v0.3-Abnahme, nicht parallel |
+| L | Multi-Task Concurrency (Update 4) | ✅ Stereo-File im Meeting-Ordner, nicht OS-Temp |
+| M | Speaker-Role-Mapping (Update 4) | ✅ Stereo-Concatenation + RMS-Cross-Channel-Correlation |
 
 ### Folge-Cluster (v0.4+, erst nach v0.3-Abnahme — Martin-Direktive Update 3)
 
@@ -116,7 +133,7 @@ Kalender-Lookup (v0.4).
 
 ### Tests
 
-- TDD-Plan in Spec 0013 §Tests: ~91 neue Tests (Ziel: 674 → ~765)
+- TDD-Plan in Spec 0013 §Tests: ~109 neue Tests (Ziel: 674 → ~783)
 - AudioRecorder (15), AudioDeviceProvider (8),
   **Teams-App-Reader-Erweiterung** (8, ersetzt MeetingDetector-Tests),
   **TriggerSupervisor-Audio-Wiring** (6, neu), TranscriptionWorker (12),
