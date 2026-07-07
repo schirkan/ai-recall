@@ -409,9 +409,9 @@ Channel<AudioTranscriptionTask>
    ▼
 TranscriptionWorker (Background-Task, max. N parallel)
    │
-   ├─ MonoMixer.Mix(mic, loopback) ──▶ combined-mono.wav  (transient)
+   ├─ StereoConcatenator.Concatenate(mic, loopback) ──▶ combined-stereo.wav  (transient)
    │
-   ├─ ITranscriptionProvider.TranscribeAsync(combined-mono.wav, ...)
+   ├─ ITranscriptionProvider.TranscribeAsync(combined-stereo.wav, ...)
    │       (Azure Speech oder Deepgram, Diarization im Provider)
    │
    ├─ MetadataUpdater.FinalizeAsync(meta.md, result)
@@ -483,7 +483,7 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - **Endpoint**: `https://{region}.api.cognitive.microsoft.com/`
 - **Auth**: API-Key im Header `Ocp-Apim-Subscription-Key`
 - **API-Call**: `SpeechConfig.FromSubscription(key, region)` →
-  `AudioConfig.FromWavFileInput(combinedMonoPath)` (siehe §5.4 Mono-Mix) →
+  `AudioConfig.FromWavFileInput(combinedStereoPath)` (siehe §5.4 Stereo-Concatenation) →
   `SpeechRecognizer.RecognizeOnceAsync()` mit `SpeakerDiarization` enabled
 - **Response-Format**: `SpeechRecognitionResult` mit `SpeakerId` pro Word
 - **Segmentierung**: Gruppierung aufeinanderfolgender Words mit gleichem `SpeakerId`
@@ -495,7 +495,7 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - **Endpoint**: `https://api.deepgram.com/v1/listen`
 - **Auth**: API-Key im Header `Authorization: Token {key}`
 - **Query-Params**: `model=nova-2`, `language={lang}`, `diarize=true`, `smart_format=true`
-- **Request-Body**: `combined-mono.wav` als Multipart-File (siehe §5.4 Mono-Mix)
+- **Request-Body**: `combined-stereo.wav` als Multipart-File (siehe §5.4 Stereo-Concatenation)
 - **Response-Format**: JSON mit `results.utterances[]` (jedes Utterance hat `speaker`, `start`, `end`, `transcript`)
 - **Fehler**: HTTP 401 → Invalid-Key-Marker; HTTP 429 → Rate-Limit-Backoff
 
@@ -506,17 +506,29 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - DeepgramTranscriptionProvider-Tests (~8): Mock-HTTP-Response, Utterance-Parse, Fehler-Pfade, Retry
 - SettingsDialog-Transcription-Tab-Tests (~5): Provider-Liste, Test-Connection-Button, Validation, Save-Reload
 
-### §5.4 Mono-Mix (Provider-Audio-Input, Multi-Task-tauglich)
+### §5.4 Stereo-Concatenation (Multi-Task-tauglich, beide Kanäle erhalten)
 
 **Martin-Direktive 2026-07-07 Update 4:** _„Beachte, dass der background worker
 auch parallel multi tasking laufen kann. Also kein fixer dateiname im temp ordner."_
 **Martin-Direktive 2026-07-07 Update 5:** _„Streiche das rms. Diarization macht der Provider."_
+**Martin-Direktive 2026-07-07 Update 6:** _„Nutze weiterhin stereo mit beiden Kanälen."_
 
-**Architektur:** Vor dem ASR-Call werden `mic.wav` und `loopback.wav` zu
-**Mono gemischt** (sample-weise Summe, geclippt auf [-1, 1]). Der
-kombinierte Mono-Stream ist der einzige Audio-Input für den Provider;
-**Diarization läuft komplett im Provider**, wir machen auf unserer Seite
-keine Speaker-Analyse.
+**Architektur:** Vor dem ASR-Call werden `mic.wav` (Mono) und `loopback.wav`
+(Mono) zu **einem Stereo-WAV kombiniert** (links = mic, rechts = loopback).
+Der kombinierte Stereo-Stream ist der einzige Audio-Input für den Provider;
+**Diarization läuft komplett im Provider** (Azure Speech oder Deepgram),
+wir machen **keine eigene Speaker-Analyse**.
+
+**Begründung Stereo (statt Mono-Mix):**
+- **Beide Kanäle bleiben erhalten** für Storage-Flexibilität (z. B. späteres
+  Per-Channel-Re-Transkribieren, Audio-Pre-Processing auf Mic vs. Loopback,
+  Debugging wenn Diarization schlecht ist)
+- **Deepgram** kann Multi-Channel-Audio mit Diarization verarbeiten
+  (`multichannel=true`-Parameter, pro Channel separate Diarization)
+- **Azure Speech** downmixt intern auf Mono und diariziert auf der Summe
+  (kein Stereo-Vorteil, aber auch kein Nachteil)
+- v0.4-Mitigationen (VAD, Echo-Cancellation) können auf Stereo-Daten
+  aufsetzen, ohne Recording-Format zu ändern
 
 **File-Layout pro Meeting:**
 
@@ -524,12 +536,12 @@ keine Speaker-Analyse.
 %APPDATA%/AiRecall/audio/yyyy-MM-dd/HHmmss-{meetingIdShort}/
   mic.wav                       # dauerhaft persistiert
   loopback.wav                  # dauerhaft persistiert
-  combined-mono.wav             # transient, gelöscht nach Transkription
+  combined-stereo.wav           # transient, gelöscht nach Transkription
   meta.md                       # dauerhaft persistiert
 ```
 
-**Lifecycle von `combined-mono.wav`:**
-- **Create** im Meeting-Ordner vor ASR-Call (Worker mischt Mono → Mono)
+**Lifecycle von `combined-stereo.wav`:**
+- **Create** im Meeting-Ordner vor ASR-Call (Worker concat Mono → Stereo)
 - **Delete** nach erfolgreicher Transkription (im `finally`-Block des Worker-Tasks)
 - **Keep on Failure** bei Worker-Fehler (Debug-Evidence) — User löscht manuell oder
   Cleanup-Job räumt nach 7 Tagen auf
@@ -542,16 +554,16 @@ keine Speaker-Analyse.
 **Algorithmus (Pseudo-Code):**
 
 ```csharp
-public sealed class MonoMixer
+public sealed class StereoConcatenator
 {
     /// <summary>
     /// Liest mic.wav (Mono) und loopback.wav (Mono), schreibt
-    /// combined-mono.wav (Mono: Summe beider Samples, geclippt) in den
+    /// combined-stereo.wav (Stereo: links=mic, rechts=loopback) in den
     /// selben Meeting-Ordner.
     /// </summary>
-    public string Mix(MeetingRecordingPaths paths)
+    public string Concatenate(MeetingRecordingPaths paths)
     {
-        var monoPath = Path.Combine(paths.Folder, "combined-mono.wav");
+        var stereoPath = Path.Combine(paths.Folder, "combined-stereo.wav");
         using var mic = new WaveFileReader(paths.MicPath);
         using var loop = new WaveFileReader(paths.LoopbackPath);
 
@@ -563,8 +575,8 @@ public sealed class MonoMixer
         if (mic.SampleCount != loop.SampleCount)
             throw new InvalidOperationException($"Length mismatch: mic={mic.SampleCount}, loop={loop.SampleCount}");
 
-        var monoFormat = WaveFormat.CreateIeeeFloatWaveFormat(mic.WaveFormat.SampleRate, 1);
-        using var writer = new WaveFileWriter(monoPath, monoFormat);
+        var stereoFormat = WaveFormat.CreateIeeeFloatWaveFormat(mic.WaveFormat.SampleRate, 2);
+        using var writer = new WaveFileWriter(stereoPath, stereoFormat);
 
         var micBuf = new float[mic.WaveFormat.SampleRate / 10];   // 100 ms chunks
         var loopBuf = new float[mic.WaveFormat.SampleRate / 10];
@@ -574,22 +586,23 @@ public sealed class MonoMixer
             loop.Read(loopBuf, 0, read);
             for (int i = 0; i < read; i++)
             {
-                // Summe beider Kanäle, geclippt auf [-1, 1] (verhindert Clipping-Artefakte)
-                float mixed = Math.Clamp(micBuf[i] + loopBuf[i], -1f, 1f);
-                writer.WriteSample(mixed);
+                // Left = mic, Right = loopback
+                writer.WriteSample(micBuf[i]);
+                writer.WriteSample(loopBuf[i]);
             }
         }
-        return monoPath;
+        return stereoPath;
     }
 }
 ```
 
-**Mono-Mix-Tests (~5):**
-- Mix_ValidMonoFiles_ProducesMono (Format-Validation)
-- Mix_SampleRateMismatch_Throws
-- Mix_LengthMismatch_Throws
-- Mix_SumAndClip_PreventsClippingArtifacts (z. B. mic=0.7 + loop=0.7 → mixed=1.0, nicht 1.4)
-- Mix_ParallelTasks_NoFilenameCollision (zwei parallele Tasks auf
+**Stereo-Concatenation-Tests (~6):**
+- Concatenate_ValidMonoFiles_ProducesStereo (Format-Validation: 2 Kanäle, korrekte Sample-Rate)
+- Concatenate_SampleRateMismatch_Throws
+- Concatenate_ChannelsMismatch_Throws
+- Concatenate_LengthMismatch_Throws
+- Concatenate_PreservesAudioContent (Bit-genau-Round-Trip-Test: Left-Channel = mic, Right-Channel = loopback)
+- Concatenate_ParallelTasks_NoFilenameCollision (zwei parallele Tasks auf
   unterschiedlichen Meeting-Ordnern, kein File-Lock-Error)
 
 ### Provider-Interface
@@ -746,7 +759,7 @@ src/AiRecall.Core/Audio/                    (NEU)
   IAudioDeviceProvider.cs
   AudioDeviceProvider.cs                    # MMDeviceEnumerator-Wrapper
   AudioDeviceInfo.cs                        # record
-  MonoMixer.cs                              # Mono + Mono → Mono (Update 5, vorher StereoConcatenator)
+  StereoConcatenator.cs                     # Mono + Mono → Stereo (Update 6, ersetzt MonoMixer aus Update 5)
 
 src/AiRecall.Core/Transcription/            (NEU)
   ITranscriptionProvider.cs
@@ -878,6 +891,14 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
 
 ## Update-Log
 
+- **2026-07-07 (Update 6, nach Martin-Feedback)** — **„Nutze weiterhin stereo mit beiden Kanälen."**
+  §5.4 von Mono-Mix (Update 5) zurück auf Stereo-Concatenation.
+  `MonoMixer` ersetzt durch `StereoConcatenator`, `combined-mono.wav`
+  ersetzt durch `combined-stereo.wav`. Beide Kanäle bleiben erhalten
+  (Deepgram kann Multi-Channel-Diarization nutzen, Azure Speech downmixt
+  intern). RMS-Analyse bleibt gestrichen (Update 5 unverändert gültig).
+  Storage-Flexibilität für v0.4 (Per-Channel-Re-Transkription,
+  Audio-Pre-Processing) ohne Recording-Format-Change.
 - **2026-07-07 (Update 5, nach Martin-Feedback)** — **„Streiche das rms. Diarization macht der Provider."**
   Komplette Vereinfachung: §5.5 Cross-Channel-Correlation (RMS) ersatzlos
   gestrichen. §5.4 von Stereo-Concatenation auf Mono-Mix reduziert
@@ -887,6 +908,7 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
   zeigt rohe Provider-Speaker-IDs (S0, S1, S2). Komponenten
   `SpeakerRoleAssigner`/`SpeakerRoleMap`/`StereoConcatenator` entfernt,
   ersetzt durch `MonoMixer`. Test-Plan von ~109 zurück auf ~91 Tests.
+  **§5.4-Mono-Mix-Teil in Update 6 zurückgenommen auf Stereo.**
 - **2026-07-07 (Update 4, nach Martin-Feedback)** — Stereo-Concatenation als
   Pre-Processing vor ASR-Call. `combined-stereo.wav` wird im Meeting-Ordner
   abgelegt (nicht im OS-Temp), pro Task eindeutig — Martin-Direktive
