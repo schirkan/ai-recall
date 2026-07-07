@@ -485,8 +485,13 @@ Response. Funktioniert unabhängig von `transcription.enabled`.
 - **API-Call**: `SpeechConfig.FromSubscription(key, region)` →
   `AudioConfig.FromWavFileInput(combinedStereoPath)` (siehe §5.4 Stereo-Concatenation) →
   `SpeechRecognizer.RecognizeOnceAsync()` mit `SpeakerDiarization` enabled
-- **Response-Format**: `SpeechRecognitionResult` mit `SpeakerId` pro Word
-- **Segmentierung**: Gruppierung aufeinanderfolgender Words mit gleichem `SpeakerId`
+- **Stereo-Handling** (Update 7): verarbeitet Stereo nativ, **kein interner Downmix**.
+  Response enthält `ChannelId` pro Segment zusätzlich zu `SpeakerId`
+  (Channel 0 = mic, Channel 1 = loopback). Wir mergen Channel+Speaker
+  zu einem kombinierten Label im Output (z. B. „C0-S1" für Channel 0 / Speaker 1)
+- **Response-Format**: `SpeechRecognitionResult` mit `ChannelId` + `SpeakerId` pro Word
+- **Segmentierung**: Gruppierung aufeinanderfolgender Words mit gleichem
+  `(ChannelId, SpeakerId)`-Tupel
 - **Fehler**: HTTP 401 → Invalid-Key-Marker; HTTP 429 → Rate-Limit-Backoff
 
 #### Deepgram
@@ -523,10 +528,13 @@ wir machen **keine eigene Speaker-Analyse**.
 - **Beide Kanäle bleiben erhalten** für Storage-Flexibilität (z. B. späteres
   Per-Channel-Re-Transkribieren, Audio-Pre-Processing auf Mic vs. Loopback,
   Debugging wenn Diarization schlecht ist)
-- **Deepgram** kann Multi-Channel-Audio mit Diarization verarbeiten
-  (`multichannel=true`-Parameter, pro Channel separate Diarization)
-- **Azure Speech** downmixt intern auf Mono und diariziert auf der Summe
-  (kein Stereo-Vorteil, aber auch kein Nachteil)
+- **Beide Provider (Azure Speech + Deepgram) bekommen das gleiche
+  `combined-stereo.wav` als Input** — keine Provider-spezifischen
+  Pre-Processing-Pfade, keine Mono-Konvertierung auf unserer Seite
+- **Deepgram** verarbeitet Stereo mit `multichannel=true`-Parameter
+  (pro Channel separate Diarization, kanalspezifische Speaker-IDs)
+- **Azure Speech** verarbeitet Stereo nativ (kein interner Downmix);
+  Response enthält `ChannelId` pro Segment zusätzlich zu `SpeakerId`
 - v0.4-Mitigationen (VAD, Echo-Cancellation) können auf Stereo-Daten
   aufsetzen, ohne Recording-Format zu ändern
 
@@ -891,6 +899,14 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
 
 ## Update-Log
 
+- **2026-07-07 (Update 7, nach Martin-Feedback)** — **„Azure speech auch mit stereo nutzen."**
+  Annahme „Azure Speech downmixt intern auf Mono" aus Update 6 entfernt.
+  Azure Speech verarbeitet das Stereo-File nativ (kein Downmix auf
+  unserer Seite), Response enthält `ChannelId` zusätzlich zu `SpeakerId`.
+  Beide Provider (Azure + Deepgram) bekommen das gleiche
+  `combined-stereo.wav` — keine Provider-spezifischen Pre-Processing-Pfade.
+  Output-MD-Format nutzt jetzt kombinierte Channel-Speaker-Labels
+  (z. B. „C0-S1" für Channel 0 / Speaker 1) für Azure-Response.
 - **2026-07-07 (Update 6, nach Martin-Feedback)** — **„Nutze weiterhin stereo mit beiden Kanälen."**
   §5.4 von Mono-Mix (Update 5) zurück auf Stereo-Concatenation.
   `MonoMixer` ersetzt durch `StereoConcatenator`, `combined-mono.wav`

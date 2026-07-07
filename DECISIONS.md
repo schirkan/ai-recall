@@ -18,6 +18,15 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 7. Diarization als Pflicht
 8. Transkription in MD-Datei (analog OCR-Pattern aus Spec 0007 / Bug-Bash I-17)
 
+**Update 7 (2026-07-07, später):** Martin-Direktive _„Azure speech auch
+mit stereo nutzen."_ → Annahme „Azure Speech downmixt intern auf Mono"
+aus Update 6 entfernt. Azure Speech verarbeitet das Stereo-File nativ
+(kein Downmix auf unserer Seite), Response enthält `ChannelId` zusätzlich
+zu `SpeakerId`. Beide Provider (Azure + Deepgram) bekommen das gleiche
+`combined-stereo.wav` — keine Provider-spezifischen Pre-Processing-Pfade.
+Output-MD nutzt kombinierte Channel-Speaker-Labels (z. B. „C0-S1"
+für Channel 0 / Speaker 1) für Azure-Response.
+
 **Update 6 (2026-07-07, später):** Martin-Direktive _„Nutze weiterhin
 stereo mit beiden Kanälen."_ → §5.4 von Mono-Mix (Update 5) zurück auf
 Stereo-Concatenation. `MonoMixer` ersetzt durch `StereoConcatenator`,
@@ -108,6 +117,7 @@ Kalender-Lookup (v0.4).
 | L | Concurrency / Multi-Task (Update 4) | „parallel multi tasking … kein fixer dateiname im temp ordner" | `combined-stereo.wav` im Meeting-Ordner (nicht OS-Temp); pro Task eindeutig, keine Collision |
 | M | Diarization (Update 5) | „Streiche das rms. Diarization macht der Provider" | RMS-Cross-Channel-Correlation komplett raus; Diarization läuft im Provider, wir geben rohe Speaker-IDs (S0, S1, S2) weiter |
 | N | Stereo erhalten (Update 6) | „Nutze weiterhin stereo mit beiden Kanälen" | Mono-Mix aus Update 5 zurückgenommen; Stereo-Concatenation mit beiden Kanälen als finaler Pre-Processing-Schritt |
+| O | Azure Speech auch mit Stereo (Update 7) | „Azure speech auch mit stereo nutzen" | Azure Speech verarbeitet Stereo nativ (kein interner Downmix); Response enthält `ChannelId` zusätzlich zu `SpeakerId`. Beide Provider bekommen das gleiche `combined-stereo.wav` |
 
 ### Verworfen / Out-of-Scope v0.3
 
@@ -146,6 +156,7 @@ Kalender-Lookup (v0.4).
 | L | Multi-Task Concurrency (Update 4) | ✅ Stereo-File im Meeting-Ordner, nicht OS-Temp |
 | M | Diarization (Update 5) | ✅ RMS ersatzlos gestrichen, Provider macht Diarization, rohe Speaker-IDs |
 | N | Stereo mit beiden Kanälen (Update 6) | ✅ Stereo-Concatenation final, Mono-Mix aus Update 5 zurückgenommen |
+| O | Azure Speech auch Stereo (Update 7) | ✅ Beide Provider bekommen gleiches Stereo-File, Azure nativ ohne Downmix |
 
 ### Folge-Cluster (v0.4+, erst nach v0.3-Abnahme — Martin-Direktive Update 3)
 
