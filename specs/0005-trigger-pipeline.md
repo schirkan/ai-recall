@@ -40,6 +40,28 @@ Ein 30-s-Loop (`trigger.heartbeatIntervalSeconds`) ruft
 `GetForegroundWindow` auf. Zweck: Fallback, falls Events verschluckt werden
 (z. B. hohe Systemlast, Sleep/Resume, schnelle User-Session-Wechsel).
 
+### Tertiär: Periodisches Capture (Bug-Bash Teil 2, 2026-07-06)
+
+Für Inhalte, die sich visuell ändern, ohne dass `SetWinEventHook`-Events
+feuern (Video-Streams, Slideshows, Live-Daten, Browser-Scroll-Churn,
+lautlose Updates) gibt es einen optionalen **Periodischen Capture**-Pfad
+(`screenRecorder.periodicCaptureMs`, Default `0` = deaktiviert).
+
+Anders als Heartbeat-Polling (Sicherheitsnetz für verlorene Events)
+ist Periodic Capture ein **eigenständiger Capture-Auslöser**: er feuert
+in festen Intervallen (sinnvoll 3 000–10 000 ms) unabhängig davon, ob
+ein WinEventHook-Event kam. Implementiert als `PeriodicCaptureThread`
+(`AiRecall.Trigger.dll`), der einen `TriggerKind.Periodic`-Event in den
+Worker-Channel schreibt. Konsolidiert mit `HeartbeatThread` über die
+gemeinsame interne `PollThread`-Klasse (Bug-Bash I-24).
+
+Wichtige Unterschiede zu Heartbeat:
+- Heartbeat ist **Fallback** (selten, ~30 s) — Periodic Capture ist
+  **regulärer Trigger** (3–10 s), wenn aktiviert.
+- Periodic Capture durchläuft die volle Pipeline (Throttle/Dedup/
+  App-Reader/OCR); bei `IgnoreApps`/`IgnoreUrls`/`IgnoreWindowTitles`
+  wird der Trigger verworfen, bevor ein Capture entsteht.
+
 ### Outlook: Background-Polling (App-Reader-intern)
 
 Outlook-Mail-Stream ist inhärent polling-basiert (kein OS-Event für
@@ -81,6 +103,13 @@ obwohl out-of-context). Der Worker-Thread entkoppelt Event-Empfang von
 Capture-Verarbeitung und nutzt `Channel<TriggerEvent>` (bounded, 1024)
 als Thread-sichere Queue.
 
+**Warum drei Quellen?** Heartbeat und Periodic Capture sind optionale
+Polling-Quellen, die unabhängig vom WinEventHook laufen. Sie teilen sich
+die gemeinsame interne `PollThread`-Klasse (`AiRecall.Trigger.PollThread`),
+die mit `triggerKind`, Thread-Name und Log-Prefix parametrisiert wird
+(HeartbeatThread und PeriodicCaptureThread sind dünne Wrapper für
+Abwärtskompatibilität — Bug-Bash 2026-07-06 I-24).
+
 ### TriggerEvent-Datentyp
 
 ```csharp
@@ -98,7 +127,8 @@ public enum TriggerKind
     ValueChange,       // EVENT_OBJECT_VALUECHANGE
     Scroll,            // EVENT_OBJECT_SCROLL
     MenuPopup,         // EVENT_SYSTEM_MENUPOPUPSTART
-    Heartbeat          // Polling-Fallback
+    Heartbeat,         // Polling-Fallback (sekundär, ~30s)
+    Periodic           // Periodisches Capture (tertiär, 3-10s wenn aktiv)
 }
 ```
 
@@ -214,6 +244,20 @@ Felder:
 - `trigger.blacklist.windowClasses` — Liste von Win32-Window-Klassen
   zum Ignorieren.
 - `trigger.blacklist.processes` — Liste von Prozess-Namen zum Ignorieren.
+
+Zusätzlich in `screenRecorder.periodicCaptureMs` (Bug-Bash Teil 2):
+- `screenRecorder.periodicCaptureMs` (Default `0`) — Periodischer
+  Capture-Trigger in Millisekunden. `0` deaktiviert den periodischen
+  Capture komplett (kein Thread wird gestartet). Sinnvolle Werte:
+  `3000`–`10000` für Video/Slideshows.
+- `screenRecorder.ignoreApps` (Default `[]`) — Prozess-Namen
+  (case-insensitive substring), die vom Periodic Capture ignoriert
+  werden (HWND-Throttle greift, aber explizit rausfiltern ist billiger).
+- `screenRecorder.ignoreUrls` (Default `[]`) — URL-Substrings
+  (case-insensitive), die ignoriert werden, wenn ein App-Kontext mit
+  URL bekannt ist (z. B. `"about:blank"`).
+- `screenRecorder.ignoreWindowTitles` (Default `[]`) — Window-Titel-
+  Substrings (case-insensitive), die ignoriert werden.
 
 ## Integration in `recall record`
 
@@ -334,6 +378,55 @@ CLI-Subcommand `recall record [--foreground]`:
 - **Test-Count:** 189 / 189 grün (vorher 98)
 - **Commits:** 791161a, f570e18, 68b97ea, c6202f3, 45aedf7, 11dea77,
   e65af93, 5d934dc
+
+### Update 2026-07-06 (Bug-Bash Teil 2)
+
+Spec 0005 wurde im Bug-Bash Teil 2 (Commit `d245dd2`, Cluster "Trigger-Pipeline v2") um
+**Periodisches Capture** als dritte Trigger-Quelle erweitert.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Periodisches Capture | Neue Trigger-Quelle `Periodic` für Inhalte ohne WinEventHook-Events | Video-Streams, Slideshows, Live-Daten, Browser-Scroll-Churn ändern sich visuell, ohne dass `EVENT_OBJECT_*`-Events feuern. Periodic Capture ergänzt Heartbeat als eigenständiger Capture-Auslöser (nicht nur Fallback). Sinnvolle Intervalle: 3 000–10 000 ms. |
+| 2 | `TriggerKind.Periodic` | Neuer Enum-Wert `Periodic` in `AiRecall.Trigger.TriggerKind` | Konsistent mit `Heartbeat`: gleiche Worker-Pipeline, eigene Semantik für Stats/Logging. Mapping in `TriggerWorker` identisch (Throttle → App-Reader → OCR → Hash-Dedup → Capture). |
+| 3 | `PeriodicCaptureThread` | Neue Klasse in `AiRecall.Trigger.dll`, dünner Wrapper um `PollThread` | Periodische Foreground-Window-Erfassung. Erbt von der gemeinsamen `PollThread`-Infrastruktur. `IntervalMs = 0` deaktiviert komplett (kein Thread). |
+| 4 | `ScreenRecorderConfig.PeriodicCaptureMs` | Neue Config-Property in `screenRecorder.periodicCaptureMs` (Default `0`) | Konfiguration unter `screenRecorder.*` (nicht `trigger.*`), weil Periodic Capture semantisch ein eigener Capture-Modus ist, nicht ein Trigger-Filter. Default `0` = deaktiviert, kein Backwards-Compat-Risiko. |
+| 5 | `PollThread`-Konsolidierung | `HeartbeatThread` + `PeriodicCaptureThread` sind dünne Wrapper um interne `PollThread`-Klasse | Vorher zwei parallel implementierte Klassen mit identischer Loop-Logik (Bug-Bash I-24). Jetzt: `PollThread(intervalMs, writer, triggerKind, threadName, logPrefix, ...)`. Reduziert Code-Duplikation, vereinfacht zukünftige Polling-Quellen. |
+| 6 | `screenRecorder.ignoreApps/Urls/WindowTitles` | Drei neue Filter-Listen auf `ScreenRecorderConfig` | Vorab-Filter **vor** Throttle/Dedup: Periodische Captures für `about:blank`, `MsEdge.exe`-URLs ohne Content, oder System-Tools werden gar nicht erst erzeugt. Billiger als HWND-Throttle alleine, weil Periodic Capture bei `0 ms` Idle den HWND-Throttle umgehen würde. |
+| 7 | Tests | 86 neue Tests in `PeriodicCaptureThreadTests` | Constructor-Validation (`IntervalMs < 0` → `Max(0, …)`), `Start/Stop`/`Dispose`-Lifecycle, Channel-Writes zählbar, `IntervalMs = 0` startet keinen Thread. |
+| 8 | Test-Count | 650 → **673/673 grün** (vorher Teil 1: 416; +73 aus Bug-Bash Teil 2 Trigger-Pipeline v2 + andere Bug-Bash-Items, siehe DECISIONS-Eintrag 2026-07-06) | 86 PeriodicCaptureThreadTests + 187 TessdataManagerTests (Spec 0012-Vorbereitung) + 56 PropertyEditorFactoryTests + weitere aus Bug-Bash Teil 2. |
+
+#### Pipeline-Erweiterung (Schritt 0b im Worker)
+
+Periodic Capture durchläuft die volle Worker-Pipeline, mit folgenden
+Erweiterungen in `TriggerWorker.ProcessEvent`:
+
+1. **HWND normalisieren** → identisch zu Foreground/Focus.
+2. **Periodic-spezifischer Vorab-Filter** (NEU): Wenn `triggerKind == Periodic`
+   und (`processName` ∈ `screenRecorder.ignoreApps`
+   oder `windowTitle` ∈ `screenRecorder.ignoreWindowTitles`) → skip.
+3. URL-Filter (NEU): Wenn App-Reader eine URL liefert und sie in
+   `screenRecorder.ignoreUrls` → skip.
+4. **Throttle per HWND** → identisch (greift auch für Periodic).
+5. **Throttle per App** → identisch.
+6. **Self-Capture-Filter** → identisch.
+7. **Class-Blacklist** → identisch.
+8. App-Reader → identisch.
+9. OCR → identisch.
+10. Hash-Dedup → identisch.
+11. Capture schreiben → identisch.
+
+#### Verworfen (Bug-Bash Teil 2)
+
+- **Periodic Capture als WinEventHook-Workaround für VALUECHANGE-Churn**: wäre
+  semantisch falsch — VALUECHANGE feuert bei jedem Edit-Control-Update.
+  Periodic Capture ist für Inhalte **ohne** Events, nicht als VALUECHAVE-Drossel.
+- **`trigger.periodicCaptureMs` (in `trigger.*`)**: wäre inkonsistent, weil
+  Periodic Capture kein Trigger-Filter ist. Bleibt unter `screenRecorder.*`.
+- **Geteilte PollThread-Klasse als `public`**: bleibt `internal sealed`,
+  die öffentlichen Klassen sind `HeartbeatThread` (für MVP1-Abwärtskompatibilität)
+  und `PeriodicCaptureThread`. So bleibt die Refactoring-API sauber.
+- **Periodisches Capture per WMI/Polling auf `_NETWORK_BYTES`**: würde
+  Netzwerk-IO messen, nicht Window-Content. Nicht hilfreich für unseren Use-Case.
 
 ## Out of Scope (MVP1)
 

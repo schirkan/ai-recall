@@ -66,3 +66,8 @@ capture/
 logs/
 tessdata/
 *.traineddata
+# Ausnahme: Tessdata-*Source-Dirs duerfen nicht aus Versehen mit-tessdata/ gematcht
+# werden (case-insensitive auf Windows). Bug-Bash-Cluster 2026-07-06.
+!**/Tessdata/*.cs
+!src/AiRecall.Core/Tessdata/
+!src/AiRecall.TrayApp/Tessdata/

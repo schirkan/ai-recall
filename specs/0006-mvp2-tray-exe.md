@@ -44,7 +44,8 @@ src/AiRecall.TrayApp/
 │   ├── UserConfigLocator.cs              (%APPDATA%/AiRecall/config.json)
 │   └── ConfigSchemaReflection.cs         (AppConfig POCO → PropertyDescriptor)
 └── Resources/
-    └── tray-icon.ico                     (16x16 + 32x32, später)
+    ├── tray-icon.ico                     (16x16 + 32x32, später)
+    └── EmojiIconFactory.cs               (Bug-Bash 2026-07-06 I-UE: Color-Emoji via TextRenderer für Menu-Icons)
 ```
 
 ### TriggerSupervisor (in-process Wrapper)
@@ -178,6 +179,55 @@ public enum TriggerState { Stopped, Starting, Running, Stopping, Crashed }
 > Tests refactored/umgeschrieben wurden (z. B. 2 Tests fuer
 > TrayIconState-Edge-Cases in Schritt 4 weggekuerzt). Stand 2026-07-04
 > 22:30: **443/443 grün**.
+
+## Update 2026-07-06 (Bug-Bash Teil 2)
+
+Bug-Bash 2026-07-06 (Commit `d245dd2`) hat Spec 0006 um **EmojiIconFactory**
+erweitert und damit das Problem „Menu-Icons mit Color-Emoji rendern"
+gelöst.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Menu-Icon-Rendering | **`EmojiIconFactory` (intern)** rendert Color-Emoji-Glyphen via Win32 `TextRenderer.DrawText` auf `Format32bppArgb`-Bitmaps | Vor Bug-Bash: Menu-Icons wurden entweder als Text-Emoji (kleine monochrome Glyphen) oder als Bitmap aus dem `tray-icon.ico` (statisch, kein Emoji) angezeigt. User-Erfahrung war inkonsistent. Nach Bug-Bash: Menu-Items rendern echte Color-Emoji (z. B. ✅ ⚙ 📄 🔴) als Bitmap. |
+| 2 | Render-Pfad | `TextRenderer.DrawText` mit Font `"Segoe UI Emoji"` statt `Graphics.DrawString` | Wichtige Erkenntnis: GDI+ `Graphics.DrawString` rendert Color-Fonts (COLR/CPAL) auf einem 32bpp-Argb-Bitmap mit transparentem Hintergrund **ZU LEER** (kein Glyphe sichtbar). `TextRenderer` benutzt die Win32-Text-Pipeline, die Color-Fonts korrekt zeichnet. Trick: Hintergrund opak weiß füllen, Glyphe drüber, dann weiße Pixel auf Alpha=0 maskieren. |
+| 3 | Glyph-Größe | Konstante `0.7f` (statt `0.85f`) für Font-Größe relativ zur Bitmap-Größe | `TextRenderer` fügt intern ein Font-Linegap hinzu. Bei `0.85f` landet der untere Teil der Glyphe im weißen Mask-Bereich und wird weggeschnitten. Bei `0.7f` sitzt die Glyphe sicher im sichtbaren Bereich mit symmetrischem Padding. |
+| 4 | NotifyIcon vs Menu | NotifyIcon rendert weiterhin `SystemIcons.Application`, Menu rendert Emoji-Bitmap | GDI+ und WinForms `NotifyIcon` rendern Color-Emoji auf dem Test-System unzuverlässig (leere Bitmaps oder monochrome Outlines). Im Tray-Icon selbst ist das akzeptabel (User sieht ohnehin nur Icon-State). Im Menu ist die Glyphe sichtbar und wichtig für UX. |
+| 5 | API | `public static Bitmap RenderBitmap(string emoji, int size, Color? color = null)` | Caller ist für `Dispose` verantwortlich (oder via `MenuImageCache` mit AutoDispose in TrayIconController). Kein eigener Cache im EmojiIconFactory — Trennung von Rendering und Lifetime-Management. |
+| 6 | Tests | Visual-Tests via Screenshot-Vergleich in `EmojiIconFactoryTests` (manuell) + Smoke-Test im TrayIconController | Reines Visual-Rendering ist schwer Unit-Test-bar (Bitmap-Pixel-Vergleich brüchig, GDI+ auf Test-Runner anders). Pragmatisch: Smoke-Test rendert ein ✅ und prüft, dass das Bitmap nicht leer ist. |
+| 7 | Icons-Set | 10 Menu-Icons im aktuellen Tray: ✅ Running, ⏸ Stopped, 🔄 Starting/Stopping, ⚠ Crashed, ⚙ Settings, 📋 Logviewer, 🚪 Quit, etc. | Alle via `EmojiIconFactory.RenderBitmap` zur Laufzeit generiert, keine `.ico`-Dateien mehr nötig. |
+
+### Code
+
+```csharp
+// AiRecall.TrayApp/EmojiIconFactory.cs (~150 LoC)
+internal static class EmojiIconFactory
+{
+    public static Bitmap RenderBitmap(string emoji, int size, Color? color = null)
+    {
+        var bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.White);
+            // ... TextRenderer.DrawText für Color-Emoji ...
+            // dann weiße Pixel auf Alpha=0 maskieren
+        }
+        return bmp;
+    }
+}
+```
+
+### Verworfen (Bug-Bash Teil 2, Icon-Set)
+
+- **Embedded `.ico` mit Color-Emoji**: ICO-Format unterstützt keine
+  COLR/CPAL-Fonts. Statische ICO-Dateien können nur monochrome Glyphen
+  oder BMP/PNG mit vorgerenderten Bitmaps enthalten — beides würde die
+  Glyphe als Bitmap fixieren und bei DPI-Skalierung pixelig werden.
+- **`NotifyIcon.Icon = EmojiIconFactory.RenderBitmap(...)`**: GDI+ kann
+  COLR/CPAL auf `NotifyIcon` nicht zuverlässig darstellen (siehe Punkt 4).
+  Tray-Icon bleibt deshalb `SystemIcons.Application`.
+- **Eigene Color-Font-Datei (`.ttf`) mitliefern**: würde Segoe UI Emoji
+  duplizieren (auf Windows 10/11 ohnehin vorhanden), unnötige
+  Binary-Größe (~5 MB).
 
 ## Verworfen
 

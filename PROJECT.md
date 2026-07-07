@@ -34,7 +34,7 @@
       Default-Verhalten bleibt UIA — bestehende Smoke-Tests laufen weiter grün.
   - **Notepad-Reader**: Buffer via Win32 `WM_GETTEXT` + rekursive Edit-Control-Suche via `EnumChildWindows`, Filename-Parsing (En-Dash/Em-Dash-tolerant) — Smoke-Test grün (15 Zeilen, 363 Zeichen aus echtem Notepad)
   - **Explorer-Reader** (neu): aktueller Pfad aus Fenster-Titel, Hyphen/En-Dash/Em-Dash-tolerant, Special-Folder-Liste (Desktop/Dieser PC/Schnellzugriff/…) → null — Smoke-Test grün (echtes Explorer-Fenster liefert Content-MD)
-- [x] Tests: **650/650 grün** (425 MVP1+Trigger+MVP2-Basis + 100 Outlook-Reader Iter. 3: 14 EntryStore + 20 AutoRuleDetector + 16 TitleParser + 23 BodyToMarkdown + 27 OutlookAppReader [18 Facts + 1 Theory mit 9 InlineData] + 64 OneNote-Reader Spec 0010: 5 Config + 8 ComInterop + 30 PageXmlToMarkdown + 21 AppReader + 61 Teams-Reader Spec 0011: 5 Config + 29 UIA + 10 CDP + 17 Reader)
+- [x] Tests: **673/673 grün** (Stand Bug-Bash 2026-07-06 Teil 2, Commit `d245dd2`; 331 Spec-0007-Stand + 100 Outlook-Reader Iter. 3: 14 EntryStore + 20 AutoRuleDetector + 16 TitleParser + 23 BodyToMarkdown + 27 OutlookAppReader [18 Facts + 1 Theory mit 9 InlineData] + 64 OneNote-Reader Spec 0010: 5 Config + 8 ComInterop + 30 PageXmlToMarkdown + 21 AppReader + 61 Teams-Reader Spec 0011: 5 Config + 29 UIA + 10 CDP + 17 Reader)
 - [x] **Documents-Reader Iter. 2 (Martin 2026-07-04) — COM-Interop:**
   - Neue Klasse `OfficeComInterop` (late binding via ProgID + P/Invoke
     auf `oleaut32.dll!GetActiveObject` — `Marshal.GetActiveObject` ist
@@ -146,6 +146,14 @@
   - Commits: `5ab077a`, `cff2b50`, `d9ffd11`, `12ced87`, `dc14dc0`, `da6586d`, `c23d3ca`, `e80d8fc`, `875ae98`
   - Architektur-Korrektur (Martin 22:29): in-process statt Subprozess — ProcessSupervisor + MMF-IPC entfallen komplett
   - Martin-Direktive umgesetzt: WinForms (kein WPF), in-process `ITriggerService`, Hot-Reload via Restart
+- [x] **Bug-Bash 2026-07-06 Teil 2 (Commit `d245dd2`)** — 6 Themen in einem Cluster-Commit:
+  - **Trigger-Pipeline v2**: Periodischer Capture-Thread (`PeriodicCaptureThread`) als neue Trigger-Quelle `TriggerKind.Periodic`. Konsolidiert mit `HeartbeatThread` über gemeinsame interne `PollThread`-Klasse (I-24). Konfiguration in `screenRecorder.periodicCaptureMs` (Default `0` = deaktiviert) + `screenRecorder.ignoreApps/Urls/WindowTitles` für Vorab-Filter. 86 neue Tests.
+  - **ConfigSchemaReflection rekursiv** (I-18): `BuildSection` läuft rekursiv über POCO-Properties, `IsExpandableConfigType` filtert expandierbare POCOs. Vorher: Sub-Sub-Konfigs (`browser.cdp`, `trigger.winEvents`, `trigger.blacklist.windowClasses`) waren im Tree unsichtbar. Nachher: echte Baumstruktur.
+  - **77 Description-Attribute** (I-19/I-25): `[Description("...")]` aus `System.ComponentModel` auf `AppConfig` + alle Sub-POCOs verteilt. SettingsDialog zeigt Description als 1-zeiliges Label **unter** dem Editor. Property-Name IST der Label (camelCase → Title Case), keine separaten `[DisplayName]` mehr.
+  - **SettingsDialog UX** (I-16, I-25): Splitter proportional zur Form-Breite (vorher fester Pixelwert), `SplitterMoved`-Event resized Editor-Panel sauber, Description-Label passt sich an. Editor + Description + Padding pro Property (`descGap = 2`, `descHeight = 16`).
+  - **EmojiIconFactory** (I-UE): Color-Emoji via Win32 `TextRenderer.DrawText` für `ToolStripMenuItem.Image`. Render-Pfad mit weißem Hintergrund + Alpha-Mask-Trick (GDI+ rendert COLR/CPAL auf transparentem Bitmap **ZU LEER**, daher der Umweg). 10 Menu-Icons jetzt via Factory.
+  - **TessdataManager** (Spec 0012-Vorbereitung): `AiRecall.Tessdata.dll` mit Auto-Download von `deu.traineddata`+`eng.traineddata` aus `tessdata_fast` GitHub-Release. Vorbereitung für Spec 0012 (Modal-Dialog beim ersten Start, geplant v0.1). 187 neue Tests.
+  - **Trigger-Pipeline v2 + Bug-Bash-Teil-2-Effekte**: Test-Count **650 → 673/673 grün** (Spec 0005 TriggerKind.Periodic + ConfigSchemaReflection rekursiv + WindowPlacement BottomRight + EmojiIconFactory + TessdataManager + PeriodicCaptureThread + weitere).
 - [x] Push auf `origin/main`
 
 ## Projektziel (Kurzfassung)
@@ -181,6 +189,7 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0009-settings-dialog.md`                                                      | Settings-Dialog JSON-Editor (v1.0 abgeschlossen)                                                                                                  |
 | `specs/0010-onenote-app-reader.md`                                                   | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only)                                                   |
 | `specs/0011-teams-app-reader.md`                                                     | Teams App-Reader (Spec 0011, Modern Teams only, UIA + CDP opt-in, 3-Strategy-Auflösung)                                                           |
+| `specs/0012-tessdata-first-run.md`                                                  | Tessdata First-Run Download (Spec 0012, geplant v0.1 — Modal-Dialog beim ersten Start wenn Tesseract-tessdata fehlt)                                |
 | `src/`                                                                               | .NET-Solution-Projekte                                                                                                                            |
 | `src/AiRecall.Core/`                                                                 | Models, Configuration, Persistence, Util, Windows                                                                                                 |
 | `src/AiRecall.ScreenCapture/`                                                        | Win32 Window/Screenshot/OCR (kein Trigger mehr)                                                                                                   |
@@ -229,4 +238,6 @@ Folgen `projects/PROJECT-RULES.md`:
    - PDF-Verschlüsselung-Handling + mehrseitige Dokumente
    - OCR-Preprocessing (Binarization/Deskew) optional
    - ✅ `*.conversion.md` ↔ `*.content.md` Vereinheitlichung (Bug-Bash I-17, 2026-07-06): ConversionWorker schreibt Document/OCR/UIA in-place in die Capture-MD unter `## Content` (ersetzt Pending-Platzhalter). Kein separates `*.conversion.md` mehr. Ein MD pro Capture.
-7. **OCR tessdata-Packaging** (nach Bug-Bash I-14): Auto-Download von `deu.traineddata`+`eng.traineddata` beim ersten Start in `%LOCALAPPDATA%\AiRecall\tessdata`, oder tessdata-Files in den Installer bündeln.
+7. **OCR tessdata-Packaging** (nach Bug-Bash I-14): Auto-Download von `deu.traineddata`+`eng.traineddata` beim ersten Start in `%LOCALAPPDATA%\AiRecall\tessdata`, oder tessdata-Files in den Installer bündeln. → Spec 0012 geplant v0.1 (Modal-Dialog beim ersten Start mit Auto-Download-Option).
+8. **MVP 3 (Audio Notes) — Roadmap-Reshuffle 2026-07-06**: Audio-Capture als **eigenständiges MVP 3** herausgelöst, statt unter MVP 1/2 mitzuschleifen. Spec-Detail folgt in eigenem Cluster, sobald Anforderungen klar sind (Mikrofon-Auswahl, VAD/Silence-Skip, Persistenz als MD + WAV). **NICHT** Teil von MVP1/MVP2.
+9. **MVP 4 (Auto Wiki) — Roadmap-Reshuffle 2026-07-06**: Auto-Wiki-Generierung aus Captures wandert von ehemals MVP 3 nach **MVP 4**. Spec-Detail (`0013-auto-wiki.md` Kandidat) folgt in eigenem Cluster, sobald Anforderungen klar sind (LLM-Auswahl, Index-Struktur, Suche/Filter). **NICHT** Teil von MVP1/MVP2/MVP3.
