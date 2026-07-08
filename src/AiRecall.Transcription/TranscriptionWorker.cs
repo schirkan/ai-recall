@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,43 +14,48 @@ namespace AiRecall.Transcription;
 
 /// <summary>
 /// Channel-basierter Background-Worker fuer Audio-Transkription
-/// (Spec 0013 v0.3 §5.4 Worker-Pattern, analog Spec 0007 ConversionWorker).
+/// (Spec 0013 v0.3 §5.4 Worker-Pattern, analog Spec 0007 <c>ConversionWorker</c>).
 /// <list type="bullet">
-///   <li>Pro Task: Stereo-Concatenate → Provider-Transkription → MD-Update → Cleanup</li>
-///   <li>Max-N parallel (Default: 2)</li>
+///   <li>Background-Task-Pool startet im Konstruktor (auto-start, max-N parallel)</item>
+///   <li>Pro Task: Stereo-Concatenate → Provider-Transkription → MD-Update → Cleanup</item>
 ///   <li>Bei Provider-Fehler: combined-stereo.wav bleibt liegen (Debug-Evidence),
-///         meta.md bekommt <c>transcript_status: failed</c> + ErrorMessage</li>
-///   <li>Bei Erfolg: combined-stereo.wav wird geloescht, meta.md bekommt
-///         <c>transcript_status: done</c> + Transkriptions-Block</li>
+///         meta.md bekommt <c>transcript_status: failed</c> + ErrorMessage</item>
+///   <item>Bei Erfolg: combined-stereo.wav wird geloescht, meta.md bekommt
+///         <c>transcript_status: done</c> + Transkriptions-Block</item>
+///   <item>Counter: <see cref="PendingCount"/>, <see cref="CompletedCount"/>, <see cref="FailedCount"/></item>
 /// </list>
 /// </summary>
-public sealed class TranscriptionWorker : IAsyncDisposable
+public sealed class TranscriptionWorker : IDisposable
 {
     private readonly ITranscriptionProvider _provider;
     private readonly StereoConcatenator _concatenator;
     private readonly MetadataUpdater _metadata;
     private readonly ILogger? _logger;
     private readonly int _maxParallel;
-    private readonly Channel<AudioTranscriptionTask> _queue;
-    private readonly ConcurrentDictionary<Guid, Task> _running = new();
-    private CancellationTokenSource? _cts;
-    private Task[]? _workerTasks;
-    private int _disposed;
+    private readonly Channel<AudioTranscriptionTask> _channel;
+    private readonly CancellationTokenSource _cts;
+    private readonly Task[] _workerTasks;
+    private bool _disposed;
 
-    /// <summary>Anzahl aktuell laufender oder wartender Tasks.</summary>
-    public int PendingCount => _running.Count;
+    private int _pendingCount;
+    private int _completedCount;
+    private int _failedCount;
+
+    /// <summary>Anzahl Captures in der Channel-Queue (noch nicht verarbeitet).</summary>
+    public int PendingCount => Volatile.Read(ref _pendingCount);
+
+    /// <summary>Anzahl erfolgreich transkribierter Meetings.</summary>
+    public int CompletedCount => Volatile.Read(ref _completedCount);
+
+    /// <summary>Anzahl komplett fehlgeschlagener Transkriptionen.</summary>
+    public int FailedCount => Volatile.Read(ref _failedCount);
 
     /// <summary>Provider-Name (fuer Diagnose / Tests).</summary>
     public string ProviderName => _provider.Name;
 
     /// <summary>
-    /// Produktions-Konstruktor.
+    /// Produktions-Konstruktor. Startet automatisch <c>maxParallel</c> Background-Worker.
     /// </summary>
-    /// <param name="provider">Azure- oder Deepgram-Provider.</param>
-    /// <param name="concatenator">Stereo-Concatenator (default: neu).</param>
-    /// <param name="metadata">MD-Updater (default: neu).</param>
-    /// <param name="maxParallel">Max gleichzeitige Transkriptionen (Default 2).</param>
-    /// <param name="logger">Serilog-Logger.</param>
     public TranscriptionWorker(
         ITranscriptionProvider provider,
         StereoConcatenator? concatenator = null,
@@ -64,76 +68,82 @@ public sealed class TranscriptionWorker : IAsyncDisposable
         _metadata = metadata ?? new MetadataUpdater();
         _maxParallel = Math.Max(1, maxParallel);
         _logger = logger;
-        _queue = Channel.CreateUnbounded<AudioTranscriptionTask>(new UnboundedChannelOptions
+
+        _channel = Channel.CreateUnbounded<AudioTranscriptionTask>(new UnboundedChannelOptions
         {
-            SingleReader = false,
+            SingleReader = false,  // Multi-Worker
             SingleWriter = false,
         });
-    }
-
-    /// <summary>Startet die Background-Worker-Tasks (idempotent).</summary>
-    public void Start()
-    {
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(TranscriptionWorker));
-        if (_workerTasks is not null) return; // bereits gestartet
         _cts = new CancellationTokenSource();
         _workerTasks = new Task[_maxParallel];
         for (int i = 0; i < _maxParallel; i++)
         {
             _workerTasks[i] = Task.Run(() => RunWorkerAsync(_cts.Token));
         }
+        _logger?.Information("TranscriptionWorker started (maxParallel={MaxParallel}, provider={Provider})",
+            _maxParallel, _provider.Name);
     }
 
-    /// <summary>Stoppt den Worker, wartet auf laufende Tasks (max 30 s).</summary>
-    public async Task StopAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Enqueue eines Transkriptions-Tasks (fire-and-forget).
+    /// </summary>
+    public bool TryEnqueue(AudioTranscriptionTask task)
     {
-        var cts = _cts;
-        var tasks = _workerTasks;
-        if (cts is null || tasks is null) return;
-        _queue.Writer.TryComplete();
-        try { cts.Cancel(); } catch (ObjectDisposedException) { }
-        try
-        {
-            await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException) { _logger?.Warning("TranscriptionWorker: Stop-Timeout (30s)"); }
-        catch (OperationCanceledException) { /* erwartet */ }
-    }
-
-    /// <summary>Enqueue eines neuen Transkriptions-Tasks (non-blocking).</summary>
-    public void Enqueue(AudioTranscriptionTask task)
-    {
+        if (_disposed) return false;
         if (task is null) throw new ArgumentNullException(nameof(task));
-        if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(TranscriptionWorker));
-        if (_workerTasks is null) throw new InvalidOperationException("Worker nicht gestartet — zuerst Start() aufrufen.");
-        var id = Guid.NewGuid();
-        var runner = Task.Run(() => ProcessTaskAsync(task, _cts?.Token ?? CancellationToken.None));
-        _running[id] = runner;
-        _ = runner.ContinueWith(_ => _running.TryRemove(id, out _), TaskScheduler.Default);
+        Interlocked.Increment(ref _pendingCount);
+        return _channel.Writer.TryWrite(task);
     }
 
-    private async Task RunWorkerAsync(CancellationToken stoppingToken)
+    /// <summary>Async-Variante von <see cref="TryEnqueue"/>.</summary>
+    public ValueTask EnqueueAsync(AudioTranscriptionTask task, CancellationToken ct = default)
+    {
+        if (_disposed) return ValueTask.CompletedTask;
+        if (task is null) throw new ArgumentNullException(nameof(task));
+        Interlocked.Increment(ref _pendingCount);
+        return _channel.Writer.WriteAsync(task, ct);
+    }
+
+    private async Task RunWorkerAsync(CancellationToken ct)
     {
         try
         {
-            await foreach (var task in _queue.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+            await foreach (var task in _channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                // ProcessTaskAsync wird bereits in Enqueue via Task.Run gestartet
-                // (fire-and-forget). Hier nur Channel lesen + Yield.
-                await Task.Yield();
+                try
+                {
+                    await ProcessAsync(task, ct).ConfigureAwait(false);
+                    Interlocked.Increment(ref _completedCount);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Interlocked.Increment(ref _failedCount);
+                    _logger?.Error(ex, "TranscriptionWorker: failed to process {Folder}", task.Folder);
+                    try
+                    {
+                        await _metadata.MarkFailedAsync(task.MetadataPath, ex.Message, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception markEx)
+                    {
+                        _logger?.Warning(markEx, "TranscriptionWorker: MarkFailed fehlgeschlagen ({Meta})", task.MetadataPath);
+                    }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _pendingCount);
+                }
             }
         }
-        catch (OperationCanceledException) { /* erwartet */ }
-        catch (Exception ex)
-        {
-            _logger?.Error(ex, "TranscriptionWorker: RunWorkerAsync-Loop beendet mit Fehler");
-        }
+        catch (OperationCanceledException) { /* sauberer Stop */ }
+        _logger?.Information("TranscriptionWorker worker-task stopped");
     }
 
-    private async Task ProcessTaskAsync(AudioTranscriptionTask task, CancellationToken cancellationToken)
+    private async Task ProcessAsync(AudioTranscriptionTask task, CancellationToken cancellationToken)
     {
         var progress = new Progress<TranscriptionProgress>(p =>
-            _logger?.Debug("TranscriptionWorker: {Folder} {Pct}% {Step}", task.Folder, p.PercentComplete, p.CurrentStep));
+            _logger?.Debug("TranscriptionWorker: {Folder} {Pct}% {Step}",
+                task.Folder, p.PercentComplete, p.CurrentStep));
 
         string? stereoPath = null;
         try
@@ -151,7 +161,7 @@ public sealed class TranscriptionWorker : IAsyncDisposable
             // 3. MD-Update
             await _metadata.UpdateAsync(task.MetadataPath, result, cancellationToken).ConfigureAwait(false);
 
-            // 4. Cleanup: bei Erfolg combined-stereo.wav loeschen, bei Fehler behalten
+            // 4. Cleanup
             if (result.IsSuccess)
             {
                 TryDelete(stereoPath);
@@ -164,17 +174,59 @@ public sealed class TranscriptionWorker : IAsyncDisposable
                 _logger?.Warning(
                     "TranscriptionWorker: failed (Provider={Provider}, Error={Error}) — combined-stereo.wav bleibt fuer Debug liegen: {StereoPath}",
                     result.ProviderName, result.ErrorMessage, stereoPath);
+                // Throw, damit der aeussere Catch als Failed gezaehlt wird
+                throw new InvalidOperationException(
+                    $"Provider-Transkription fehlgeschlagen: {result.ErrorMessage}");
             }
         }
         catch (OperationCanceledException)
         {
             _logger?.Information("TranscriptionWorker: Task gecancelt fuer {Folder}", task.Folder);
+            throw;
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Recovery-Scan: durchsucht <paramref name="storageRoot"/> nach Meeting-Ordnern
+    /// mit <c>transcript_status: pending</c> und enqueued sie. Fuer App-Start nach Crash.
+    /// </summary>
+    public int ScanForPendingTranscriptions(string storageRoot, TranscriptionOptions defaultOptions)
+    {
+        if (string.IsNullOrEmpty(storageRoot)) throw new ArgumentException("Pfad fehlt", nameof(storageRoot));
+        if (!Directory.Exists(storageRoot)) return 0;
+
+        int enqueued = 0;
+        foreach (var metaPath in Directory.EnumerateFiles(storageRoot, "meta.md", SearchOption.AllDirectories))
         {
-            _logger?.Error(ex, "TranscriptionWorker: unerwarteter Fehler bei {Folder}", task.Folder);
-            await _metadata.MarkFailedAsync(task.MetadataPath, ex.Message, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var content = File.ReadAllText(metaPath);
+                if (!content.Contains("transcript_status: pending")) continue;
+                var folder = Path.GetDirectoryName(metaPath)!;
+                var mic = Path.Combine(folder, "mic.wav");
+                var loop = Path.Combine(folder, "loopback.wav");
+                if (!File.Exists(mic) || !File.Exists(loop)) continue;
+                if (TryEnqueue(new AudioTranscriptionTask(
+                    Folder: folder,
+                    MicPath: mic,
+                    LoopbackPath: loop,
+                    MetadataPath: metaPath,
+                    Options: defaultOptions,
+                    EnqueuedAt: DateTimeOffset.UtcNow)))
+                {
+                    enqueued++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warning(ex, "TranscriptionWorker.ScanForPending: skip {Path}", metaPath);
+            }
         }
+        if (enqueued > 0)
+        {
+            _logger?.Information("TranscriptionWorker.ScanForPending: enqueued {Count} tasks aus {Root}", enqueued, storageRoot);
+        }
+        return enqueued;
     }
 
     private static void TryDelete(string path)
@@ -182,18 +234,25 @@ public sealed class TranscriptionWorker : IAsyncDisposable
         try { File.Delete(path); } catch { /* ignore */ }
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>Stoppt den Worker sauber. Idempotent.</summary>
+    public void Stop()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (_disposed) return;
+        _channel.Writer.TryComplete();
         try
         {
-            await StopAsync(CancellationToken.None).ConfigureAwait(false);
+            Task.WhenAll(_workerTasks).Wait(TimeSpan.FromSeconds(30));
         }
-        finally
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _workerTasks = null;
-        }
+        catch (AggregateException) { /* Tasks koennen gecancelt sein */ }
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+        _logger?.Information("TranscriptionWorker stopped by user");
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Stop();
+        _cts.Dispose();
     }
 }

@@ -89,7 +89,14 @@ public class TranscriptionWorkerTests : IDisposable
             var deadline = Environment.TickCount + timeoutMs;
             while (Environment.TickCount < deadline)
             {
-                if (condition()) return;
+                try
+                {
+                    if (condition()) return;
+                }
+                catch (IOException)
+                {
+                    // Datei wird gerade geschrieben — retry.
+                }
                 await Task.Delay(20);
             }
             if (!condition())
@@ -102,106 +109,79 @@ public class TranscriptionWorkerTests : IDisposable
     // =============================================================================
 
     [Fact]
-    public async Task Enqueue_BeforeStart_Throws()
+    public void Constructor_StartsWorker_Auto()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>());
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        var (folder, mic, loop, meta) = NewMeeting("t1");
-        Assert.Throws<InvalidOperationException>(
-            () => worker.Enqueue(NewTask(folder, mic, loop, meta)));
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
+        // Counter initial 0
+        Assert.Equal(0, worker.PendingCount);
+        Assert.Equal(0, worker.CompletedCount);
+        Assert.Equal(0, worker.FailedCount);
     }
 
     [Fact]
-    public async Task Start_ThenEnqueue_ProcessesTask()
+    public void Enqueue_ProcessesTask()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>
         {
             new("S0", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hi"),
         });
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
         var (folder, mic, loop, meta) = NewMeeting("t2");
 
-        worker.Enqueue(NewTask(folder, mic, loop, meta));
+        Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        await WaitUntilAsync(() => provider.CallCount == 1, what: "Provider wurde aufgerufen");
-        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: done"),
-            what: "meta.md enthaelt 'transcript_status: done'");
+        WaitUntilAsync(() => provider.CallCount == 1, what: "Provider wurde aufgerufen").GetAwaiter().GetResult();
+        WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: done"),
+            what: "meta.md enthaelt 'transcript_status: done'").GetAwaiter().GetResult();
         // Bei Erfolg: combined-stereo.wav wurde geloescht
         Assert.False(File.Exists(Path.Combine(folder, "combined-stereo.wav")));
+        Assert.Equal(1, worker.CompletedCount);
     }
 
     [Fact]
-    public async Task ProviderFailure_KeepsCombinedStereo_MarksMetaFailed()
+    public void Enqueue_ProviderFailure_KeepsCombinedStereo_MarksMetaFailed()
     {
         var provider = new FakeProvider("fake", Array.Empty<TranscriptionSegment>(),
             errorMessage: "HTTP 401: Unauthorized");
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
         var (folder, mic, loop, meta) = NewMeeting("t3");
 
-        worker.Enqueue(NewTask(folder, mic, loop, meta));
+        Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: failed"),
-            what: "meta.md enthaelt 'transcript_status: failed'");
+        WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1").GetAwaiter().GetResult();
         // Bei Fehler: combined-stereo.wav bleibt liegen (Debug-Evidence)
         Assert.True(File.Exists(Path.Combine(folder, "combined-stereo.wav")));
         // Error-Message in Frontmatter
         var metaContent = File.ReadAllText(meta);
+        Assert.Contains("transcript_status: failed", metaContent);
         Assert.Contains("HTTP 401", metaContent);
     }
 
     [Fact]
-    public async Task MultipleTasks_ProcessedInParallel()
+    public void Enqueue_MultipleTasks_ProcessedInParallel()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>
         {
             new("S0", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hi"),
         }, delayMs: 200);
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 2, logger: _logger);
-        worker.Start();
+        using var worker = new TranscriptionWorker(provider, maxParallel: 2, logger: _logger);
         var meetings = Enumerable.Range(0, 4)
             .Select(i => NewMeeting($"parallel-{i}"))
             .ToList();
 
         foreach (var (folder, mic, loop, meta) in meetings)
-            worker.Enqueue(NewTask(folder, mic, loop, meta));
+            Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        // Warten bis alle 4 Tasks durch sind
-        await WaitUntilAsync(() => provider.CallCount == 4, timeoutMs: 5000, what: "Provider wurde 4x aufgerufen");
-        await WaitUntilAsync(
-            () => meetings.All(m => File.Exists(m.meta) && File.ReadAllText(m.meta).Contains("transcript_status: done")),
-            timeoutMs: 5000, what: "alle 4 meta.md sind 'done'");
+        WaitUntilAsync(() => worker.CompletedCount == 4, timeoutMs: 5000, what: "CompletedCount == 4").GetAwaiter().GetResult();
+        Assert.True(meetings.All(m => File.Exists(m.meta) && File.ReadAllText(m.meta).Contains("transcript_status: done")));
     }
 
     [Fact]
-    public async Task StopAsync_DrainsQueue_StopsProcessing()
-    {
-        var provider = new FakeProvider("fake", new List<TranscriptionSegment>
-        {
-            new("S0", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hi"),
-        }, delayMs: 100);
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
-        var (folder1, mic1, loop1, meta1) = NewMeeting("stop1");
-        var (folder2, mic2, loop2, meta2) = NewMeeting("stop2");
-
-        worker.Enqueue(NewTask(folder1, mic1, loop1, meta1));
-        await WaitUntilAsync(() => provider.CallCount == 1, what: "Task 1 durch");
-        worker.Enqueue(NewTask(folder2, mic2, loop2, meta2));
-
-        await worker.StopAsync(CancellationToken.None);
-
-        // Task 2 sollte entweder durch oder gecancelt sein — nicht in Endlosschleife
-        Assert.True(provider.CallCount >= 1);
-    }
-
-    [Fact]
-    public async Task ConcatenateFailure_LeavesNoStereo_MarksMetaFailed()
+    public void Enqueue_ConcatenateFailure_MarksMetaFailed_DoesNotCallProvider()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>());
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
         // Sample-Rate mismatch → Concatenator wirft
         var folder = Path.Combine(_root, "concatfail");
         Directory.CreateDirectory(folder);
@@ -209,32 +189,43 @@ public class TranscriptionWorkerTests : IDisposable
         WriteMonoWav(Path.Combine(folder, "loopback.wav"), 8000, 400); // andere Rate
         var meta = Path.Combine(folder, "meta.md");
 
-        worker.Enqueue(NewTask(folder, Path.Combine(folder, "mic.wav"), Path.Combine(folder, "loopback.wav"), meta));
+        Assert.True(worker.TryEnqueue(NewTask(folder, Path.Combine(folder, "mic.wav"), Path.Combine(folder, "loopback.wav"), meta)));
 
-        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: failed"),
-            what: "meta.md enthaelt 'transcript_status: failed'");
+        WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1").GetAwaiter().GetResult();
         // Provider wurde NICHT aufgerufen (Concatenate schlug vorher fehl)
         Assert.Equal(0, provider.CallCount);
+        Assert.True(File.Exists(meta));
+        Assert.Contains("transcript_status: failed", File.ReadAllText(meta));
     }
 
     [Fact]
-    public async Task DisposeAsync_StopsWorker()
+    public void ScanForPendingTranscriptions_EnqueuesPendingMeetings()
     {
+        // 3 Meetings: 1 pending, 1 done, 1 ohne meta.md
+        var pending = NewMeeting("scan-pending", 50);
+        File.WriteAllText(pending.meta, "---\ntranscript_status: pending\n---\n");
+        var done = NewMeeting("scan-done", 50);
+        File.WriteAllText(done.meta, "---\ntranscript_status: done\n---\n");
+        var noMeta = NewMeeting("scan-nometa", 50);
+
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>
         {
             new("S0", TimeSpan.Zero, TimeSpan.FromSeconds(1), "Hi"),
         });
-        var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
-        await worker.DisposeAsync();
-        // Enqueue nach Dispose sollte werfen
-        var (folder, mic, loop, meta) = NewMeeting("dispose");
-        Assert.Throws<ObjectDisposedException>(
-            () => worker.Enqueue(NewTask(folder, mic, loop, meta)));
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
+        var defaultOptions = new TranscriptionOptions("deu", true, 4, "test-key", null);
+
+        var count = worker.ScanForPendingTranscriptions(_root, defaultOptions);
+        Assert.Equal(1, count); // nur das "pending" wird enqueued
+
+        WaitUntilAsync(() => worker.CompletedCount == 1, what: "CompletedCount == 1").GetAwaiter().GetResult();
+        // Pending-Meta ist jetzt "done", done-Meta ist unveraendert
+        Assert.Contains("transcript_status: done", File.ReadAllText(pending.meta));
+        Assert.Contains("transcript_status: done", File.ReadAllText(done.meta));
     }
 
     [Fact]
-    public async Task TranscriptBlock_ContainsProviderAndSegments()
+    public void TranscriptBlock_ContainsProviderAndSegments()
     {
         var segments = new List<TranscriptionSegment>
         {
@@ -242,14 +233,13 @@ public class TranscriptionWorkerTests : IDisposable
             new("S1", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), "Welt"),
         };
         var provider = new FakeProvider("fake", segments);
-        await using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
-        worker.Start();
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
         var (folder, mic, loop, meta) = NewMeeting("transcript-content");
 
-        worker.Enqueue(NewTask(folder, mic, loop, meta));
+        Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("[S0]"),
-            what: "Transcript enthaelt [S0]-Block");
+        WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("[S0]"),
+            what: "Transcript enthaelt [S0]-Block").GetAwaiter().GetResult();
         var content = File.ReadAllText(meta);
         Assert.Contains("[S0]", content);
         Assert.Contains("Hallo", content);
