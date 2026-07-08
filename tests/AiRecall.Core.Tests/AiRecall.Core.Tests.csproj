@@ -31,5 +31,6 @@
     <ProjectReference Include="..\..\src\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Trigger\AiRecall.Trigger.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Conversion\AiRecall.Conversion.csproj" />
+    <ProjectReference Include="..\..\src\AiRecall.Transcription\AiRecall.Transcription.csproj" />
   </ItemGroup>
 </Project>

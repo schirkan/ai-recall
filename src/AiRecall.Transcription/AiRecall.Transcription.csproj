@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- NAudio 2.2.1: WAVE-File-Reader/Writer fuer Stereo-Concatenation (Spec 0013 v0.3 §5.4) -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
+  </ItemGroup>
+
+</Project>
