@@ -9,8 +9,13 @@
   <ItemGroup>
     <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
     <ProjectReference Include="..\AiRecall.AppReader.Base\AiRecall.AppReader.Base.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Teams\AiRecall.AppReader.Teams.csproj" />
     <ProjectReference Include="..\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\AiRecall.Conversion\AiRecall.Conversion.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
   </ItemGroup>
 
 </Project>

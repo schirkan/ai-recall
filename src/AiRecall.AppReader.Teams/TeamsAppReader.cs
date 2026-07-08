@@ -343,4 +343,115 @@ public sealed class TeamsAppReader : AppReaderBase
             .Replace("\n", " ")
             .Replace("\r", " ");
     }
+
+    // ============================================================================
+    // Meeting-Presence (Spec 0013 v0.3 §1) — Polling-API fuer MeetingPresencePoller
+    // ============================================================================
+
+    /// <summary>
+    /// Liefert einen Snapshot der aktuellen Teams-Meeting-Anwesenheit.
+    /// Polling-API fuer <c>MeetingPresencePoller</c> (Spec 0013 v0.3 §1):
+    /// iteriert alle laufenden <c>ms-teams</c>-Prozesse und prueft, ob ein
+    /// MainWindow mit Title-Prefix <c>"Meeting |"</c> existiert.
+    /// </summary>
+    /// <remarks>
+    /// Polling-Strategie:
+    /// <list type="number">
+    ///   <item><see cref="Process.GetProcessesByName(string)"/> fuer alle ms-teams-Prozesse.</item>
+    ///   <item>Pro Prozess: <see cref="Process.MainWindowTitle"/> parsen via
+    ///         <see cref="TeamsUiaReader.ParseWindowTitle"/>.</item>
+    ///   <item>Pruefen auf <see cref="TeamsChatKind.Meeting"/> (= Title-Prefix "Meeting |").</item>
+    ///   <item>Bei Fund: Snapshot mit Topic, WindowTitle, ChatIdShort zurueckgeben.</item>
+    ///   <item>Sonst: Snapshot mit <c>IsActive=false</c>.</item>
+    /// </list>
+    /// 3-Strategy-Aufloesung (CDP/UIA) wird hier <b>nicht</b> angewendet — fuer
+    /// Presence brauchen wir nur Title, nicht Content. CDP/UIA wird im <see cref="Read"/>-Pfad
+    /// fuer die Capture-Extraktion genutzt.
+    /// </remarks>
+    public static async Task<MeetingPresenceSnapshot> TryGetActiveMeetingAsync(
+        AiRecall.Core.Configuration.TeamsConfig cfg,
+        Serilog.ILogger? logger,
+        CancellationToken ct)
+    {
+        if (!cfg.Enabled)
+        {
+            return new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null);
+        }
+
+        try
+        {
+            var processes = Process.GetProcessesByName(TeamsProcessName);
+            try
+            {
+                foreach (var proc in processes)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var title = proc.MainWindowTitle;
+                    if (string.IsNullOrEmpty(title)) continue;
+
+                    var titleInfo = TeamsUiaReader.ParseWindowTitle(title);
+                    if (titleInfo.Kind != TeamsChatKind.Meeting) continue;
+
+                    // Meeting gefunden.
+                    var topic = ExtractMeetingTopic(title);
+                    var chatId = TeamsHierarchyInfo.ComputeChatId(
+                        titleInfo.FormattedTitle,
+                        titleInfo.ChatTypeLabel,
+                        Array.Empty<string>());
+                    var chatIdShort = ShortId(chatId);
+
+                    logger?.Debug("TeamsAppReader.TryGetActiveMeetingAsync: meeting detected: {Title} -> topic='{Topic}', chatIdShort={ChatIdShort}",
+                        title, topic, chatIdShort);
+
+                    return new MeetingPresenceSnapshot(
+                        IsActive: true,
+                        Topic: topic,
+                        WindowTitle: title,
+                        ChatIdShort: chatIdShort);
+                }
+            }
+            finally
+            {
+                foreach (var proc in processes) proc.Dispose();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.Warning(ex, "TeamsAppReader.TryGetActiveMeetingAsync: failed");
+        }
+
+        return new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null);
+    }
+
+    /// <summary>
+    /// Extrahiert den Topic-Namen aus einem Teams-Meeting-Title.
+    /// Format: <c>"Meeting | &lt;Topic&gt; - Microsoft Teams"</c> → <c>"&lt;Topic&gt;"</c>.
+    /// Gibt <c>null</c> zurueck, wenn das Format nicht erkannt wird.
+    /// </summary>
+    private static string? ExtractMeetingTopic(string windowTitle)
+    {
+        if (string.IsNullOrEmpty(windowTitle)) return null;
+
+        const string prefix = "Meeting | ";
+        const string suffix = " - Microsoft Teams";
+
+        var startIdx = windowTitle.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (startIdx < 0) return null;
+        startIdx += prefix.Length;
+
+        // Suffix kann mehrfach vorkommen (selten, aber moeglich) — wir nehmen den letzten
+        var endIdx = windowTitle.LastIndexOf(suffix, StringComparison.OrdinalIgnoreCase);
+        if (endIdx < 0 || endIdx <= startIdx)
+        {
+            // Kein Suffix gefunden — nimm alles nach dem Prefix
+            return windowTitle[startIdx..].Trim();
+        }
+
+        return windowTitle[startIdx..endIdx].Trim();
+    }
 }
