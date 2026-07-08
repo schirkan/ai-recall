@@ -59,6 +59,12 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
     /// <summary>Wird an Edge-Transitions gefeuert (inactive↔active).</summary>
     public event EventHandler<MeetingPresenceStateChangedEventArgs>? PresenceChanged;
 
+    /// <summary>Test-Hook (internal): manuell PresenceChanged-Event feuern.</summary>
+    internal void RaisePresenceChangedForTest(MeetingPresenceStateChangedEventArgs args)
+    {
+        PresenceChanged?.Invoke(this, args);
+    }
+
     /// <summary>Letzter gesehener Snapshot (null vor erstem Tick).</summary>
     public MeetingPresenceSnapshot? Current { get; private set; }
 

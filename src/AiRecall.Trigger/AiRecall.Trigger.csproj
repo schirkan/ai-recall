@@ -12,6 +12,7 @@
     <ProjectReference Include="..\AiRecall.AppReader.Teams\AiRecall.AppReader.Teams.csproj" />
     <ProjectReference Include="..\AiRecall.ScreenCapture\AiRecall.ScreenCapture.csproj" />
     <ProjectReference Include="..\AiRecall.Conversion\AiRecall.Conversion.csproj" />
+    <ProjectReference Include="..\AiRecall.Transcription\AiRecall.Transcription.csproj" />
   </ItemGroup>
 
   <ItemGroup>
