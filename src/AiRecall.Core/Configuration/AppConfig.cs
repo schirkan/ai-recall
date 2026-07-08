@@ -686,5 +686,54 @@ public sealed class TriggerBlacklist
     public List<string> WindowTitles { get; set; } = new() { "AiRecall - " };
 }
 
+/// <summary>
+/// Transkriptions-Provider-Konfiguration (Spec 0013 v0.3 §5.4, MVP 3 Audio Notes).
+/// Beide Provider (Azure Speech + Deepgram) koennen konfiguriert werden; die
+/// Auswahl zur Laufzeit erfolgt ueber <see cref="Provider"/>.
+/// </summary>
+public sealed class TranscriptionConfig
+{
+    /// <summary>
+    /// Privacy-First-Toggle. Default <c>false</c> — nichts wird transkribiert,
+    /// bevor der User es explizit aktiviert.
+    /// </summary>
+    [Description("true: Transkription aktiv (Spec 0013 v0.3 §5). Default false (Privacy-First).")]
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// Provider-Auswahl: <c>"azure-speech"</c> oder <c>"deepgram"</c>. Fallback
+    /// auf <c>"azure-speech"</c>, wenn der Wert unbekannt ist.
+    /// </summary>
+    [Description("Provider: 'azure-speech' oder 'deepgram'. Fallback: 'azure-speech'.")]
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = "azure-speech";
+
+    /// <summary>API-Key fuer den gewaehlten Provider (verschluesselt at rest — TODO v0.4).</summary>
+    [Description("API-Key fuer den Provider (Azure Cognitive Services oder Deepgram).")]
+    [JsonPropertyName("apiKey")]
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>Azure-spezifisch: Region (z. B. westeurope, eastus).</summary>
+    [Description("Azure-Region (nur fuer 'azure-speech').")]
+    [JsonPropertyName("azureRegion")]
+    public string AzureRegion { get; set; } = "westeurope";
+
+    /// <summary>Deepgram-spezifisch: API-Endpoint.</summary>
+    [Description("Deepgram-Endpoint (nur fuer 'deepgram').")]
+    [JsonPropertyName("deepgramEndpoint")]
+    public string DeepgramEndpoint { get; set; } = "https://api.deepgram.com";
+
+    /// <summary>ISO-639-2-Sprachcode fuer die Transkription (deu, eng, ...).</summary>
+    [Description("ISO-639-2 Sprachcode (deu, eng, ...).")]
+    [JsonPropertyName("defaultLanguage")]
+    public string DefaultLanguage { get; set; } = "deu";
+
+    /// <summary>Cap fuer die Anzahl der Provider-Speaker-IDs (S0..SN-1).</summary>
+    [Description("Max-Speakers fuer Diarization (1-32, Default 8).")]
+    [JsonPropertyName("maxSpeakers")]
+    public int MaxSpeakers { get; set; } = 8;
+}
+
 
 
