@@ -78,11 +78,13 @@ public sealed record TranscriptionProgress(
 /// <summary>
 /// Task-Beschreibung fuer <c>TranscriptionWorker</c> (Spec 0013 v0.3 §5).
 /// Pro Meeting-Aufzeichnung gibt es genau einen Task; Worker enqueued aus
-/// <c>RecordingSession.Stop</c> oder Recovery-Scan.
+/// <c>RecordingSession.Stop</c> oder Recovery-Scan. Stereo-Concatenation
+/// laeuft intern im Worker (mic + loopback → combined-stereo.wav).
 /// </summary>
 public sealed record AudioTranscriptionTask(
     string Folder,
-    string StereoPath,
+    string MicPath,
+    string LoopbackPath,
     string MetadataPath,
     TranscriptionOptions Options,
     DateTimeOffset EnqueuedAt);
