@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
 
+using AiRecall.Core.Audio;
+
 namespace AiRecall.Core.Configuration;
 
 /// <summary>
@@ -35,6 +37,13 @@ public sealed class AppConfig
     /// <summary>Async-Conversion-Pipeline (Spec 0007).</summary>
     [JsonPropertyName("conversion")]
     public ConversionConfig Conversion { get; set; } = new();
+
+    /// <summary>
+    /// Audio-Recording-Konfiguration (Spec 0013 v0.3, MVP 3 Audio Notes).
+    /// Default <c>enabled=false</c> (Privacy-First).
+    /// </summary>
+    [JsonPropertyName("audio")]
+    public AudioConfig Audio { get; set; } = new();
 }
 
 public sealed class AppReaderConfig
@@ -422,6 +431,37 @@ public sealed class TeamsConfig
     [Description("Sender-Patterns (case-insensitive substring) als Whitelist. Leer = alle Sender.")]
     [JsonPropertyName("includeSenderPatterns")]
     public List<string> IncludeSenderPatterns { get; set; } = new();
+
+    // ===== Audio-Notes-MVP3 (Spec 0013 v0.3) ====================================
+    // Erweiterung TeamsConfig fuer MeetingPresencePoller. Diese Properties steuern
+    // die Auto-Recording-Logik (Iter. 2): Polling-Intervall, Mindestdauer,
+    // Auto-Record-Toggle. Iter. 1 hat bewusst KEINEN Recording-Start; diese Werte
+    // werden erst in Iter. 2 wirklich ausgewertet.
+
+    /// <summary>
+    /// true: AiRecall startet Audio-Recording bei erkanntem Teams-Meeting automatisch.
+    /// In Iter. 2 wird der Wert vom Poller ausgewertet; ein tatsaechlicher
+    /// Recording-Start folgt in Iter. 3 (oder spaeter).
+    /// </summary>
+    [Description("true: Auto-Recording bei erkanntem Teams-Meeting (Spec 0013 v0.3).")]
+    [JsonPropertyName("autoRecordMeetings")]
+    public bool AutoRecordMeetings { get; set; } = true;
+
+    /// <summary>
+    /// Mindestdauer eines Meetings in Sekunden. Meetings unter diesem Wert
+    /// werden verworfen (Default 30 s, verhindert 5-Sekunden-Test-Meetings).
+    /// </summary>
+    [Description("Mindestdauer (Sekunden), unter der ein Meeting verworfen wird (Default 30).")]
+    [JsonPropertyName("minMeetingDurationSeconds")]
+    public int MinMeetingDurationSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Polling-Intervall fuer den MeetingPresencePoller in Sekunden (Default 5).
+    /// Niedrigere Werte = schnellere Stop-Erkennung, hoehere Werte = weniger CPU-Last.
+    /// </summary>
+    [Description("Polling-Intervall (Sekunden) fuer den MeetingPresencePoller (Default 5).")]
+    [JsonPropertyName("presencePollIntervalSeconds")]
+    public int PresencePollIntervalSeconds { get; set; } = 5;
 }
 
 /// <summary>

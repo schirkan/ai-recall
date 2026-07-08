@@ -11,6 +11,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="Serilog" Version="3.1.1" />
+    <!-- fuer ILoggerFactory in RecordingSessionTests.cs (Spec 0013 v0.3 Audio Notes) -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
