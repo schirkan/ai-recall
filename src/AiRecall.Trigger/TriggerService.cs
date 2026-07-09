@@ -47,6 +47,8 @@ public sealed class TriggerService : ITriggerService
     private readonly TriggerWorker _worker;
     private readonly ConversionWorker? _conversionWorker;
     private readonly bool _ownsConversionWorker;
+    private readonly MeetingTrigger? _meetingTrigger;
+    private readonly bool _ownsMeetingTrigger;
 
     private bool _isRunning;
     private bool _disposed;
@@ -57,7 +59,8 @@ public sealed class TriggerService : ITriggerService
         AppReaderRegistry? appReaderRegistry = null,
         bool enableWinEventHook = true,
         bool enableHeartbeat = true,
-        ConversionWorker? conversionWorker = null)
+        ConversionWorker? conversionWorker = null,
+        MeetingTrigger? meetingTrigger = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -103,6 +106,12 @@ public sealed class TriggerService : ITriggerService
         //     TesseractOcrEngineAdapter, disposen beim Service-Dispose
         //   - Bei OcrEngine-Init-Fehler (z. B. tessdata fehlt) Fallback auf
         //     NullOcrEngine — Conversion laeuft dann ohne OCR weiter
+        // ConversionWorker (Spec 0007 Schritt 6):
+        //   - Wenn extern injiziert: verwenden, nicht disposen
+        //   - Wenn null + Conversion.Enabled: selbst erzeugen mit
+        //     TesseractOcrEngineAdapter, disposen beim Service-Dispose
+        //   - Bei OcrEngine-Init-Fehler (z. B. tessdata fehlt) Fallback auf
+        //     NullOcrEngine — Conversion laeuft dann ohne OCR weiter
         if (conversionWorker is not null)
         {
             _conversionWorker = conversionWorker;
@@ -129,6 +138,26 @@ public sealed class TriggerService : ITriggerService
             }
             _conversionWorker = new ConversionWorker(_config, _logger, ocrEngine);
             _ownsConversionWorker = true;
+        }
+
+        // MeetingTrigger (Spec 0013 v0.3 §1 + §5.4 Auto-Recording):
+        //   - Wenn extern injiziert: verwenden, nicht disposen
+        //   - Wenn null + Audio.Enabled + TeamsConfig.AutoRecordMeetings: factory-build
+        //     mit Poller + Worker + RecorderFactory-Default
+        //   - Bei Disabled-Audio (Privacy-First, default false): kein Trigger
+        if (meetingTrigger is not null)
+        {
+            _meetingTrigger = meetingTrigger;
+            _ownsMeetingTrigger = false;
+        }
+        else
+        {
+            var defaultTrigger = MeetingTriggerFactory.TryCreateDefault(_config, _logger);
+            if (defaultTrigger is not null)
+            {
+                _meetingTrigger = defaultTrigger;
+                _ownsMeetingTrigger = true;
+            }
         }
 
         _worker = new TriggerWorker(_channel.Reader, _config, _logger, appReaderRegistry, _conversionWorker);
@@ -161,13 +190,23 @@ public sealed class TriggerService : ITriggerService
     /// </summary>
     public ConversionWorker? ConversionWorker => _conversionWorker;
 
+    /// <summary>
+    /// Audio-Meeting-Trigger (Spec 0013 v0.3 §1). <c>null</c>, wenn
+    /// <c>AudioConfig.Enabled=false</c> oder <c>TeamsConfig.AutoRecordMeetings=false</c>
+    /// (Privacy-First-Gate in <see cref="MeetingTriggerFactory.TryCreateDefault"/>).
+    /// </summary>
+    public MeetingTrigger? MeetingTrigger => _meetingTrigger;
+
     /// <inheritdoc />
     public void Start()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(TriggerService));
         if (_isRunning) return; // idempotent
-        // Reihenfolge: Worker zuerst (liest), dann Quellen (schreiben).
+        // Reihenfolge: Worker zuerst (liest), dann Trigger-Quellen, dann
+        // MeetingTrigger (subscribt Poller und emittiert Audio-Tasks ueber
+        // TranscriptionWorker — unabhaengig vom Capture-Channel).
         _worker.Start();
+        _meetingTrigger?.Start();
         _winEventHook?.Start();
         _heartbeat?.Start();
         _periodicCapture?.Start();
@@ -190,6 +229,7 @@ public sealed class TriggerService : ITriggerService
         try { _winEventHook?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "WinEventHook.Stop failed"); }
         try { _heartbeat?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Heartbeat.Stop failed"); }
         try { _periodicCapture?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "PeriodicCapture.Stop failed"); }
+        try { _meetingTrigger?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "MeetingTrigger.Stop failed"); }
         _channel.Writer.TryComplete();
         try { _worker.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Worker.Stop failed"); }
         _isRunning = false;
@@ -209,6 +249,10 @@ public sealed class TriggerService : ITriggerService
         if (_ownsConversionWorker)
         {
             _conversionWorker?.Dispose();
+        }
+        if (_ownsMeetingTrigger)
+        {
+            _meetingTrigger?.Dispose();
         }
         _disposed = true;
     }

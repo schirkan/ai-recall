@@ -1,6 +1,14 @@
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Channels;
+using System.Threading.Tasks;
+
+using AiRecall.AppReader.Teams;
+using AiRecall.Core.Audio;
 using AiRecall.Core.Configuration;
+using AiRecall.Transcription;
 using AiRecall.Trigger;
+
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
@@ -154,5 +162,106 @@ public class TriggerServiceTests
         svc.Start();
         svc.Stop();
         Assert.Contains(sink.Events, e => e.MessageTemplate.Text.Contains("TriggerService stopped"));
+    }
+
+    // =============================================================================
+    // Tests fuer MeetingTrigger-Integration (Spec 0013 v0.3 Iter. 4)
+    // =============================================================================
+
+    private sealed class StubProbe : IMeetingPresenceProbe
+    {
+        public Task<MeetingPresenceSnapshot> GetSnapshotAsync(TeamsConfig cfg, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return Task.FromResult(new MeetingPresenceSnapshot(false, null, null, null));
+        }
+    }
+
+    private sealed class StubTicker : IPresenceTicker
+    {
+        public async ValueTask<bool> WaitForNextTickAsync(CancellationToken ct)
+        {
+            try { await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false); return true; }
+            catch (OperationCanceledException) { return false; }
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class StubClock : IPresenceClock
+    {
+        public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+    }
+
+    private sealed class StubProvider : ITranscriptionProvider
+    {
+        public string Name => "stub";
+        public Task<TranscriptionResult> TranscribeAsync(
+            string stereoPath, TranscriptionOptions options,
+            IProgress<TranscriptionProgress>? progress, CancellationToken cancellationToken)
+            => Task.FromResult(new TranscriptionResult(
+                Segments: new List<TranscriptionSegment>(),
+                ProviderName: "stub",
+                AudioDuration: TimeSpan.Zero,
+                SpeakerCount: 0,
+                SpeakerLabels: new List<string>(),
+                ErrorMessage: null));
+    }
+
+    /// <summary>Baut einen echten MeetingTrigger mit Stub-Probe/Ticker/Clock/Provider
+    /// (kein NAudio, kein Recording — Recorder-Factory bleibt ungenutzt).</summary>
+    private static MeetingTrigger NewStubMeetingTrigger(ILogger logger)
+    {
+        var poller = new MeetingPresencePoller(new StubProbe(), new StubTicker(), new StubClock(), logger);
+        var worker = new TranscriptionWorker(new StubProvider(), maxParallel: 1, logger: logger);
+        Func<MeetingRecordingContext, RecordingSession> recorderFactory = _ => null!;
+        return new MeetingTrigger(
+            poller, worker, recorderFactory,
+            new TranscriptionOptions("deu", DiarizationRequired: true, MaxSpeakers: 4, ApiKey: "test", EndpointOverride: null),
+            logger);
+    }
+
+    [Fact]
+    public void MeetingTrigger_AudioDisabled_PropertyIsNull()
+    {
+        var (logger, _) = NewLogger();
+        var c = NewConfig();
+        c.Audio.Enabled = false;
+        c.AppReader.Teams.AutoRecordMeetings = true;
+        using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false);
+        Assert.Null(svc.MeetingTrigger);
+    }
+
+    [Fact]
+    public void MeetingTrigger_TeamsAutoRecordDisabled_PropertyIsNull()
+    {
+        var (logger, _) = NewLogger();
+        var c = NewConfig();
+        c.Audio.Enabled = true;
+        c.AppReader.Teams.AutoRecordMeetings = false;
+        using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false);
+        Assert.Null(svc.MeetingTrigger);
+    }
+
+    [Fact]
+    public void MeetingTrigger_TeamsReaderDisabled_PropertyIsNull()
+    {
+        var (logger, _) = NewLogger();
+        var c = NewConfig();
+        c.Audio.Enabled = true;
+        c.AppReader.Teams.Enabled = false;       // Master-Switch Teams-Reader
+        c.AppReader.Teams.AutoRecordMeetings = true;
+        using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false);
+        Assert.Null(svc.MeetingTrigger);
+    }
+
+    [Fact]
+    public void MeetingTrigger_ExternallyInjected_IsExposedAsIs_EvenIfAudioDisabled()
+    {
+        var (logger, _) = NewLogger();
+        var c = NewConfig();
+        c.Audio.Enabled = false;
+        var mt = NewStubMeetingTrigger(logger);
+        using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false, meetingTrigger: mt);
+        Assert.Same(mt, svc.MeetingTrigger);
     }
 }

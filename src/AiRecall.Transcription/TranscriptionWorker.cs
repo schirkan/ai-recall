@@ -118,8 +118,10 @@ public sealed class TranscriptionWorker : IDisposable
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    Interlocked.Increment(ref _failedCount);
                     _logger?.Error(ex, "TranscriptionWorker: failed to process {Folder}", task.Folder);
+                    // Counter NACH dem Metadata-Update incrementieren: Tests warten auf
+                    // FailedCount == 1 + meta.md mit 'transcript_status: failed'; bei zu frühem
+                    // Increment ist meta.md noch nicht geschrieben (Race mit MarkFailedAsync).
                     try
                     {
                         await _metadata.MarkFailedAsync(task.MetadataPath, ex.Message, ct).ConfigureAwait(false);
@@ -128,6 +130,7 @@ public sealed class TranscriptionWorker : IDisposable
                     {
                         _logger?.Warning(markEx, "TranscriptionWorker: MarkFailed fehlgeschlagen ({Meta})", task.MetadataPath);
                     }
+                    Interlocked.Increment(ref _failedCount);
                 }
                 finally
                 {

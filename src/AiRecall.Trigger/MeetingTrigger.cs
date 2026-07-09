@@ -39,7 +39,7 @@ public sealed record MeetingRecordingContext(
 /// </list>
 /// </para>
 /// </summary>
-public sealed class MeetingTrigger : IAsyncDisposable
+public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
 {
     private readonly MeetingPresencePoller _poller;
     private readonly TranscriptionWorker _worker;
@@ -173,6 +173,18 @@ public sealed class MeetingTrigger : IAsyncDisposable
         _disposed = true;
         Stop();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Sync-Dispose fuer Composition in <c>TriggerService</c> (analog
+    /// <c>ConversionWorker</c>). Stop() loest das Poller-Event,
+    /// <c>StopRecordingAsync</c> laeuft fire-and-forget im Hintergrund —
+    /// darum reicht die IDiposable-Form fuer Service-Lifecycle.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private sealed record ActiveRecording(

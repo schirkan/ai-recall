@@ -44,6 +44,14 @@ public sealed class AppConfig
     /// </summary>
     [JsonPropertyName("audio")]
     public AudioConfig Audio { get; set; } = new();
+
+    /// <summary>
+    /// Transkriptions-Provider-Konfiguration (Spec 0013 v0.3 §5.4). Stellt
+    /// Provider-Auswahl (Azure Speech / Deepgram) und API-Key bereit.
+    /// Default <c>enabled=false</c> (Privacy-First).
+    /// </summary>
+    [JsonPropertyName("transcription")]
+    public TranscriptionConfig Transcription { get; set; } = new();
 }
 
 public sealed class AppReaderConfig

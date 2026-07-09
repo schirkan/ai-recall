@@ -1,6 +1,6 @@
 # 0013 — Audio Notes (MVP 3)
 
-> **Status:** 🟡 **GEPLANT v0.3 (2026-07-07, Update 2 nach Martin-Feedback)**
+> **Status:** 🟢 **ABGESCHLOSSEN v0.3 (2026-07-09, Update 8 — TriggerSupervisor-Integration)**
 > **Owner:** Martin
 > **Abhängig von:** Spec 0005 (Trigger-Pipeline), Spec 0006 (Tray-EXE), Spec 0007 (Conversion-Worker-Pattern), Spec 0009 (Settings-Dialog), **Spec 0011 (Teams App-Reader — Trigger-Quelle)**, Spec 0012 (Modal-Dialog-Stil)
 
@@ -1368,5 +1368,24 @@ Verbleibende externe Abhängigkeit (nicht TBD, sondern Roadmap):
   `IMeetingDetector`/`TeamsMeetingDetector` verworfen (Duplikation der
   Title-Parsing-Logik). 6 Martin-Entscheidungen angewandt (Provider-Wahl
   Azure-vs-Deepgram noch offen, Kalender-Integration auf v0.4 verschoben).
+- **2026-07-09 (Update 8, Iter. 4)** — TriggerSupervisor-Integration:
+  `MeetingTrigger` wird von `TriggerService` initialisiert/beendet
+  (analog zum `ConversionWorker`-Pattern aus Spec 0007). Neue Factory
+  `MeetingTriggerFactory.TryCreateDefault(config, logger)` baut die
+  Production-Default-Composition (`MeetingPresencePoller` +
+  `TeamsAppReaderProbe` + `TranscriptionWorker` mit Default-Provider
+  (Azure Speech / Deepgram, je nach `TranscriptionConfig.Provider`) +
+  `WasapiAudioRecorderFactory` + `AudioDeviceProvider` +
+  StorageRoot-Fallback auf `%APPDATA%\AiRecall\audio`). Privacy-First-Gate
+  (Audio.Enabled / Teams.AutoRecordMeetings / AppReader.Teams.Enabled) →
+  `null` anstatt Composition. `MeetingTrigger` ist jetzt
+  `IDisposable + IAsyncDisposable`; `Dispose()` ruft `DisposeAsync()`
+  synchron. `TranscriptionWorker`-Bug-Fix: Counter (`_failedCount`)
+  wird jetzt **nach** `MarkFailedAsync` inkrementiert (vorher: Test sah
+  Counter steigen bevor `meta.md` mit `transcript_status: failed`
+  geschrieben war → 40 % Flake-Rate).
+  4 neue `TriggerService`Tests (Audio.Disabled / Teams.AutoRecord.Off /
+  Teams.Reader.Disabled / External-Injection-Is-Exposed-As-Is),
+  777/777 grün in 5/5 Runs stabil.
 - **2026-07-07 (Update 1)** — Erstellt nach Martins Anforderungsliste (8 Punkte).
   Skeleton v0.3.
