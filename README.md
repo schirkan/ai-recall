@@ -3,7 +3,7 @@
 > Lokales, persönliches „Recall"-Tool für Windows — Screenshot-basiertes
 > Memory für Bildschirmarbeit, Mails, Dokumente und (später) Meetings.
 
-⚠️ **Status:** MVP1 + MVP2 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release.
+⚠️ **Status:** MVP1 + MVP2 + MVP3 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release. **777/777 Tests grün stabil** (Stand 2026-07-09).
 
 ## Vision
 
@@ -13,7 +13,7 @@ läuft aber **komplett lokal**, ist **Open Source (MIT)** und fokussiert auf
 
 Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
 
-## Features (Stand 2026-07-05)
+## Features (Stand 2026-07-09)
 
 - ✅ `recall list-windows` — alle Top-Level-Fenster auflisten
 - ✅ `recall active-window` — aktives Fenster (oder per `--hwnd`) capturen
@@ -61,7 +61,28 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
   `ITriggerService`, Hot-Reload via `TriggerSupervisor.Restart`, SingleInstance-Mutex,
   + Live Logviewer ([Spec 0008](./specs/0008-live-logviewer.md), Ringbuffer 10k + Filter + Auto-Scroll)
   + Settings-Dialog ([Spec 0009](./specs/0009-settings-dialog.md), dynamische Form-Generierung via Reflection auf `AppConfig`)
-- MVP3: Auto Knowledge Base / Wiki (Embeddings + LLM-Indexing-Service)
+- ✅ **MVP3 Audio Notes** ([Spec 0013](./specs/0013-audio-notes-mvp3.md), v0.3 Update 8 abgeschlossen 2026-07-09):
+  - Teams-Meeting-Polling (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection,
+    Start-Debounce `MinMeetingDurationSeconds=30s`)
+  - Zweikanaliges Audio-Recording (Mic + Speaker-Loopback via NAudio.Wasapi 2.2.1)
+  - Stereo-Concatenation (`combined-stereo.wav` als Pre-Processing für die
+    Provider — Azure Speech + Deepgram parallel)
+  - Background-Transkription mit Diarization (`TranscriptionWorker`, analog
+    `ConversionWorker`-Pattern aus Spec 0007: Channel + Counter + Recovery-Scan)
+  - Beide Provider implementiert (Martin-Direktive Update 3): Azure Speech
+    (`Microsoft.CognitiveServices.Speech 1.40.0`, Speaker-Label `C0-S1`) +
+    Deepgram REST (`/v1/listen?model=nova-2&language=…&diarize=true&smart_format=true`)
+  - `TranscriptionConnectionTester` (1-s-Silent-Audio → Provider →
+    `ConnectionTestResult`) für Settings-Dialog „Test Connection"
+  - Privacy-First: Auto-Recording nur wenn `audio.enabled=true` UND
+    `appReader.teams.autoRecordMeetings=true` UND `appReader.teams.enabled=true`;
+    sonst `null` (kein Trigger, kein Background-Task)
+  - Trigger-Wiring: `TriggerService` integriert `MeetingTrigger` analog zum
+    bestehenden `ConversionWorker`-Pattern (optional ctor-Param +
+    `_ownsMeetingTrigger`-Flag)
+  - Iter. 1-4 Commits: `88cf4f7` / `787c151` / `8d77e7a` / `725f352` / `c278616` /
+    `b21411a` / `c292b25` / `56965c6` / `2d79f7f` / `ff97767` / `92480e7`
+- MVP4: Auto Knowledge Base / Wiki (Embeddings + LLM-Indexing-Service) — siehe DECISIONS.md 2026-07-06 Roadmap-Reshuffle
 
 ## Quick Start
 
@@ -126,7 +147,13 @@ Hilfreich für Skripte und headless Tests.
 dotnet test
 ```
 
-Aktuell **650/650 grün** (MVP1 + Trigger + App-Reader inkl. Outlook + Documents + PDF + OneNote + Teams + MVP2-Basis + Conversion + TrayApp-PureLogic).
+Aktuell **777/777 Tests grün, 5/5 Runs stabil** (MVP1 + MVP2 + MVP3 Audio Notes).
+
+Iterations-Stand 2026-07-09:
+- MVP1: 650 Tests nach Bug-Bash 2026-07-06 (`d245dd2`)
+- MVP3 (Audio Notes): +104 Tests (Iter. 1-4 vom 2026-07-08/09, Bug-Fix
+  `TranscriptionWorker`-Counter-Race in Iter. 4)
+- Total: **777/777 stabil**
 
 ## Konfiguration
 

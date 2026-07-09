@@ -7,7 +7,7 @@
 
 ## Aktueller Status
 
-**MVP1 abgeschlossen — `active-window` + App-Reader-Foundation (Spec 0004 abgeschlossen: Browser [UIA + CDP opt-in + ReverseMarkdown 1:1], Notepad, Explorer, Documents [Word/Excel/PowerPoint mit COM-Interop Iter. 2/3], Outlook + Mail-Log [Iter. 3], PDF-Viewer) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0) + MVP2 Tray-Icon-EXE (Spec 0006/0008/0009 v1.0).**
+**MVP1 + MVP2 + MVP3 abgeschlossen** — MVP1: `active-window` + App-Reader-Foundation (Spec 0004: Browser [UIA + CDP opt-in + ReverseMarkdown 1:1], Notepad, Explorer, Documents [Word/Excel/PowerPoint mit COM-Interop Iter. 2/3], Outlook + Mail-Log [Iter. 3], PDF-Viewer) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0). MVP2: Tray-Icon-EXE (Spec 0006/0008/0009 v1.0). **MVP3: Audio Notes (Spec 0013 v0.3 Update 8)** — Teams-Meeting-Polling (`MeetingPresencePoller`) + zweikanaliges Recording (Mic + Speaker-Loopback via NAudio.Wasapi 2.2.1) + Stereo-Concatenation + Background-Transkription mit Diarization (Azure Speech + Deepgram, parallel) + TriggerSupervisor-Integration + 777/777 Tests grün.
 
 - [x] Projektordner angelegt
 - [x] Lokales Git-Repo initialisiert (`main`)
@@ -190,7 +190,7 @@ Ausführlich: `specs/0001-vision.md`
 | `specs/0010-onenote-app-reader.md`                                                   | OneNote App-Reader (Spec 0010, 4-stufige Active-Page-Strategie via COM late-binding, Read-only)                                                   |
 | `specs/0011-teams-app-reader.md`                                                     | Teams App-Reader (Spec 0011, Modern Teams only, UIA + CDP opt-in, 3-Strategy-Auflösung)                                                           |
 | `specs/0012-tessdata-first-run.md`                                                  | Tessdata First-Run Download (Spec 0012, geplant v0.1 — Modal-Dialog beim ersten Start wenn Tesseract-tessdata fehlt)                                |
-| `specs/0013-audio-notes-mvp3.md`                                                   | **MVP 3 Audio Notes (Spec 0013, geplant v0.3)** — Teams-Meeting-Detection + zweikanaliges Audio-Recording (Mic + Speaker-Loopback) + Background-Transkription mit Diarization; siehe DECISIONS.md 2026-07-07        |
+| `specs/0013-audio-notes-mvp3.md`                                                   | **MVP 3 Audio Notes (Spec 0013, v0.3 ABGESCHLOSSEN Update 8)** — Teams-Meeting-Polling + zweikanaliges Audio-Recording (Mic + Speaker-Loopback) + Background-Transkription mit Diarization (Azure Speech + Deepgram). Implementiert in Iter. 1-4 (Commits `88cf4f7`/`787c151`/`8d77e7a`/`725f352`/`c278616`/`b21411a`/`c292b25`/`56965c6`/`2d79f7f`/`ff97767`/`92480e7`); siehe DECISIONS.md |
 | `src/`                                                                               | .NET-Solution-Projekte                                                                                                                            |
 | `src/AiRecall.Core/`                                                                 | Models, Configuration, Persistence, Util, Windows                                                                                                 |
 | `src/AiRecall.ScreenCapture/`                                                        | Win32 Window/Screenshot/OCR (kein Trigger mehr)                                                                                                   |
@@ -240,5 +240,59 @@ Folgen `projects/PROJECT-RULES.md`:
    - OCR-Preprocessing (Binarization/Deskew) optional
    - ✅ `*.conversion.md` ↔ `*.content.md` Vereinheitlichung (Bug-Bash I-17, 2026-07-06): ConversionWorker schreibt Document/OCR/UIA in-place in die Capture-MD unter `## Content` (ersetzt Pending-Platzhalter). Kein separates `*.conversion.md` mehr. Ein MD pro Capture.
 7. **OCR tessdata-Packaging** (nach Bug-Bash I-14): Auto-Download von `deu.traineddata`+`eng.traineddata` beim ersten Start in `%LOCALAPPDATA%\AiRecall\tessdata`, oder tessdata-Files in den Installer bündeln. → Spec 0012 geplant v0.1 (Modal-Dialog beim ersten Start mit Auto-Download-Option).
-8. **MVP 3 (Audio Notes) — Spec 0013 v0.3 (Updates 1–8)**: Audio-Capture als **eigenständiges MVP 3** herausgelöst. **Spec voll spezifiziert** (`specs/0013-audio-notes-mvp3.md`, ~63 KB, 7 Anforderungen + 10 Martin-Direktiven geklärt). Aktuelle Architektur (Update 8, 2026-07-07): **Polling-basierte Meeting-Anwesenheitserkennung** (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection) + **Recording-Lifecycle** (eigener Thread + Stop-Signal via `CancellationToken`) + **MD-Stub-Pattern** (zweistufiges Schreiben: Start = `recording`, Stop = `recorded` mit Audio-Links) + **Worker-Discovery** (Live-Enqueue + Recovery-Scan für Crash-Recovery). Beide Provider (Azure Speech + Deepgram) parallel, Stereo-Concatenation als Pre-Processing, Diarization im Provider (rohe Speaker-IDs S0/S1/…). **Implementation wartet auf Martins „go"** nach v0.3-Abnahme. **NICHT** Teil von MVP1/MVP2.
-9. **MVP 4 (Auto Wiki) — Roadmap-Reshuffle 2026-07-06**: Auto-Wiki-Generierung aus Captures wandert von ehemals MVP 3 nach **MVP 4**. Spec-Detail (`0013-auto-wiki.md` Kandidat) folgt in eigenem Cluster, sobald Anforderungen klar sind (LLM-Auswahl, Index-Struktur, Suche/Filter). **NICHT** Teil von MVP1/MVP2/MVP3.
+8. **MVP 3 (Audio Notes) — Spec 0013 v0.3 (Update 8) ✅ ABGESCHLOSSEN + GEPUSHT**:
+   Implementation komplett in 11 Commits (Iter. 1-4):
+   - **Iter. 1** (`88cf4f7`): Recording-Block. `AudioConfig` + `AudioDeviceProvider`
+     (NAudio.Wasapi 2.2.1) + `IAudioRecorder` + `WasapiAudioRecorder` +
+     `RecordingSession` (Lifecycle `Created→Recording→Recorded|Failed`,
+     `IAsyncDisposable`). Privacy-First Default `Audio.Enabled=false`.
+     +23 Tests.
+   - **Iter. 2** (`787c151`): **Polling-basierte Meeting-Anwesenheitserkennung**.
+     `MeetingPresencePoller` (5-s-`PeriodicTimer`, Edge-Detection,
+     Start-Debounce `MinMeetingDurationSeconds=30s`). `MeetingPresenceSnapshot`
+     + `MeetingPresenceStateChangedEventArgs`. `TeamsConfig.AutoRecordMeetings
+     /MinMeetingDurationSeconds/PresencePollIntervalSeconds`. +14 Tests.
+   - **Iter. 3a** (`8d77e7a`): Stereo-Concatenator. Mono+Loopback → `combined-stereo.wav`.
+     NAudio 2.2.1 nutzt `ToSampleProvider().Read(float[],…)`. +7 Tests.
+   - **Iter. 3b** (`725f352`): Provider-Interface `ITranscriptionProvider` +
+     DTOs (`TranscriptionOptions`, `TranscriptionResult`, `TranscriptionSegment`,
+     `TranscriptionProgress`, `AudioTranscriptionTask`) +
+     `TranscriptionConfig` + `TranscriptionConfigResolver` (Fallback
+     `azure-speech`). +12 Tests.
+   - **Iter. 3c** (`c278616`): `AzureSpeechTranscriptionProvider` (NuGet
+     `Microsoft.CognitiveServices.Speech 1.40.0`, Speaker-Label `C0-S1`).
+     +9 Tests.
+   - **Iter. 3d** (`b21411a`): `DeepgramTranscriptionProvider` (HttpClient,
+     `https://api.deepgram.com/v1/listen?model=nova-2&language=…&diarize=true&
+     smart_format=true`). +13 Tests.
+   - **Iter. 3e** (`c292b25`): `TranscriptionWorker` (Init, Channel-basiert,
+     Concatenate→Provider→MD-Update→Cleanup). `MetadataUpdater` schreibt
+     `transcript_status` + `## Transcription`-Block.
+   - **Iter. 3e-r** (`56965c6`): `TranscriptionWorker` analog
+     **ConversionWorker-Pattern** (Spec 0007) refactored: ctor-auto-start
+     Background-Pool, Counter (`PendingCount/CompletedCount/FailedCount`),
+     `IDisposable`, `ScanForPendingTranscriptions` für Crash-Recovery.
+   - **Iter. 3g** (`2d79f7f`): **Trigger-Wiring**: `MeetingTrigger` (Poller
+     → `RecordingSession.Start/Stop` → `TranscriptionWorker.Enqueue`).
+     Test-Hook `MeetingPresencePoller.RaisePresenceChangedForTest()`. +6 Tests.
+   - **Iter. 3f** (`ff97767`): `TranscriptionConnectionTester` (1-s-Silent-Audio
+     → Provider → `ConnectionTestResult`). Deckt Netzwerk/Endpoint,
+     API-Key, Audio-Format ab. +8 Tests.
+   - **Iter. 4** (`92480e7`, **aktuell letzter Commit**): `TriggerService`
+     integriert `MeetingTrigger` (analog `ConversionWorker`-Pattern).
+     Neue Factory `MeetingTriggerFactory.TryCreateDefault(config, logger)` mit
+     Privacy-First-Gate (3 Gates: `Audio.Enabled` / `Teams.AutoRecordMeetings`
+     / `AppReader.Teams.Enabled`). `MeetingTrigger` jetzt
+     `IDisposable + IAsyncDisposable`, sync-`Dispose()` ruft `DisposeAsync()`
+     synchron. `AppConfig.Transcription` als JSON-Property ergänzt.
+     **Counter-Race-Bug-Fix** im `TranscriptionWorker`:
+     `_failedCount`-Increment NACH `await MarkFailedAsync()` verschoben
+     (40 % Flake-Rate vorher, 0 % nachher in 5/5 Runs). +4 Tests.
+   - **Test-Stand:** 673 (Bug-Bash 2026-07-06) → **777/777 grün stabil** nach MVP 3.
+     104 neue Tests für MVP 3 + Counter-Bug-Fix.
+   - **Production-Wiring**: alles automatisch via `TriggerService`-
+     Default-Composition — kein manuelles Setup nötig. `MeetingTrigger` ist
+     `null` wenn Privacy-Gate zuschlägt.
+   - Spezifikation: `specs/0013-audio-notes-mvp3.md`, Update 1-8 dokumentiert.
+9. **MVP 4 (Auto Wiki) — Roadmap-Reshuffle 2026-07-06**: Auto-Wiki-Generierung aus Captures wandert von ehemals MVP 3 nach **MVP 4**. Spec-Detail (`0013-auto-wiki.md` Kandidat) folgt in eigenem Cluster, sobald Anforderungen klar sind (LLM-Auswahl, Index-Struktur, Suche/Filter). **NICHT** Teil von MVP1/MVP2/MVP3 (MVP3 = Audio Notes).
+10. **Spec 0013 v0.4 (Outlook-Speaker-Mapping)** — wartet auf v0.3-Abnahme. Speaker-IDs (S0/S1 aus Provider-Diarization) → Outlook-Kontakte → Realnamen in MD. Architektur: `SpeakerRoleAssigner` mit `OutlookContactLookup` (Outlook-COM-Interop oder Microsoft-Graph-Provider, Entscheidung in Spec-Erweiterung).

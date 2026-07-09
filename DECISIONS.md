@@ -5,6 +5,117 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-09 — MVP 3 Audio Notes IMPLEMENTATION (Spec 0013 v0.3 abgeschlossen)
+
+**Anlass:** Iter. 1-4 Implementations-Cluster nach der Spec-Definition
+vom 2026-07-07. Komplette Pipeline von Teams-Meeting-Polling bis
+MD-Aktualisierung mit Diarization in 11 Commits gepusht. Commits:
+`88cf4f7` (Iter. 1) → `787c151` (Iter. 2) → `8d77e7a`/`725f352`/`c278616`/
+`b21411a`/`c292b25`/`56965c6`/`2d79f7f`/`ff97767` (Iter. 3a-g) → `92480e7`
+(Iter. 4). Stand 22:50: 7 Commits lokal + 4 Commits, alle gepusht, Working
+Tree clean, **777/777 Tests grün stabil in 5/5 Runs**.
+
+**Sub-Iterations-Architektur (Martin-Direktive, Sub-Commits pro
+Komponente):** Iter. 3 wurde in 7 Sub-Commits (3a-3g) zerlegt statt einem
+großen — saubere Trennung pro Komponente (Stereo-Concatenator, Provider-
+Interface, je 1 Provider, Worker-Init, Worker-Refactor, Trigger-Wiring,
+Connection-Tester). Gezieltes Review/Revert pro Provider möglich.
+
+**Pattern: ConversionWorker-Pattern wiederverwendet.** Der
+`TranscriptionWorker` (Spec 0013) folgt 1:1 dem `ConversionWorker`-
+Pattern (Spec 0007): ctor startet Background-Pool auto, Channel<T> +
+SemaphoreSlim(maxN), Counter via Interlocked (`PendingCount/
+CompletedCount/FailedCount`), `IDisposable` für Service-Lifecycle,
+optional ctor-Param + `_owns*` Flag, Recovery-Scan. **Martin-approved
+Standard für Background-Worker im Projekt** — bei neuen Workern
+(ConfigurationWorker, IndexWorker, etc.) diesem Pattern folgen.
+
+**TriggerSupervisor-Integration (Iter. 4, `92480e7`).**
+`MeetingTrigger` wird von `TriggerService` (nicht von `TriggerSupervisor`
+direkt) initialisiert/beendet — analog zur bestehenden
+`ConversionWorker`-Composition. Neue Factory
+`MeetingTriggerFactory.TryCreateDefault(config, logger)` baut die
+Production-Default-Composition mit Privacy-First-Gate:
+
+```text
+if (!Audio.Enabled || !Teams.AutoRecordMeetings || !AppReader.Teams.Enabled) return null;
+// sonst: Poller + Provider-Default + TranscriptionWorker + RecorderFactory + Devices
+```
+
+`MeetingTrigger` wurde nachträglich auf `IDisposable + IAsyncDisposable`
+erweitert; sync-`Dispose()` ruft `DisposeAsync().AsTask().GetAwaiter().
+GetResult()` (saubere Sync-Bridge ohne ConfigureAwait-Verlust).
+
+**Bug-Fix: TranscriptionWorker Counter-Race (in Iter. 4 enthalten).**
+Beim Stabilitätstest (5 Runs) entdeckt: 2/5 Runs scheiterten mit 40 %
+Flake-Rate. Ursache: `_failedCount`-Increment stand VOR dem
+`await _metadata.MarkFailedAsync()`-Aufruf. Tests warten per
+`WaitUntilAsync(() => worker.FailedCount == 1)` auf den Counter, prüfen
+danach `File.Exists(meta)` — Race: Counter steigt bevor `meta.md`
+geschrieben ist. Fix: Increment NACH `await MarkFailedAsync` verschoben.
+Production-Code-Fix, kein Test-Hack. Lesson für künftige Worker:
+**Counter incrementieren erst NACH Side-Effect**, sonst observability
+ohne tatsächliche Vollständigkeit.
+
+**Privacy-First ist nicht verhandelbar.** Drei unabhängige Gates
+hindern `MeetingTrigger` an unbeauftragter Composition: `Audio.Enabled`,
+`TeamsConfig.AutoRecordMeetings`, `AppReaderConfig.Teams.Enabled`. Alle
+drei Default-true (Teams) bzw. Default-false (Audio, Privacy) — User
+muss Auto-Recording bewusst aktivieren. In Tests verifiziert
+(`MeetingTrigger_*_PropertyIsNull` + `MeetingTrigger_ExternallyInjected_*`).
+
+**Lessons für PowerShell-Windows-Development (Martin-relevant):**
+
+1. **Commit-Message via UTF-8-File** (umgeht cp1252-Bug): PowerShell 5.1
+   übergibt Argumente in Windows-Console-Codepage an externe Prozesse.
+   `git commit -m "äöü"` schreibt die cp1252-Bytes ins Commit-Objekt
+   (kaputte Umlaute permanent). Workaround: Commit-Message in
+   `temp/commit-X.txt` via `write`-Tool (UTF-8) + `git commit -F <file>`.
+   Für `git push`: PowerShell-Single-Quotes-Pattern (`git -C 'C:\...' push
+   origin main`) verhindert Pfad-/Argument-Expansion.
+
+2. **PowerShell `~\` + `git -C` ist ein Antagonismus.** `cd '~\...'`
+   expandiert `~\` zu HOME; `git -C '~\...'` versucht wörtlich den
+   `~\`-Pfad und scheitert mit „No such file". Lösung: expliziter
+   Backslash-Pfad mit Drive-Letter, oder `cd` + `git` ohne `-C`.
+
+3. **`git diff --stat` zeigt LF→CRLF-Warnings als „error"**. OpenClaws
+   `exec`-Layer stuft die Git-Warnings als stderr ein → `2>&1` Returncode
+   bei eigentlich erfolgreichem Build. Bei Verdacht: Original-Output
+   prüfen (z. B. `tail -10`), nicht nur Exit-Code.
+
+4. **Test-Run-Stabilität**: 1 Run = unzuverlässig. Minimum 3 Runs vor
+   Commit; bei Counter-/Async-Tests lieber 5. Heute: 776/777 (Flake,
+   Counter-Race), 777/777, 777/777, 777/777, 777/777 → Bug aufgedeckt →
+   Counter-Pattern-Fix → 5/5 Runs stabil grün.
+
+**NAudio 2.2.1 API-Realität (für Iter. 1 hart erarbeitet):**
+
+- `WaveFileReader.Read(float[], int, int)` existiert NICHT in 2.2.1.
+  Pflicht: `waveFileReader.ToSampleProvider().Read(buffer, offset, count)`.
+- `WaveFileWriter.WriteSamples(short[], int, int)` existiert NICHT.
+  Workaround: `float[] = shorts.Select(s => s / 32768f).ToArray()` +
+  `writer.WriteSamples(floats, …)`.
+- `MMDevice.DeviceFriendlyName` = direkte Property, NICHT
+  PropertyStore. PropertyStore-Indexer `this[string]` ist in NAudio 2.x
+  entfernt → nur `Contains(PropertyKey)` + `this[PropertyKey]`.
+- `WaveFileReader.SampleCount` = Frames (NICHT interleaved Samples).
+  Stereo 16 kHz, 100 ms Aufnahme = 1600 Frames.
+- General: NAudio 2.x ist breaking gegenüber 1.x (auch 2.0 → 2.2).
+  Library-Wechsel: immer API-Diff prüfen.
+
+**Poller-Test-Hook-Pattern (projektweit etabliert):** Klassen mit
+Debounce (Poller, 30 s `MinMeetingDurationSeconds`) brauchen
+Test-Hooks, weil reale Clock-Tests zu lange dauern würden. Lösung:
+`internal void RaiseXxxChangedForTest(args)` per `InternalsVisibleTo`
+für Test-Assembly. Production-Code nutzt weiter echte Detection-Pfade.
+
+**Status:** MVP 3 v0.3 vollständig abgeschlossen. Nächste Stufe:
+Spec 0013 v0.4 (Outlook-Speaker-Mapping) auf Martins „go" oder
+MVP 4 Auto-Wiki.
+
+---
+
 ## 2026-07-07 — MVP 3 Audio Notes (Spec 0013, v0.3 nach Martin-Feedback)
 
 **Anlass:** Martins Anforderungsliste 2026-07-07 (Telegram-Topic „AI Recall",
