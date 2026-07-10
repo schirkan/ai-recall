@@ -5,9 +5,15 @@ namespace AiRecall.Core.Persistence;
 
 /// <summary>
 /// Persists a capture as a PNG + Markdown-with-YAML-frontmatter pair under
-/// <c>{root}/yyyy-MM-dd/{process}/{HHmmss-fff}-{title-slug}.{png,md}</c>.
+/// <c>{root}/yyyy-MM-dd/{process}/{HHmmss-fff}.{png,md}</c>.
 /// The Markdown embeds a relative link to the screenshot (P-3 from MVP1 spec).
-/// Optional <c>*.content.md</c> for structured App-Reader output (Spec 0004).
+/// Optional <c>{HHmmss-fff}.content.md</c> for structured App-Reader output (Spec 0004).
+///
+/// File names deliberately do NOT include the window title: titles can be very long
+/// (e.g. multi-clause browser tab titles, deeply nested document names) and cause
+/// path-length issues on Windows. The window title is preserved verbatim in the
+/// YAML frontmatter (<c>title</c>) and as the H1 in the body — only the filename
+/// drops it. See spec decision 2026-07-10.
 /// </summary>
 public static class CaptureWriter
 {
@@ -27,9 +33,7 @@ public static class CaptureWriter
             SanitizeFileName(window.ProcessName));
         Directory.CreateDirectory(dayDir);
 
-        var stamp = timestamp.ToString("HHmmss-fff");
-        var titleSlug = SanitizeFileName(string.IsNullOrWhiteSpace(window.Title) ? "untitled" : window.Title);
-        var baseName = $"{stamp}-{titleSlug}";
+        var baseName = BuildBaseName(timestamp);
 
         var screenshotPath = Path.Combine(dayDir, baseName + ".png");
         var markdownPath = Path.Combine(dayDir, baseName + ".md");
@@ -69,9 +73,7 @@ public static class CaptureWriter
             SanitizeFileName(window.ProcessName));
         Directory.CreateDirectory(dayDir);
 
-        var stamp = timestamp.ToString("HHmmss-fff");
-        var titleSlug = SanitizeFileName(string.IsNullOrWhiteSpace(window.Title) ? "untitled" : window.Title);
-        var baseName = $"{stamp}-{titleSlug}";
+        var baseName = BuildBaseName(timestamp);
 
         var screenshotPath = Path.Combine(dayDir, baseName + ".png");
         var markdownPath = Path.Combine(dayDir, baseName + ".md");
@@ -321,9 +323,7 @@ public static class CaptureWriter
             SanitizeFileName(window.ProcessName));
         Directory.CreateDirectory(dayDir);
 
-        var stamp = timestamp.ToString("HHmmss-fff");
-        var titleSlug = SanitizeFileName(string.IsNullOrWhiteSpace(window.Title) ? "untitled" : window.Title);
-        var baseName = $"{stamp}-{titleSlug}";
+        var baseName = BuildBaseName(timestamp);
 
         var contentPath = Path.Combine(dayDir, baseName + ".content.md");
         File.WriteAllText(contentPath, RenderContentMarkdown(result, window, timestamp, appContext), new UTF8Encoding(false));
@@ -400,6 +400,22 @@ public static class CaptureWriter
         var s = sb.ToString().Trim();
         if (s.Length > 80) s = s[..80];
         return string.IsNullOrEmpty(s) ? "untitled" : s;
+    }
+
+    /// <summary>
+    /// Baut den <c>{baseName}</c>-Anteil des Capture-Dateinamens (ohne Extension).
+    /// Bewusst OHNE Fenstertitel — der Titel landet im YAML-Frontmatter und als H1 im
+    /// Body, nicht im Filename. Gründe: (1) Browser-Tab-Titel können beliebig lang
+    /// sein (Multi-Clause-Strings), (2) Sonderzeichen-Sanitisierung ist fehleranfällig,
+    /// (3) Window-Titel können sich zwischen Trigger und Conversion unterscheiden,
+    ///   was die Korrelation Capture ↔ Content unnötig kompliziert.
+    /// Kollisionen mehrerer Captures in derselben Millisekunde sind durch das
+    /// <c>fff</c>-Segment extrem unwahrscheinlich; bei Bedarf kann später
+    /// ein Counter-Suffix angehängt werden.
+    /// </summary>
+    private static string BuildBaseName(DateTimeOffset timestamp)
+    {
+        return timestamp.ToString("HHmmss-fff");
     }
 
     private static string EscapeYaml(string value)
