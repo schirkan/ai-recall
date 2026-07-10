@@ -40,7 +40,7 @@
     "browser": {
       "maxTextLengthKB": 50,
       "cdp": {
-        "enabled": false,
+        "enabled": true,
         "endpoint": "http://localhost:9222",
         "timeoutMs": 1500
       },

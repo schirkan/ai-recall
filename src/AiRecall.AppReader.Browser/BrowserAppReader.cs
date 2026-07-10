@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
+using Serilog;
 
 namespace AiRecall.AppReader.Browser;
 
@@ -50,13 +51,37 @@ public sealed class BrowserAppReader : AppReaderBase
             var (tabTitle, browserSuffix) = ParseTitle(window.Title);
 
             // 1. CDP-Pfad versuchen (intern: Skip wenn cdp.enabled == false)
-            var cdp = ChromeDevToolsProtocolClient.TryReadActivePage(context.Config.AppReader.Browser.Cdp);
+            var cdpConfig = context.Config.AppReader.Browser.Cdp;
+            ChromeDevToolsProtocolClient.CdpResult? cdp = null;
+            if (cdpConfig.Enabled)
+            {
+                context.Logger.Information(
+                    "Browser reader: CDP enabled (endpoint={Endpoint}, timeoutMs={Timeout}), querying…",
+                    cdpConfig.Endpoint, cdpConfig.TimeoutMs);
+                cdp = ChromeDevToolsProtocolClient.TryReadActivePage(cdpConfig);
+                if (cdp is null)
+                {
+                    context.Logger.Information(
+                        "Browser reader: CDP returned no page snapshot (endpoint unreachable or no active tab) — falling back to UIA");
+                }
+            }
+            else
+            {
+                context.Logger.Debug(
+                    "Browser reader: CDP disabled in config, using UIA only");
+            }
 
             // 2. URL: CDP hat Vorrang, sonst UIA
             string? url = cdp?.Url;
             if (string.IsNullOrEmpty(url))
             {
-                url = TryReadUrlViaUia(window.Handle);
+                url = TryReadUrlViaUia(window.Handle, context.Logger);
+                if (string.IsNullOrEmpty(url))
+                {
+                    context.Logger.Debug(
+                        "Browser reader: UIA produced no URL for HWND 0x{Hwnd:X} (no Edit/ComboBox match)",
+                        window.Handle.ToInt64());
+                }
             }
 
             // 3. Content: CDP-HTML → ReverseMarkdown; sonst UIA-TextPattern
@@ -71,11 +96,17 @@ public sealed class BrowserAppReader : AppReaderBase
             }
             else
             {
-                var text = TryReadBodyViaUia(window.Handle, maxChars);
+                var text = TryReadBodyViaUia(window.Handle, maxChars, context.Logger);
                 if (!string.IsNullOrEmpty(text))
                 {
                     contentMarkdown = $"```\n{TruncateForCodeBlock(text, maxChars)}\n```";
                     contentSource = "uia-text";
+                }
+                else
+                {
+                    context.Logger.Debug(
+                        "Browser reader: UIA produced no body for HWND 0x{Hwnd:X} (no Document/Pane match)",
+                        window.Handle.ToInt64());
                 }
             }
 
@@ -232,67 +263,143 @@ public sealed class BrowserAppReader : AppReaderBase
         return s[..maxChars] + "\n// ... (truncated)";
     }
 
-    private static string? TryReadUrlViaUia(IntPtr hWnd)
+    private static string? TryReadUrlViaUia(IntPtr hWnd, ILogger? logger = null)
     {
         try
         {
             var element = AutomationElement.FromHandle(hWnd);
-            if (element is null) return null;
+            if (element is null)
+            {
+                logger?.Debug("Browser reader UIA: AutomationElement.FromHandle returned null for HWND 0x{Hwnd:X}", hWnd.ToInt64());
+                return null;
+            }
 
-            var cond = new AndCondition(
+            // Strategie 1+2: Edits + ComboBoxes mit Address/Search/URL im Name oder in der AutomationId.
+            // Moderner Edge hat die Adressleiste oft als ComboBox mit AutomationId "urlBar"
+            // oder Name "Address and search bar" (lokalisiert).
+            var urlCandidates = new OrCondition(
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ComboBox));
+            var cond = new AndCondition(
+                urlCandidates,
                 new PropertyCondition(AutomationElement.IsEnabledProperty, true));
 
             var edits = element.FindAll(TreeScope.Descendants, cond);
+            logger?.Debug("Browser reader UIA: found {Count} Edit/ComboBox candidates under HWND 0x{Hwnd:X}", edits.Count, hWnd.ToInt64());
+
+            string? firstPlausibleUrl = null;
             foreach (AutomationElement edit in edits)
             {
                 var name = edit.Current.Name ?? string.Empty;
-                if (name.Contains("Address", StringComparison.OrdinalIgnoreCase) ||
+                var automationId = edit.Current.AutomationId ?? string.Empty;
+                var isAddressLike =
+                    name.Contains("Address", StringComparison.OrdinalIgnoreCase) ||
                     name.Contains("Search", StringComparison.OrdinalIgnoreCase) ||
-                    name.Contains("URL", StringComparison.OrdinalIgnoreCase))
+                    name.Contains("URL", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Url bar", StringComparison.OrdinalIgnoreCase) ||
+                    automationId.Contains("address", StringComparison.OrdinalIgnoreCase) ||
+                    automationId.Contains("url", StringComparison.OrdinalIgnoreCase) ||
+                    automationId.Equals("urlBar", StringComparison.OrdinalIgnoreCase) ||
+                    automationId.Equals("addressBar", StringComparison.OrdinalIgnoreCase);
+
+                if (!isAddressLike) continue;
+
+                if (!edit.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObj) ||
+                    patternObj is not ValuePattern vp)
                 {
-                    if (edit.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObj) &&
-                        patternObj is ValuePattern vp)
+                    continue;
+                }
+                var value = vp.Current.Value;
+                if (string.IsNullOrWhiteSpace(value)) continue;
+                if (UrlRegex.IsMatch(value)) return value;
+                firstPlausibleUrl ??= value;
+            }
+
+            // Strategie 3 (Fallback): Wenn genau EIN Edit/ComboBox im Baum vorhanden ist
+            // und einen Wert hat, der wie eine URL aussieht, nehmen wir ihn an.
+            // Edge hat nur eine kombinierte Adress-/Suchleiste — selbst wenn Name/Id
+            // nicht passen, ist das die Address-Bar.
+            if (firstPlausibleUrl is null && edits.Count == 1)
+            {
+                AutomationElement only = edits[0];
+                if (only.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObj) &&
+                    patternObj is ValuePattern vp)
+                {
+                    var value = vp.Current.Value;
+                    if (!string.IsNullOrWhiteSpace(value) && UrlRegex.IsMatch(value))
                     {
-                        var value = vp.Current.Value;
-                        if (!string.IsNullOrWhiteSpace(value) && UrlRegex.IsMatch(value))
-                        {
-                            return value;
-                        }
+                        logger?.Debug("Browser reader UIA: using single-Edit/ComboBox fallback for URL");
+                        return value;
                     }
                 }
             }
+
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.Warning(ex, "Browser reader UIA: TryReadUrlViaUia failed for HWND 0x{Hwnd:X}", hWnd.ToInt64());
             return null;
         }
     }
 
-    private static string? TryReadBodyViaUia(IntPtr hWnd, int maxChars)
+    private static string? TryReadBodyViaUia(IntPtr hWnd, int maxChars, ILogger? logger = null)
     {
         try
         {
             var element = AutomationElement.FromHandle(hWnd);
-            if (element is null) return null;
-
-            var cond = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document);
-            var doc = element.FindFirst(TreeScope.Descendants, cond);
-            if (doc is null) return null;
-
-            if (doc.TryGetCurrentPattern(TextPattern.Pattern, out var patternObj) &&
-                patternObj is TextPattern tp)
+            if (element is null)
             {
-                var range = tp.DocumentRange;
-                var text = range.GetText(maxChars);
-                return string.IsNullOrEmpty(text) ? null : text;
+                logger?.Debug("Browser reader UIA: AutomationElement.FromHandle returned null for HWND 0x{Hwnd:X}", hWnd.ToInt64());
+                return null;
             }
+
+            // Strategie 1: Document-Control (klassisch, z. B. Firefox/IE).
+            var doc = element.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document));
+            if (doc is not null)
+            {
+                var fromDoc = TryReadTextFromElement(doc, maxChars);
+                if (fromDoc is not null)
+                {
+                    logger?.Debug("Browser reader UIA: body found via Document control");
+                    return fromDoc;
+                }
+            }
+
+            // Strategie 2: Pane-Control mit TextPattern. Edge (Chromium) rendert
+            // Webseiten-Content oft in einer Custom-Tree-Pane, nicht als Document.
+            var pane = element.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Pane));
+            if (pane is not null)
+            {
+                var fromPane = TryReadTextFromElement(pane, maxChars);
+                if (fromPane is not null)
+                {
+                    logger?.Debug("Browser reader UIA: body found via Pane control");
+                    return fromPane;
+                }
+            }
+
+            logger?.Debug("Browser reader UIA: no Document or Pane control with TextPattern under HWND 0x{Hwnd:X}", hWnd.ToInt64());
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.Warning(ex, "Browser reader UIA: TryReadBodyViaUia failed for HWND 0x{Hwnd:X}", hWnd.ToInt64());
             return null;
         }
+    }
+
+    private static string? TryReadTextFromElement(AutomationElement element, int maxChars)
+    {
+        if (element.TryGetCurrentPattern(TextPattern.Pattern, out var patternObj) &&
+            patternObj is TextPattern tp)
+        {
+            var range = tp.DocumentRange;
+            var text = range.GetText(maxChars);
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        return null;
     }
 }

@@ -3,6 +3,8 @@ using AiRecall.AppReader.Browser;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
 using Serilog;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace AiRecall.Core.Tests.AppReaders;
 
@@ -371,5 +373,107 @@ public class BrowserAppReaderTests
         Assert.Null(cfg.AppReader.Browser.Markdown.UnknownTags);
         Assert.Null(cfg.AppReader.Browser.Markdown.GithubFlavored);
         Assert.Null(cfg.AppReader.Browser.Markdown.ListBulletChar);
+    }
+
+    // ---- Diagnostic-Logging (Fix A: Logging statt silent catch) ----
+
+    /// <summary>
+    /// Minimaler In-Memory-Log-Sink für Test-Assertions. Implementiert
+    /// <see cref="ILogEventSink"/> direkt (kein NuGet-Package nötig).
+    /// </summary>
+    private sealed class ListLogSink : ILogEventSink
+    {
+        public List<LogEvent> Events { get; } = new();
+        public void Emit(LogEvent logEvent) => Events.Add(logEvent);
+        public bool Contains(string fragment) =>
+            Events.Any(e => e.RenderMessage().Contains(fragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (ILogger Logger, ListLogSink Sink) BuildCollectingLogger(LogEventLevel minLevel = LogEventLevel.Verbose)
+    {
+        var sink = new ListLogSink();
+        var logger = new LoggerConfiguration()
+            .MinimumLevel.Is(minLevel)
+            .WriteTo.Sink(sink)
+            .CreateLogger();
+        return (logger, sink);
+    }
+
+    [Fact]
+    public void Read_CdpEnabled_LogsInformationAboutCdpAttempt()
+    {
+        // CDP aktiviert, aber Server nicht erreichbar → Information-Log muss kommen.
+        var cfg = new AppConfig();
+        cfg.AppReader.Browser.Cdp.Enabled = true;
+        cfg.AppReader.Browser.Cdp.Endpoint = "http://127.0.0.1:39998";
+        cfg.AppReader.Browser.Cdp.TimeoutMs = 100;
+
+        var (logger, sink) = BuildCollectingLogger();
+        var ctx = new AppReaderContext { Config = cfg, Logger = logger };
+
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("msedge", "Sample - Microsoft Edge"), ctx);
+
+        Assert.NotNull(result);
+        Assert.True(sink.Contains("CDP enabled"),
+            "Expected Information-Log containing 'CDP enabled' when CDP config flag is on");
+    }
+
+    [Fact]
+    public void Read_CdpEnabled_FailsGracefully_LogsFallbackMessage()
+    {
+        // CDP an, Server nicht erreichbar → Log muss "falling back to UIA" o. ä. enthalten,
+        // damit Diagnose ohne DevTools möglich ist.
+        var cfg = new AppConfig();
+        cfg.AppReader.Browser.Cdp.Enabled = true;
+        cfg.AppReader.Browser.Cdp.Endpoint = "http://127.0.0.1:39997";
+        cfg.AppReader.Browser.Cdp.TimeoutMs = 100;
+
+        var (logger, sink) = BuildCollectingLogger();
+        var ctx = new AppReaderContext { Config = cfg, Logger = logger };
+
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("chrome", "Anything - Google Chrome"), ctx);
+
+        Assert.NotNull(result);
+        Assert.Equal("none", result!.Extra!["contentSource"]);
+        Assert.True(
+            sink.Contains("falling back to UIA") || sink.Contains("CDP returned"),
+            "Expected a diagnostic log explaining the CDP fallback path");
+    }
+
+    [Fact]
+    public void Read_CdpDisabled_LogsDebug()
+    {
+        // CDP aus → Debug-Log muss "CDP disabled" enthalten (für Diagnose bei Tests).
+        var cfg = new AppConfig();
+        cfg.AppReader.Browser.Cdp.Enabled = false;
+
+        var (logger, sink) = BuildCollectingLogger();
+        var ctx = new AppReaderContext { Config = cfg, Logger = logger };
+
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("msedge", "X - Microsoft Edge"), ctx);
+
+        Assert.NotNull(result);
+        Assert.True(sink.Contains("CDP disabled"),
+            "Expected Debug-Log containing 'CDP disabled' when CDP config flag is off");
+    }
+
+    [Fact]
+    public void Read_NoUiaUrlNoUiaBody_LogsBothDebugs()
+    {
+        // Stub-Hwnd → UIA liefert weder URL noch Body → zwei Debug-Logs erwartet.
+        var (logger, sink) = BuildCollectingLogger();
+        var ctx = new AppReaderContext { Config = new AppConfig(), Logger = logger };
+
+        var reader = new BrowserAppReader();
+        var result = reader.Read(Win("chrome", "Y - Google Chrome"), ctx);
+
+        Assert.NotNull(result);
+        Assert.True(sink.Contains("UIA produced no URL"),
+            "Expected Debug-Log for missing UIA URL on IntPtr.Zero");
+        Assert.True(sink.Contains("UIA produced no body"),
+            "Expected Debug-Log for missing UIA body on IntPtr.Zero");
     }
 }
