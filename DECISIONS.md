@@ -88,6 +88,12 @@ muss Auto-Recording bewusst aktivieren. In Tests verifiziert
    Commit; bei Counter-/Async-Tests lieber 5. Heute: 776/777 (Flake,
    Counter-Race), 777/777, 777/777, 777/777, 777/777 → Bug aufgedeckt →
    Counter-Pattern-Fix → 5/5 Runs stabil grün.
+   **Update 2026-07-10**: Auch 5 Runs sind nicht genug. Bei einem
+   33%-Flake liegt P(0 Fehler in 5) = (0,67)^5 ≈ 13 %. Erst **10–12 Runs**
+   detektieren mit >95 % Wahrscheinlichkeit. Beispiel: 12 Runs heute hatten
+   4 Fehler (P(4 oder mehr) ≈ 8 % — wir hatten Pech im Bereich 8–13 %).
+   **Faustregel**: 10+ Runs für Counter/Async-Pfade; jeder Run mit Verbose-Logger,
+   damit das FAIL-Muster sichtbar wird.
 
 **NAudio 2.2.1 API-Realität (für Iter. 1 hart erarbeitet):**
 
