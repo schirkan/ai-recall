@@ -150,6 +150,10 @@ public class MeetingTriggerTests
         var loop = new AudioDeviceInfo("loop-1", "Default Speakers", "USB");
         var devices = new FakeDeviceProvider();
         var recorders = new FakeRecorderFactory();
+        // AudioConfig.StorageRoot auf den Test-Temp-Pfad setzen, damit
+        // parallele xUnit-Tests nicht in den geteilten AppContext.BaseDirectory-
+        // Pfad schreiben (sonst IOException auf meta.md).
+        var audioConfig = new AudioConfig { StorageRoot = _root };
 
         Func<MeetingRecordingContext, RecordingSession> factory = ctx =>
         {
@@ -158,7 +162,7 @@ public class MeetingTriggerTests
                 meetingIdShort: ctx.ChatIdShort,
                 startedAt: DateTimeOffset.UtcNow,
                 topic: ctx.Topic,
-                config: new AudioConfig(),
+                config: audioConfig,
                 logger: _logger,
                 recorderFactory: recorders,
                 deviceProvider: devices);
@@ -279,5 +283,260 @@ public class MeetingTriggerTests
         poller.RaisePresenceChangedForTest(a with { IsActive = false });
         await WaitUntilAsync(() => trigger.ActiveCount == 1, what: "ActiveCount == 1 nach A-Stop");
         Assert.Equal(1, trigger.ActiveCount);
+    }
+
+    // =============================================================================
+    // Tests fuer IRecordingControl (Spec 0014 v0.1 Iter. 1)
+    // =============================================================================
+
+    /// <summary>Wie <see cref="NewPollerWorkerFactory"/>, aber mit zusaetzlicher
+    /// <c>manualRecorderFactory</c> fuer <see cref="MeetingTrigger.StartManualAsync"/>.</summary>
+    private (MeetingPresencePoller poller, TranscriptionWorker worker,
+             Func<MeetingRecordingContext, RecordingSession> factory,
+             Func<RecordingSession> manualFactory)
+        NewPollerWorkerFactoryWithManual()
+    {
+        var probe = new FakeProbe();
+        var ticker = new FakeTicker();
+        var clock = new FakeClock();
+        var poller = new MeetingPresencePoller(probe, ticker, clock, _logger);
+        var worker = new TranscriptionWorker(new FakeProvider(), maxParallel: 1, logger: _logger);
+
+        var recorders = new FakeRecorderFactory();
+        var devices = new FakeDeviceProvider();
+        var folderCounter = 0;
+        // AudioConfig.StorageRoot auf den Test-Temp-Pfad setzen, damit
+        // parallele xUnit-Tests nicht in den geteilten AppContext.BaseDirectory-
+        // Pfad schreiben (sonst IOException auf meta.md).
+        var audioConfig = new AudioConfig { StorageRoot = _root };
+
+        Func<MeetingRecordingContext, RecordingSession> factory = ctx =>
+        {
+            var folder = Path.Combine(_root, "meetings", ctx.ChatIdShort);
+            return new RecordingSession(
+                meetingIdShort: ctx.ChatIdShort,
+                startedAt: DateTimeOffset.UtcNow,
+                topic: ctx.Topic,
+                config: audioConfig,
+                logger: _logger,
+                recorderFactory: recorders,
+                deviceProvider: devices);
+        };
+        Func<RecordingSession> manualFactory = () =>
+        {
+            // Eindeutiger Key: GUID mit 32 hex + Counter als Suffix fuer
+            // Race-Freiheit bei parallelen Tests im selben Millisekunden-Bereich.
+            var id = $"manual-{Guid.NewGuid():N}-{Interlocked.Increment(ref folderCounter):D3}";
+            return new RecordingSession(
+                meetingIdShort: id,
+                startedAt: DateTimeOffset.UtcNow,
+                topic: "(manual recording)",
+                config: audioConfig,
+                logger: _logger,
+                recorderFactory: recorders,
+                deviceProvider: devices);
+        };
+        return (poller, worker, factory, manualFactory);
+    }
+
+    [Fact]
+    public async Task IsRecording_DefaultsToFalse_WhenNoSession()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        Assert.False(trigger.IsRecording);
+        Assert.Equal(0, trigger.ActiveCount);
+    }
+
+    [Fact]
+    public async Task IsRecording_True_WhenMeetingAutoStarted()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        trigger.Start();
+
+        var args = new MeetingPresenceStateChangedEventArgs(
+            IsActive: true, Topic: "Test", WindowTitle: "Meeting | Test - Teams",
+            ChatIdShort: "isrec01", DetectedAt: DateTimeOffset.UtcNow);
+        poller.RaisePresenceChangedForTest(args);
+
+        Assert.True(trigger.IsRecording);
+        Assert.Equal(1, trigger.ActiveCount);
+    }
+
+    [Fact]
+    public async Task IsRecording_False_WhenMeetingAutoStopped()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        trigger.Start();
+
+        var startArgs = new MeetingPresenceStateChangedEventArgs(
+            IsActive: true, Topic: "Test", WindowTitle: "Meeting | Test - Teams",
+            ChatIdShort: "isrec02", DetectedAt: DateTimeOffset.UtcNow);
+        poller.RaisePresenceChangedForTest(startArgs);
+        Assert.True(trigger.IsRecording);
+
+        var stopArgs = startArgs with { IsActive = false };
+        poller.RaisePresenceChangedForTest(stopArgs);
+
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Auto-Stop");
+        Assert.False(trigger.IsRecording);
+        Assert.Equal(0, trigger.ActiveCount);
+    }
+
+    [Fact]
+    public async Task RecordingStateChanged_Fired_OnAutoStart()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        var events = new List<RecordingStateChangedEventArgs>();
+        trigger.RecordingStateChanged += (_, e) => events.Add(e);
+        trigger.Start();
+
+        var args = new MeetingPresenceStateChangedEventArgs(
+            IsActive: true, Topic: "Standup", WindowTitle: "Meeting | Standup - Teams",
+            ChatIdShort: "statev01", DetectedAt: DateTimeOffset.UtcNow);
+        poller.RaisePresenceChangedForTest(args);
+
+        var startEvent = Assert.Single(events);
+        Assert.True(startEvent.IsRecording);
+        Assert.Equal(RecordingSource.MeetingAuto, startEvent.Source);
+        Assert.Equal("statev01", startEvent.Key);
+        Assert.Equal("Standup", startEvent.Topic);
+    }
+
+    [Fact]
+    public async Task RecordingStateChanged_Fired_OnAutoStop()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        var events = new List<RecordingStateChangedEventArgs>();
+        trigger.RecordingStateChanged += (_, e) => events.Add(e);
+        trigger.Start();
+
+        var startArgs = new MeetingPresenceStateChangedEventArgs(
+            IsActive: true, Topic: "X", WindowTitle: "Meeting | X - Teams",
+            ChatIdShort: "statev02", DetectedAt: DateTimeOffset.UtcNow);
+        poller.RaisePresenceChangedForTest(startArgs);
+        poller.RaisePresenceChangedForTest(startArgs with { IsActive = false });
+
+        await WaitUntilAsync(() => events.Count == 2, what: "2 RecordingStateChanged-Events");
+        var stopEvent = events[1];
+        Assert.False(stopEvent.IsRecording);
+        Assert.Equal(RecordingSource.MeetingAuto, stopEvent.Source);
+        Assert.Equal("statev02", stopEvent.Key);
+    }
+
+    [Fact]
+    public async Task StartManualAsync_Throws_WhenNoFactoryProvided()
+    {
+        var (poller, worker, factory, _) = NewPollerWorkerFactoryWithManual();
+        // manual-Factory WIRD NICHT injiziert (null)
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger);
+        await Assert.ThrowsAsync<NotSupportedException>(
+            async () => await trigger.StartManualAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task StartManualAsync_CreatesSession_FiresEvent_ReturnsKey()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+        var events = new List<RecordingStateChangedEventArgs>();
+        trigger.RecordingStateChanged += (_, e) => events.Add(e);
+
+        var key = await trigger.StartManualAsync(CancellationToken.None);
+
+        Assert.False(string.IsNullOrEmpty(key));
+        Assert.True(trigger.IsRecording);
+        Assert.Equal(1, trigger.ActiveCount);
+
+        var startEvent = Assert.Single(events);
+        Assert.True(startEvent.IsRecording);
+        Assert.Equal(RecordingSource.Manual, startEvent.Source);
+        Assert.Equal(key, startEvent.Key);
+        Assert.Null(startEvent.Topic); // manuelle Aufnahme: keine Topic-Info
+    }
+
+    [Fact]
+    public async Task StartManualAsync_Key_HasManualPrefix()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        var key = await trigger.StartManualAsync(CancellationToken.None);
+
+        Assert.StartsWith("manual-", key);
+        Assert.True(key.Length > "manual-".Length);
+    }
+
+    [Fact]
+    public async Task StopAsync_WithSpecificKey_StopsOnlyThatSession()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        var key1 = await trigger.StartManualAsync(CancellationToken.None);
+        var key2 = await trigger.StartManualAsync(CancellationToken.None);
+        Assert.Equal(2, trigger.ActiveCount);
+
+        await trigger.StopAsync(key1);
+
+        await WaitUntilAsync(() => trigger.ActiveCount == 1, what: "ActiveCount == 1 nach Stop(key1)");
+        Assert.Equal(1, trigger.ActiveCount);
+        Assert.True(trigger.IsRecording); // key2 laeuft noch
+
+        // Cleanup
+        await trigger.StopAsync(key2);
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Stop(key2)");
+    }
+
+    [Fact]
+    public async Task StopAsync_WithNullKey_StopsAllSessions()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        await trigger.StartManualAsync(CancellationToken.None);
+        await trigger.StartManualAsync(CancellationToken.None);
+        await trigger.StartManualAsync(CancellationToken.None);
+        Assert.Equal(3, trigger.ActiveCount);
+
+        await trigger.StopAsync(); // null = alle
+
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "alle Sessions gestoppt");
+        Assert.False(trigger.IsRecording);
+        Assert.Equal(0, trigger.ActiveCount);
+    }
+
+    [Fact]
+    public async Task IsRecording_IsTrueWhileAtLeastOneSessionActive()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        // Auto-Session via Poller
+        trigger.Start();
+        var autoArgs = new MeetingPresenceStateChangedEventArgs(
+            IsActive: true, Topic: "Auto", WindowTitle: "Meeting | Auto - Teams",
+            ChatIdShort: "mixedaaa", DetectedAt: DateTimeOffset.UtcNow);
+        poller.RaisePresenceChangedForTest(autoArgs);
+
+        // Manual-Session parallel
+        var manualKey = await trigger.StartManualAsync(CancellationToken.None);
+
+        Assert.Equal(2, trigger.ActiveCount);
+        Assert.True(trigger.IsRecording);
+
+        // Auto stoppen, Manual laeuft noch
+        poller.RaisePresenceChangedForTest(autoArgs with { IsActive = false });
+        await WaitUntilAsync(() => trigger.ActiveCount == 1, what: "ActiveCount == 1 nach Auto-Stop");
+        Assert.True(trigger.IsRecording); // Manual laeuft noch
+
+        // Manual stoppen
+        await trigger.StopAsync(manualKey);
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Manual-Stop");
+        Assert.False(trigger.IsRecording);
     }
 }

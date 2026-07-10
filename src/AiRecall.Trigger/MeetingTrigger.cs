@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -38,12 +39,19 @@ public sealed record MeetingRecordingContext(
 ///         Task im <see cref="TranscriptionWorker"/>.</item>
 /// </list>
 /// </para>
+/// <para>
+/// Erweiterung Spec 0014 Iter. 1: implementiert zusaetzlich
+/// <see cref="IRecordingControl"/> fuer manuelle Audio-Aufnahmen via
+/// <see cref="StartManualAsync"/>. Dafuer wird optional eine zweite Factory
+/// (<c>manualRecorderFactory</c>) im Konstruktor injiziert.
+/// </para>
 /// </summary>
-public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
+public sealed class MeetingTrigger : IDisposable, IAsyncDisposable, IRecordingControl
 {
     private readonly MeetingPresencePoller _poller;
     private readonly TranscriptionWorker _worker;
     private readonly Func<MeetingRecordingContext, RecordingSession> _recorderFactory;
+    private readonly Func<RecordingSession>? _manualRecorderFactory;
     private readonly TranscriptionOptions _defaultOptions;
     private readonly ILogger? _logger;
     private readonly ConcurrentDictionary<string, ActiveRecording> _active = new(StringComparer.Ordinal);
@@ -53,24 +61,32 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
     /// <summary>Anzahl aktuell laufender Aufnahmen (fuer Diagnose).</summary>
     public int ActiveCount => _active.Count;
 
+    /// <inheritdoc />
+    public bool IsRecording => !_active.IsEmpty;
+
     /// <summary>
     /// Wird gefeuert, wenn ein Meeting beendet und ein Transkriptions-Task
     /// erfolgreich enqueued wurde.
     /// </summary>
     public event EventHandler<MeetingTranscriptEnqueuedEventArgs>? TranscriptEnqueued;
 
+    /// <inheritdoc />
+    public event EventHandler<RecordingStateChangedEventArgs>? RecordingStateChanged;
+
     public MeetingTrigger(
         MeetingPresencePoller poller,
         TranscriptionWorker worker,
         Func<MeetingRecordingContext, RecordingSession> recorderFactory,
         TranscriptionOptions defaultOptions,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        Func<RecordingSession>? manualRecorderFactory = null)
     {
         _poller = poller ?? throw new ArgumentNullException(nameof(poller));
         _worker = worker ?? throw new ArgumentNullException(nameof(worker));
         _recorderFactory = recorderFactory ?? throw new ArgumentNullException(nameof(recorderFactory));
         _defaultOptions = defaultOptions;
         _logger = logger;
+        _manualRecorderFactory = manualRecorderFactory;
     }
 
     public void Start()
@@ -96,11 +112,11 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
         {
             if (e.IsActive)
             {
-                StartRecording(e);
+                StartRecording(e, RecordingSource.MeetingAuto);
             }
             else
             {
-                await StopRecordingAsync(e).ConfigureAwait(false);
+                await StopRecordingAsync(e.ChatIdShort, RecordingSource.MeetingAuto).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -109,7 +125,7 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
         }
     }
 
-    private void StartRecording(MeetingPresenceStateChangedEventArgs e)
+    private void StartRecording(MeetingPresenceStateChangedEventArgs e, RecordingSource source)
     {
         var key = e.ChatIdShort ?? Guid.NewGuid().ToString("N")[..8];
         if (!_active.TryAdd(key, null!)) return; // bereits aktiv
@@ -123,24 +139,110 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
                 DetectedAt: e.DetectedAt);
             var session = _recorderFactory(ctx);
             session.Start();
-            _active[key] = new ActiveRecording(session, ctx, e.DetectedAt);
-            _logger?.Information("MeetingTrigger: recording started für {Topic} (chatId={ChatIdShort})",
-                ctx.Topic, ctx.ChatIdShort);
+            _active[key] = new ActiveRecording(session, ctx, e.DetectedAt, source);
+            _logger?.Information("MeetingTrigger: recording started ({Source}) fuer {Topic} (chatId={ChatIdShort})",
+                source, ctx.Topic, ctx.ChatIdShort);
+            RecordingStateChanged?.Invoke(this, new RecordingStateChangedEventArgs(
+                IsRecording: true,
+                Source: source,
+                Key: key,
+                Topic: ctx.Topic,
+                At: e.DetectedAt));
         }
         catch (Exception ex)
         {
             _active.TryRemove(key, out _);
-            _logger?.Error(ex, "MeetingTrigger: Start fehlgeschlagen für {ChatIdShort}", key);
+            _logger?.Error(ex, "MeetingTrigger: Start fehlgeschlagen fuer {ChatIdShort}", key);
         }
     }
 
-    private async Task StopRecordingAsync(MeetingPresenceStateChangedEventArgs e)
+    /// <inheritdoc />
+    public Task<string> StartManualAsync(CancellationToken ct)
     {
-        var key = e.ChatIdShort ?? string.Empty;
+        if (_disposed) throw new ObjectDisposedException(nameof(MeetingTrigger));
+        if (_manualRecorderFactory is null)
+        {
+            throw new NotSupportedException(
+                "MeetingTrigger wurde ohne manualRecorderFactory konstruiert. " +
+                "Fuer manuelle Aufnahmen muss die Factory im Konstruktor injiziert werden (Spec 0014 Iter. 1).");
+        }
+        ct.ThrowIfCancellationRequested();
+
+        // 8 hex aus Guid (analog zur Meeting-Auto-Konvention in StartRecording)
+        var key = "manual-" + Guid.NewGuid().ToString("N")[..8];
+        if (!_active.TryAdd(key, null!))
+        {
+            // Kollision ist extrem unwahrscheinlich (8 hex = 32 bit), aber defensiv.
+            _logger?.Warning("MeetingTrigger: manual-key collision fuer {Key}, retry", key);
+            return StartManualAsync(ct);
+        }
+
+        try
+        {
+            var session = _manualRecorderFactory();
+            session.Start();
+            var startedAt = DateTimeOffset.UtcNow;
+            var ctx = new MeetingRecordingContext(
+                Topic: "(manual recording)",
+                ChatIdShort: key,
+                WindowTitle: null,
+                DetectedAt: startedAt);
+            _active[key] = new ActiveRecording(session, ctx, startedAt, RecordingSource.Manual);
+            _logger?.Information("MeetingTrigger: manual recording started (key={Key})", key);
+            RecordingStateChanged?.Invoke(this, new RecordingStateChangedEventArgs(
+                IsRecording: true,
+                Source: RecordingSource.Manual,
+                Key: key,
+                Topic: null,
+                At: startedAt));
+            return Task.FromResult(key);
+        }
+        catch (Exception ex)
+        {
+            _active.TryRemove(key, out _);
+            _logger?.Error(ex, "MeetingTrigger: manual Start fehlgeschlagen (key={Key})", key);
+            throw;
+        }
+    }
+
+    private async Task StopRecordingAsync(string? key, RecordingSource source)
+    {
         if (string.IsNullOrEmpty(key)) return;
         if (!_active.TryGetValue(key, out var active) || active is null) return;
+        if (active.Source != source) return; // fremde Source, kein Eingriff
         if (!_active.TryRemove(key, out _)) return;
 
+        await FinalizeStopAsync(key, active).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task StopAsync(string? key = null)
+    {
+        if (_disposed) return;
+
+        if (key is null)
+        {
+            // Snapshot der Keys vor dem Stop, damit waehrend des async-Await
+            // keine neuen Sessions ueber den Snapshot hinaus gestoppt werden.
+            var keys = new List<string>(_active.Keys);
+            foreach (var k in keys)
+            {
+                if (_active.TryRemove(k, out var active) && active is not null)
+                {
+                    await FinalizeStopAsync(k, active).ConfigureAwait(false);
+                }
+            }
+        }
+        else
+        {
+            if (!_active.TryGetValue(key, out var active) || active is null) return;
+            if (!_active.TryRemove(key, out _)) return;
+            await FinalizeStopAsync(key, active).ConfigureAwait(false);
+        }
+    }
+
+    private async Task FinalizeStopAsync(string key, ActiveRecording active)
+    {
         try
         {
             var paths = await active.Session.StopAsync().ConfigureAwait(false);
@@ -155,24 +257,40 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
             if (enqueued)
             {
                 _logger?.Information(
-                    "MeetingTrigger: recording stopped + transcription enqueued ({Topic} → {Folder})",
-                    active.Context.Topic, paths.Folder);
+                    "MeetingTrigger: recording stopped ({Source}) + transcription enqueued ({Topic} → {Folder})",
+                    active.Source, active.Context.Topic, paths.Folder);
                 TranscriptEnqueued?.Invoke(this, new MeetingTranscriptEnqueuedEventArgs(
                     ChatIdShort: key, Topic: active.Context.Topic, Folder: paths.Folder));
             }
+            RecordingStateChanged?.Invoke(this, new RecordingStateChangedEventArgs(
+                IsRecording: !_active.IsEmpty,
+                Source: active.Source,
+                Key: key,
+                Topic: active.Context.Topic,
+                At: DateTimeOffset.UtcNow));
         }
         catch (Exception ex)
         {
-            _logger?.Error(ex, "MeetingTrigger: Stop fehlgeschlagen für {ChatIdShort}", key);
+            _logger?.Error(ex, "MeetingTrigger: Stop fehlgeschlagen fuer {Key}", key);
+            // Auch im Fehlerfall ein RecordingStateChanged feuern, damit
+            // Konsumenten (Tray-Icon) nicht in einem haengenden "IsRecording=true"
+            // State bleiben.
+            RecordingStateChanged?.Invoke(this, new RecordingStateChangedEventArgs(
+                IsRecording: !_active.IsEmpty,
+                Source: active.Source,
+                Key: key,
+                Topic: active.Context.Topic,
+                At: DateTimeOffset.UtcNow));
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
+        if (_disposed) return;
         _disposed = true;
         Stop();
-        return ValueTask.CompletedTask;
+        // Auch manuelle + Auto-Aufnahmen sauber stoppen.
+        await StopAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -190,7 +308,8 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable
     private sealed record ActiveRecording(
         RecordingSession Session,
         MeetingRecordingContext Context,
-        DateTimeOffset StartedAt);
+        DateTimeOffset StartedAt,
+        RecordingSource Source);
 }
 
 /// <summary>
