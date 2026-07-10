@@ -472,71 +472,81 @@ public class MeetingTriggerTests
     }
 
     [Fact]
-    public async Task StopAsync_WithSpecificKey_StopsOnlyThatSession()
+    public async Task StopAsync_StopsActiveSession()
     {
         var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
         await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
 
-        var key1 = await trigger.StartManualAsync(CancellationToken.None);
-        var key2 = await trigger.StartManualAsync(CancellationToken.None);
-        Assert.Equal(2, trigger.ActiveCount);
+        var key = await trigger.StartManualAsync(CancellationToken.None);
+        Assert.True(trigger.IsRecording);
 
-        await trigger.StopAsync(key1);
-
-        await WaitUntilAsync(() => trigger.ActiveCount == 1, what: "ActiveCount == 1 nach Stop(key1)");
-        Assert.Equal(1, trigger.ActiveCount);
-        Assert.True(trigger.IsRecording); // key2 laeuft noch
-
-        // Cleanup
-        await trigger.StopAsync(key2);
-        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Stop(key2)");
-    }
-
-    [Fact]
-    public async Task StopAsync_WithNullKey_StopsAllSessions()
-    {
-        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
-        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
-
-        await trigger.StartManualAsync(CancellationToken.None);
-        await trigger.StartManualAsync(CancellationToken.None);
-        await trigger.StartManualAsync(CancellationToken.None);
-        Assert.Equal(3, trigger.ActiveCount);
-
-        await trigger.StopAsync(); // null = alle
-
-        await WaitUntilAsync(() => !trigger.IsRecording, what: "alle Sessions gestoppt");
+        await trigger.StopAsync();
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Stop");
         Assert.False(trigger.IsRecording);
         Assert.Equal(0, trigger.ActiveCount);
     }
 
     [Fact]
-    public async Task IsRecording_IsTrueWhileAtLeastOneSessionActive()
+    public async Task StopAsync_WithoutActiveRecording_IsNoOp()
     {
         var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
         await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
 
-        // Auto-Session via Poller
+        // Keine aktive Session - StopAsync() soll still sein (kein Throw).
+        await trigger.StopAsync();
+        Assert.False(trigger.IsRecording);
+        Assert.Equal(0, trigger.ActiveCount);
+    }
+
+    [Fact]
+    public async Task StartManualAsync_WhileAutoRecording_Throws()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
         trigger.Start();
+
+        // Auto-Aufnahme via Poller starten
         var autoArgs = new MeetingPresenceStateChangedEventArgs(
             IsActive: true, Topic: "Auto", WindowTitle: "Meeting | Auto - Teams",
-            ChatIdShort: "mixedaaa", DetectedAt: DateTimeOffset.UtcNow);
+            ChatIdShort: "saactive1", DetectedAt: DateTimeOffset.UtcNow);
         poller.RaisePresenceChangedForTest(autoArgs);
-
-        // Manual-Session parallel
-        var manualKey = await trigger.StartManualAsync(CancellationToken.None);
-
-        Assert.Equal(2, trigger.ActiveCount);
         Assert.True(trigger.IsRecording);
 
-        // Auto stoppen, Manual laeuft noch
-        poller.RaisePresenceChangedForTest(autoArgs with { IsActive = false });
-        await WaitUntilAsync(() => trigger.ActiveCount == 1, what: "ActiveCount == 1 nach Auto-Stop");
-        Assert.True(trigger.IsRecording); // Manual laeuft noch
+        // Manual waehrend Auto -> InvalidOperationException (Single-Active-Constraint)
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await trigger.StartManualAsync(CancellationToken.None));
+        Assert.Contains("Single-Active", ex.Message);
+    }
 
-        // Manual stoppen
-        await trigger.StopAsync(manualKey);
-        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Manual-Stop");
-        Assert.False(trigger.IsRecording);
+    [Fact]
+    public async Task StartManualAsync_WhileManualRecording_Throws()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        await trigger.StartManualAsync(CancellationToken.None);
+        Assert.True(trigger.IsRecording);
+
+        // Zweiter Manual waehrend erstem laeuft -> InvalidOperationException
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await trigger.StartManualAsync(CancellationToken.None));
+        Assert.Contains("Single-Active", ex.Message);
+    }
+
+    [Fact]
+    public async Task StartManualAsync_AfterStopAsync_AllowsNewStart()
+    {
+        var (poller, worker, factory, manual) = NewPollerWorkerFactoryWithManual();
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manual);
+
+        var key1 = await trigger.StartManualAsync(CancellationToken.None);
+        await trigger.StopAsync();
+        await WaitUntilAsync(() => !trigger.IsRecording, what: "IsRecording == false nach Stop");
+
+        var key2 = await trigger.StartManualAsync(CancellationToken.None);
+        Assert.NotEqual(key1, key2);
+        Assert.True(trigger.IsRecording);
+
+        await trigger.StopAsync();
     }
 }

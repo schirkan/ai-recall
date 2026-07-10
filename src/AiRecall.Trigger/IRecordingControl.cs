@@ -70,12 +70,17 @@ public interface IRecordingControl
     /// eine neue <see cref="AiRecall.Core.Audio.RecordingSession"/> via der
     /// injizierten Factory, feuert <see cref="RecordingStateChanged"/> mit
     /// <see cref="RecordingSource.Manual"/>. Returnwert ist der eindeutige
-    /// Session-Key (Format <c>"manual-{guid}"</c>) fuer spaeteren
-    /// <see cref="StopAsync(string?)"/>.
+    /// Session-Key (Format <c>"manual-{guid}"</c>) fuer spaeteres
+    /// <see cref="StopAsync"/>.
     /// <para>
     /// Wirft <see cref="NotSupportedException"/>, wenn der Trigger ohne
     /// Manual-Factory konstruiert wurde (Rueckwaertskompatibilitaet mit
     /// Spec 0013 v0.3 Tests).
+    /// </para>
+    /// <para>
+    /// Wirft <see cref="InvalidOperationException"/>, wenn schon eine Aufnahme
+    /// laeuft (Single-Active-Recording-Constraint, Spec 0014 v0.1 Update 2).
+    /// Der Aufrufer muss erst <see cref="StopAsync"/> aufrufen.
     /// </para>
     /// </summary>
     /// <param name="ct">CancellationToken. Wird nicht an die Recording-Session
@@ -83,15 +88,11 @@ public interface IRecordingControl
     Task<string> StartManualAsync(CancellationToken ct);
 
     /// <summary>
-    /// Stoppt eine oder alle aktiven Aufnahmen. Nach dem Stop wird der
-    /// resultierende Audio-Transkriptions-Task automatisch im
+    /// Stoppt die aktive Aufnahme (genau eine, da Single-Active-Constraint).
+    /// Nach dem Stop wird der resultierende Audio-Transkriptions-Task automatisch im
     /// <see cref="AiRecall.Transcription.TranscriptionWorker"/> enqueued
-    /// (analog Auto-Recording, Spec 0013 v0.3 §5.4).
+    /// (analog Auto-Recording, Spec 0013 v0.3 §5.4). Wenn keine Aufnahme laeuft,
+    /// ist der Aufruf ein No-Op.
     /// </summary>
-    /// <param name="key">
-    /// <c>null</c> = alle aktiven Sessions stoppen. Sonst nur die Session
-    /// mit dem angegebenen Key (Meeting-Auto-Key = ChatIdShort,
-    /// Manual-Key = <c>"manual-{guid}"</c>).
-    /// </param>
-    Task StopAsync(string? key = null);
+    Task StopAsync();
 }

@@ -166,13 +166,24 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable, IRecordingCo
                 "MeetingTrigger wurde ohne manualRecorderFactory konstruiert. " +
                 "Fuer manuelle Aufnahmen muss die Factory im Konstruktor injiziert werden (Spec 0014 Iter. 1).");
         }
+        // Single-Active-Recording-Constraint (Martin 2026-07-10 19:11):
+        // maximal 1 aktive Aufnahme. Wenn schon eine laeuft (egal ob Auto
+        // oder Manual), muss der Aufrufer erst StopAsync() aufrufen.
+        if (IsRecording)
+        {
+            throw new InvalidOperationException(
+                "Eine Audio-Aufnahme laeuft bereits (Single-Active-Recording-Constraint, " +
+                "Spec 0014 v0.1 Update 2). Bitte zuerst StopAsync() aufrufen.");
+        }
         ct.ThrowIfCancellationRequested();
 
-        // 8 hex aus Guid (analog zur Meeting-Auto-Konvention in StartRecording)
-        var key = "manual-" + Guid.NewGuid().ToString("N")[..8];
+        // Eindeutiger Key: 32 hex aus Guid + Counter (Spec 0014 Iter. 1b).
+        // Dictionary bleibt intern trotzdem Dictionary (auch wenn max. 1
+        // Eintrag), damit das Pattern zu Auto-Recording symmetrisch bleibt.
+        var key = "manual-" + Guid.NewGuid().ToString("N");
         if (!_active.TryAdd(key, null!))
         {
-            // Kollision ist extrem unwahrscheinlich (8 hex = 32 bit), aber defensiv.
+            // Kollision ist extrem unwahrscheinlich (128 bit), aber defensiv.
             _logger?.Warning("MeetingTrigger: manual-key collision fuer {Key}, retry", key);
             return StartManualAsync(ct);
         }
@@ -216,28 +227,22 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable, IRecordingCo
     }
 
     /// <inheritdoc />
-    public async Task StopAsync(string? key = null)
+    public async Task StopAsync()
     {
         if (_disposed) return;
+        if (_active.IsEmpty) return;
 
-        if (key is null)
+        // Snapshot der Keys vor dem Stop, damit waehrend des async-Await
+        // keine neuen Sessions ueber den Snapshot hinaus gestoppt werden.
+        // Single-Active: normalerweise max. 1 Eintrag, aber defensiv fuer
+        // Iter. 3+ Multi-Session-Aktivierungen.
+        var keys = new List<string>(_active.Keys);
+        foreach (var k in keys)
         {
-            // Snapshot der Keys vor dem Stop, damit waehrend des async-Await
-            // keine neuen Sessions ueber den Snapshot hinaus gestoppt werden.
-            var keys = new List<string>(_active.Keys);
-            foreach (var k in keys)
+            if (_active.TryRemove(k, out var active) && active is not null)
             {
-                if (_active.TryRemove(k, out var active) && active is not null)
-                {
-                    await FinalizeStopAsync(k, active).ConfigureAwait(false);
-                }
+                await FinalizeStopAsync(k, active).ConfigureAwait(false);
             }
-        }
-        else
-        {
-            if (!_active.TryGetValue(key, out var active) || active is null) return;
-            if (!_active.TryRemove(key, out _)) return;
-            await FinalizeStopAsync(key, active).ConfigureAwait(false);
         }
     }
 
