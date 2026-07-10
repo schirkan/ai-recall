@@ -91,20 +91,46 @@ public sealed class TrayAppContext : ApplicationContext
         // Beim ersten Start kann das TrayApp-Hauptfenster noch nicht da sein,
         // NotifyIcon ist aber sichtbar — deshalb Owner=null (Balloon-Auslöser
         // übernimmt die Aufmerksamkeit). Spec 0012 §Auslöser.
+        var targetDir = manager.ResolveTargetDirectory(_config.Ocr);
+        var persistCallback = new Action<bool>(disable =>
+        {
+            _config.Ocr.AutoDownloadTessdata = disable;
+            TryPersistOcrConfig();
+        });
         using var dialog = new TessdataFirstRunDialog(
             missing,
             manager,
-            onPersistNeverAskAgain: disable =>
-            {
-                _config.Ocr.AutoDownloadTessdata = disable;
-                TryPersistOcrConfig();
-            });
+            targetDir,
+            persistCallback,
+            Log.Logger.ForContext<TessdataFirstRunDialog>());
 
         var result = dialog.ShowDialog();
         switch (dialog.Choice)
         {
             case TessdataFirstRunDialog.DialogChoice.DownloadNow:
-                Log.Information("User chose to download tessdata now (missing was {Count})", missing.Count);
+                if (dialog.DownloadSucceeded == true)
+                {
+                    Log.Information("tessdata download succeeded ({Count} file(s) to {Dir})",
+                        missing.Count, targetDir);
+                    _trayIcon.ShowBalloon(
+                        title: "AiRecall — OCR bereit",
+                        text: $"tessdata-Dateien heruntergeladen ({missing.Count} Sprache(n)).",
+                        icon: ToolTipIcon.Info,
+                        timeoutMs: 5000);
+                }
+                else if (dialog.DownloadSucceeded == false)
+                {
+                    Log.Warning("tessdata download failed; user can retry via re-launch");
+                    _trayIcon.ShowBalloon(
+                        title: "AiRecall — OCR-Download fehlgeschlagen",
+                        text: "Captures laufen ohne OCR. Manueller Download siehe Spec 0012.",
+                        icon: ToolTipIcon.Warning,
+                        timeoutMs: 8000);
+                }
+                else
+                {
+                    Log.Information("User chose to download tessdata now (missing was {Count})", missing.Count);
+                }
                 break;
             case TessdataFirstRunDialog.DialogChoice.Later:
                 _trayIcon.ShowBalloon(
