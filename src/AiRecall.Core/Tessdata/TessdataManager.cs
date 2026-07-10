@@ -1,5 +1,6 @@
 using System.Net;
 using AiRecall.Core.Configuration;
+using AiRecall.Core.Net;
 
 namespace AiRecall.Core.Tessdata;
 
@@ -24,13 +25,19 @@ public sealed class TessdataManager
     private readonly HttpClient _http;
     private readonly string _baseUrl;
 
-    /// <summary>Default-Konstruktor: verwendet <see cref="DefaultBaseUrl"/> und einen neuen <see cref="HttpClient"/>.</summary>
-    public TessdataManager() : this(new HttpClientHandler(), DefaultBaseUrl)
+    /// <summary>
+    /// Default-Konstruktor: verwendet <see cref="DefaultBaseUrl"/> und einen neuen
+    /// <see cref="HttpClient"/> mit aktivierten Default-Credentials
+    /// (Spec 0015 — NTLM/Kerberos-Proxy-Auth).
+    /// </summary>
+    public TessdataManager() : this(HttpClientFactory.CreateDefaultHandler(), DefaultBaseUrl)
     {
     }
 
     /// <summary>DI-Konstruktor für Tests (Mock-Handler + eigene BaseUrl).</summary>
-    /// <param name="handler">HTTP-Handler (in Production: <c>new HttpClientHandler()</c>).</param>
+    /// <param name="handler">HTTP-Handler. In Production via
+    /// <c>HttpClientFactory.CreateDefaultHandler()</c> (siehe Spec 0015); in Tests
+    /// ein Mock-Handler mit Stub-Responses.</param>
     /// <param name="baseUrl">Base-URL für Downloads.</param>
     public TessdataManager(HttpMessageHandler handler, string baseUrl)
     {

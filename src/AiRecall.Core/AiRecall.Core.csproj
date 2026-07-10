@@ -15,4 +15,9 @@
     <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
   </ItemGroup>
 
+  <!-- Spec 0015: internal Helper (HttpClientFactory) für Tests sichtbar machen. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
+  </ItemGroup>
+
 </Project>
