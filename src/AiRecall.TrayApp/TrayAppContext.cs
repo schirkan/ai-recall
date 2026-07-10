@@ -35,7 +35,7 @@ public sealed class TrayAppContext : ApplicationContext
 
     public TrayAppContext(System.Threading.Mutex singleInstanceMutex)
     {
-        _config = UserConfigLocator.LoadOrDefault(msg => Log.Warning("Config: {Msg}", msg));
+        _config = UserConfigLocator.LoadOrDefault(out bool loadedFromUserFile, msg => Log.Warning("Config: {Msg}", msg));
 
         // InMemoryLogSink zuerst erzeugen, dann in Serilog-Logger einhängen.
         // Schritt 5 (LogviewerWindow) subscribed auf sink.EventEmitted.
@@ -71,12 +71,60 @@ public sealed class TrayAppContext : ApplicationContext
         // Settings-Item aktivieren (Spec 0009 Schritt 6)
         _trayIcon.EnableSettings();
 
-        Log.Information("AiRecall TrayApp ready (config={Path})", UserConfigLocator.GetUserConfigPath());
+        Log.Information("AiRecall TrayApp ready (config={Path}, loadedFromUserFile={Loaded})",
+            UserConfigLocator.GetUserConfigPath(), loadedFromUserFile);
+
+        // Spec 0016: First-Run-Dialog, wenn keine User-Config existiert und
+        // App.FirstRun aktiv ist (Default true). VOR dem Tessdata-Dialog, damit
+        // der User im First-Run-Flow zuerst die Settings prüfen kann.
+        MaybeOfferFirstRunSettings(loadedFromUserFile);
 
         // Spec 0012: First-Run-Dialog, wenn Tesseract konfiguriert ist und
         // tessdata für die konfigurierten Sprachen fehlt. Ersetzt das passive
         // Balloon aus Bug-Bash I-14.
         MaybeOfferTessdataDownload();
+    }
+
+    private void MaybeOfferFirstRunSettings(bool loadedFromUserFile)
+    {
+        // Bedingung: keine User-Config + App.FirstRun=true. Bei existierender
+        // Config wird der Dialog nie gezeigt (auch wenn App.FirstRun=true),
+        // damit Updates/Settings-Edits nicht plötzlich den Dialog triggern.
+        if (loadedFromUserFile) return;
+        if (!_config.App.FirstRun)
+        {
+            Log.Information("No user config found, but App.FirstRun=false — skipping first-run settings dialog");
+            return;
+        }
+
+        Log.Information("First run detected (no user config + App.FirstRun=true). Showing settings dialog.");
+
+        // Hauptfenster kann beim ersten Start noch nicht existieren — Owner=null
+        // analog zum Tessdata-Dialog (Spec 0012 §Auslöser).
+        using var dialog = new SettingsDialog(_config, onSave: newConfig =>
+        {
+            Log.Information("First-run settings saved, hot-reloading supervisor");
+            ApplyConfig(newConfig);
+        });
+
+        var result = dialog.ShowDialog();
+        if (result != DialogResult.OK)
+        {
+            Log.Information("First-run settings skipped (dialog result = {Result}); user can open Settings later via tray menu",
+                result);
+            _trayIcon.ShowBalloon(
+                title: "AiRecall — Willkommen",
+                text: "Du kannst die Settings jederzeit über das Tray-Menü öffnen.",
+                icon: ToolTipIcon.Info,
+                timeoutMs: 5000);
+            return;
+        }
+
+        // Save-Pfad: ApplyConfig wurde via SettingsDialog.onSave-Callback
+        // bereits aufgerufen (Hot-Reload), AppConfig.App.FirstRun ist jetzt
+        // auf false persistiert (oder vom User bewusst auf true gelassen —
+        // dann erscheint der Dialog beim nächsten Start wieder).
+        Log.Information("First-run settings applied; next start will skip the dialog if config was saved");
     }
 
     private void MaybeOfferTessdataDownload()

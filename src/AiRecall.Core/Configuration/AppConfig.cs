@@ -6,6 +6,23 @@ using AiRecall.Core.Audio;
 namespace AiRecall.Core.Configuration;
 
 /// <summary>
+/// App-spezifische Einstellungen, die nicht zu einer anderen Feature-Gruppe
+/// (Trigger, OCR, Audio, Transcription, App-Reader) gehören (Spec 0016).
+/// </summary>
+public sealed class AppSettings
+{
+    /// <summary>
+    /// <c>true</c> → beim ersten Start der TrayApp (keine User-Config vorhanden)
+    /// wird der Settings-Dialog automatisch modal angezeigt.
+    /// User kann das in den Settings selbst auf <c>false</c> setzen, um den
+    /// Dialog explizit zu unterdrücken (Use-Case: stille Erstinstallation via
+    /// Deployment-Script). Default: <c>true</c>.
+    /// </summary>
+    [Description("Erste-Schritte-Dialog beim ersten Start anzeigen, wenn keine User-Config existiert (Spec 0016).")]
+    public bool FirstRun { get; set; } = true;
+}
+
+/// <summary>
 /// Root configuration object loaded from JSON (see <see cref="ConfigLoader"/>).
 /// All sections have safe defaults; missing properties fall back to those.
 /// </summary>
@@ -52,6 +69,11 @@ public sealed class AppConfig
     /// </summary>
     [JsonPropertyName("transcription")]
     public TranscriptionConfig Transcription { get; set; } = new();
+
+    /// <summary>App-spezifische Einstellungen (Spec 0016 — First-Run-Dialog).</summary>
+    [Description("App-spezifische Einstellungen (z. B. First-Run-Dialog beim ersten Start).")]
+    [JsonPropertyName("app")]
+    public AppSettings App { get; set; } = new();
 }
 
 public sealed class AppReaderConfig
