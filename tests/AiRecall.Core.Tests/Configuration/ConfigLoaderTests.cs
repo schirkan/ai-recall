@@ -3,6 +3,7 @@ using AiRecall.Core.Configuration;
 
 namespace AiRecall.Core.Tests.Configuration;
 
+[Collection("ConfigFile")]
 public class ConfigLoaderTests : IDisposable
 {
     private readonly string _tempDir;

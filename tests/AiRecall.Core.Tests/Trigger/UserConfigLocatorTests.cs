@@ -4,6 +4,7 @@ using Xunit;
 
 namespace AiRecall.Core.Tests.Trigger;
 
+[Collection("ConfigFile")]
 public class UserConfigLocatorTests
 {
     [Fact]
