@@ -180,12 +180,23 @@ Items „Audio aufnehmen" / „Audio stoppen" nur sichtbar/aktiv wenn `Audio.Ena
 - `_statusRefreshTimer` triggert auch Icon-Refresh bei Audio-State-Change
 - Tests: ~5 Tests (Icon-State-Machine, Edge-Cases: Audio-Start während Capture-Running)
 
-### Iter. 3 — Tray-Menu-Items für manuelle Audio-Steuerung
+### Iter. 3 — Tray-Menu-Items für manuelle Audio-Steuerung (🟢 GEPUSHT)
 - Neue Menu-Items `_startAudioItem` / `_stopAudioItem` (zusätzlich auf gleicher Ebene)
 - Privacy-First-Gate: nur sichtbar wenn `Audio.Enabled = true`
 - Click-Handler ruft `MeetingTrigger.StartManualAsync()` / `StopAsync()`
 - Disabled-State basierend auf `IsRecording` (analog Capture-Items)
 - Tests: ~6 Tests (Click-Handler, Gate-Verhalten, Idempotenz)
+
+#### Implementierungs-Details (2026-07-12)
+- **`TrayIconController`-Konstruktor erweitert:** Neuer optionaler Parameter `Func<IRecordingControl?>? recordingControlProvider = null`. Rückwärtskompatibel — ohne Provider (oder wenn Provider `null` liefert) sind die Audio-Items nicht klickbar (`Enabled=false`) und werden per `RebindRecordingControl()` beim nächsten `Supervisor.StateChanged` aktiviert, sobald der TriggerService eine `MeetingTrigger`-Instanz hält.
+- **`TrayAppContext`:** Reicht `() => _supervisor.Service?.MeetingTrigger as IRecordingControl` durch. Damit bekommt der Tray-Controller die korrekte Control-Instanz nach jedem Service-Restart (z. B. nach Hot-Reload via `ApplyConfig`).
+- **`RebindRecordingControl()` (private):** Idempotent — alte Control wird via `-=` abgemeldet, neue Control via `+=` angemeldet. Wird bei jedem `Supervisor.StateChanged`-Event und beim Konstruktor aufgerufen.
+- **Privacy-First-Gate:** `Visible = _configProvider().Audio.Enabled`. Wird ebenfalls in `RebindRecordingControl()` (nach Subscribe) und im 1-Hz-`StatusRefreshTimer` (analog Capture-Items) aktualisiert, damit Hot-Reload von `Audio.Enabled` ohne Neustart wirkt.
+- **Disabled-State:** Bei `RecordingStateChanged` mit `IsRecording=true`: `_startAudioItem.Enabled=false`, `_stopAudioItem.Enabled=true`. Bei `IsRecording=false`: umgekehrt. Initial beim Bind: `IsRecording`-Property lesen.
+- **Click-Handler:** `Start` → `_recordingControl?.StartManualAsync(CancellationToken.None)`; `Stop` → `_recordingControl?.StopAsync()`. Fehler (z. B. `InvalidOperationException` bei laufender Aufnahme aus anderem Pfad) werden via `ShowError` als MessageBox angezeigt — analog Capture-Start-Fail-Handler.
+- **Icons:** 🎙-Emoji via `EmojiIconFactory.RenderBitmap("🎙", size)` — konsistent mit dem Quit-Item-Pattern (Bug-Bash 2026-07-06 I-UE).
+- **Test-Hooks:** `internal void RebindRecordingControlForTest()` und `internal ToolStripMenuItem StartAudioItemForTest` / `StopAudioItemForTest` für deterministische Tests ohne WinForms-Threading-Komplexität im Click-Handler.
+- **Persistenz manueller Aufnahmen:** landen im selben Pfad-Schema wie Meeting-Aufnahmen (`{rootPath}/yyyy-MM-dd/audio/{key}/` mit Key `manual-{guid}`). `trigger_source` im MD-Frontmatter ist aktuell hardcoded `polling` (siehe `RecordingSession.WriteInitialMetaMd`); eine Parametrisierung auf `manual-audio` ist explizit als TODO für Spec 0014 Iter. 3.1 vorgemerkt, aber für Iter. 3 nicht blockierend.
 
 ### Iter. 4 — Doku-Cluster
 - `PROJECT.md`: Punkt 8 erweitern (MVP 3 Audio Notes → Audio Indicator)

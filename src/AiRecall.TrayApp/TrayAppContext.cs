@@ -56,7 +56,17 @@ public sealed class TrayAppContext : ApplicationContext
         _supervisor.StateChanged += (_, e) =>
             Log.Information("Supervisor state: {Old} -> {New}", e.OldState, e.NewState);
 
-        _trayIcon = new TrayIconController(_supervisor, () => _config);
+        _trayIcon = new TrayIconController(
+            _supervisor,
+            () => _config,
+            // Spec 0014 Iter. 3: Recording-Control-Provider. Liefert die
+            // aktuelle MeetingTrigger-Instanz als IRecordingControl, oder
+            // null wenn der TriggerService noch nicht gestartet / gecrasht
+            // ist. Hot-Reload erzeugt einen neuen TriggerService, daher
+            // muss der Tray-Controller bei jedem StateChange neu resolven.
+            // MeetingTrigger-Property ist auf TriggerService (nicht auf dem
+            // ITriggerService-Interface), daher der Cast.
+            () => _supervisor.Service is TriggerService svc ? svc.MeetingTrigger as IRecordingControl : null);
         _trayIcon.ExitRequested += (_, _) =>
         {
             Log.Information("Exit requested from tray menu");

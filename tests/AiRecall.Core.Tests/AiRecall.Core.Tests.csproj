@@ -4,6 +4,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
+    <!-- Spec 0014 Iter. 3: TrayIconController ist WinForms-Code. Tests
+         muessen ToolStripMenuItem/NotifyIcon instanziieren koennen.
+         UseWindowsForms=true aktiviert die Typen ohne Launcher-Funktion. -->
+    <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
@@ -32,5 +36,9 @@
     <ProjectReference Include="..\..\src\AiRecall.Trigger\AiRecall.Trigger.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Conversion\AiRecall.Conversion.csproj" />
     <ProjectReference Include="..\..\src\AiRecall.Transcription\AiRecall.Transcription.csproj" />
+    <!-- Spec 0014 Iter. 3: TrayIconController ist im TrayApp-Projekt.
+         Tests ueber internal-Hooks (RebindRecordingControlForTest,
+         StartAudioItemForTest, StopAudioItemForTest). -->
+    <ProjectReference Include="..\..\src\AiRecall.TrayApp\AiRecall.TrayApp.csproj" />
   </ItemGroup>
 </Project>

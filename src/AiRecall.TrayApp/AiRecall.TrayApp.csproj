@@ -29,4 +29,14 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\Icons\*.ico" />
   </ItemGroup>
+
+  <!--
+    Spec 0014 Iter. 3: TrayIconController-Audio-Menu-Items testbar machen.
+    internal-Hooks (RebindRecordingControlForTest, StartAudioItemForTest,
+    StopAudioItemForTest) erlauben deterministische Tests ohne WinForms-
+    Threading-Komplexitaet fuer die Click-Handler.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="AiRecall.Core.Tests" />
+  </ItemGroup>
 </Project>
