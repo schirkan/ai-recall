@@ -120,7 +120,7 @@ public class TranscriptionWorkerTests : IDisposable
     }
 
     [Fact]
-    public void Enqueue_ProcessesTask()
+    public async Task Enqueue_ProcessesTask()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>
         {
@@ -131,16 +131,16 @@ public class TranscriptionWorkerTests : IDisposable
 
         Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        WaitUntilAsync(() => provider.CallCount == 1, what: "Provider wurde aufgerufen").GetAwaiter().GetResult();
-        WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: done"),
-            what: "meta.md enthaelt 'transcript_status: done'").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => provider.CallCount == 1, what: "Provider wurde aufgerufen");
+        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("transcript_status: done"),
+            what: "meta.md enthaelt 'transcript_status: done'");
         // Bei Erfolg: combined-stereo.wav wurde geloescht
         Assert.False(File.Exists(Path.Combine(folder, "combined-stereo.wav")));
         Assert.Equal(1, worker.CompletedCount);
     }
 
     [Fact]
-    public void Enqueue_ProviderFailure_KeepsCombinedStereo_MarksMetaFailed()
+    public async Task Enqueue_ProviderFailure_KeepsCombinedStereo_MarksMetaFailed()
     {
         var provider = new FakeProvider("fake", Array.Empty<TranscriptionSegment>(),
             errorMessage: "HTTP 401: Unauthorized");
@@ -149,7 +149,7 @@ public class TranscriptionWorkerTests : IDisposable
 
         Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1");
         // Bei Fehler: combined-stereo.wav bleibt liegen (Debug-Evidence)
         Assert.True(File.Exists(Path.Combine(folder, "combined-stereo.wav")));
         // Error-Message in Frontmatter
@@ -159,7 +159,7 @@ public class TranscriptionWorkerTests : IDisposable
     }
 
     [Fact]
-    public void Enqueue_MultipleTasks_ProcessedInParallel()
+    public async Task Enqueue_MultipleTasks_ProcessedInParallel()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>
         {
@@ -173,12 +173,12 @@ public class TranscriptionWorkerTests : IDisposable
         foreach (var (folder, mic, loop, meta) in meetings)
             Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        WaitUntilAsync(() => worker.CompletedCount == 4, timeoutMs: 5000, what: "CompletedCount == 4").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => worker.CompletedCount == 4, timeoutMs: 5000, what: "CompletedCount == 4");
         Assert.True(meetings.All(m => File.Exists(m.meta) && File.ReadAllText(m.meta).Contains("transcript_status: done")));
     }
 
     [Fact]
-    public void Enqueue_ConcatenateFailure_MarksMetaFailed_DoesNotCallProvider()
+    public async Task Enqueue_ConcatenateFailure_MarksMetaFailed_DoesNotCallProvider()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>());
         using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
@@ -191,7 +191,7 @@ public class TranscriptionWorkerTests : IDisposable
 
         Assert.True(worker.TryEnqueue(NewTask(folder, Path.Combine(folder, "mic.wav"), Path.Combine(folder, "loopback.wav"), meta)));
 
-        WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => worker.FailedCount == 1, what: "FailedCount == 1");
         // Provider wurde NICHT aufgerufen (Concatenate schlug vorher fehl)
         Assert.Equal(0, provider.CallCount);
         Assert.True(File.Exists(meta));
@@ -199,7 +199,7 @@ public class TranscriptionWorkerTests : IDisposable
     }
 
     [Fact]
-    public void ScanForPendingTranscriptions_EnqueuesPendingMeetings()
+    public async Task ScanForPendingTranscriptions_EnqueuesPendingMeetings()
     {
         // 3 Meetings: 1 pending, 1 done, 1 ohne meta.md
         var pending = NewMeeting("scan-pending", 50);
@@ -218,14 +218,14 @@ public class TranscriptionWorkerTests : IDisposable
         var count = worker.ScanForPendingTranscriptions(_root, defaultOptions);
         Assert.Equal(1, count); // nur das "pending" wird enqueued
 
-        WaitUntilAsync(() => worker.CompletedCount == 1, what: "CompletedCount == 1").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => worker.CompletedCount == 1, what: "CompletedCount == 1");
         // Pending-Meta ist jetzt "done", done-Meta ist unveraendert
         Assert.Contains("transcript_status: done", File.ReadAllText(pending.meta));
         Assert.Contains("transcript_status: done", File.ReadAllText(done.meta));
     }
 
     [Fact]
-    public void TranscriptBlock_ContainsProviderAndSegments()
+    public async Task TranscriptBlock_ContainsProviderAndSegments()
     {
         var segments = new List<TranscriptionSegment>
         {
@@ -238,8 +238,8 @@ public class TranscriptionWorkerTests : IDisposable
 
         Assert.True(worker.TryEnqueue(NewTask(folder, mic, loop, meta)));
 
-        WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("[S0]"),
-            what: "Transcript enthaelt [S0]-Block").GetAwaiter().GetResult();
+        await WaitUntilAsync(() => File.Exists(meta) && File.ReadAllText(meta).Contains("[S0]"),
+            what: "Transcript enthaelt [S0]-Block");
         var content = File.ReadAllText(meta);
         Assert.Contains("[S0]", content);
         Assert.Contains("Hallo", content);

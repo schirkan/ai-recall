@@ -204,7 +204,7 @@ public class InMemoryLogSinkTests
     /// duerfen nicht zu ObjectDisposedException fuehren.
     /// </summary>
     [Fact]
-    public void Emit_ConcurrentWithDispose_NoThrow()
+    public async Task Emit_ConcurrentWithDispose_NoThrow()
     {
         var sink = new InMemoryLogSink(capacity: 10_000);
 
@@ -222,7 +222,7 @@ public class InMemoryLogSinkTests
 
         // Emit-Task darf nicht abstuerzen — einzelne Emits nach Dispose
         // werden verworfen, das ist OK.
-        emitTask.Wait(TimeSpan.FromSeconds(5));
+        await emitTask.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(emitTask.IsCompletedSuccessfully, "Emit-Task sollte nicht abstuerzen");
     }
 

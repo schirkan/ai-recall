@@ -66,7 +66,7 @@ public class RecordingSessionTests
     }
 
     [Fact]
-    public void Start_CreatesMeetingFolder()
+    public async Task Start_CreatesMeetingFolder()
     {
         var storageRoot = Path.Combine(Path.GetTempPath(), "AiRecall-test-" + Guid.NewGuid().ToString("N"));
         var config = new AudioConfig { StorageRoot = storageRoot };
@@ -99,7 +99,7 @@ public class RecordingSessionTests
         }
         finally
         {
-            session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            await session.DisposeAsync();
             if (Directory.Exists(storageRoot)) Directory.Delete(storageRoot, recursive: true);
         }
     }

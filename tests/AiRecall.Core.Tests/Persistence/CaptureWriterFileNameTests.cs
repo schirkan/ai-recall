@@ -102,7 +102,8 @@ public class CaptureWriterFileNameTests : IDisposable
             ReaderName: "Browser",
             ReaderVersion: "1.0",
             Extra: new Dictionary<string, string> { ["url"] = "https://example.com" });
-        var contentPath = CaptureWriter.WriteContent(record, window, item.Timestamp, _tempRoot);
+        var contentPath = CaptureWriter.WriteContent(record, window, item.Timestamp, _tempRoot)
+            ?? throw new InvalidOperationException("WriteContent returned null");
         var contentMdName = Path.GetFileName(contentPath); // "HHmmss-fff.content.md"
 
         Assert.Equal(mainDir, Path.GetDirectoryName(contentPath));

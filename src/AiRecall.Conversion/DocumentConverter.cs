@@ -95,7 +95,7 @@ public static class DocumentConverter
 
     // ----- Konverter pro Format -----
 
-    private static string ConvertDocx(string filePath, int maxChars, ILogger? logger)
+    private static string? ConvertDocx(string filePath, int maxChars, ILogger? logger)
     {
         var sb = new StringBuilder();
         using var doc = WordprocessingDocument.Open(filePath, false);
@@ -114,7 +114,7 @@ public static class DocumentConverter
         return Truncate(sb.ToString(), maxChars);
     }
 
-    private static string ConvertXlsx(string filePath, int maxChars, ILogger? logger)
+    private static string? ConvertXlsx(string filePath, int maxChars, ILogger? logger)
     {
         var sb = new StringBuilder();
         using var doc = SpreadsheetDocument.Open(filePath, false);
@@ -123,14 +123,14 @@ public static class DocumentConverter
 
         var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable;
 
-        foreach (var sheet in workbookPart.Workbook.Sheets!.OfType<Sheet>())
+        foreach (var sheet in workbookPart!.Workbook.Sheets!.OfType<Sheet>())
         {
             sb.AppendLine($"## {sheet.Name?.Value ?? "(unnamed)"}");
             sb.AppendLine();
 
             if (sheet.Id?.Value == null) continue;
             var sheetPart = (WorksheetPart)workbookPart.GetPartById(sheet.Id.Value);
-            var sheetData = sheetPart.Worksheet.GetFirstChild<SheetData>();
+            var sheetData = sheetPart!.Worksheet!.GetFirstChild<SheetData>();
             if (sheetData == null) continue;
 
             int colCount = 0;
@@ -179,7 +179,7 @@ public static class DocumentConverter
         return escaped;
     }
 
-    private static string ConvertPptx(string filePath, int maxChars, ILogger? logger)
+    private static string? ConvertPptx(string filePath, int maxChars, ILogger? logger)
     {
         var sb = new StringBuilder();
         using var doc = PresentationDocument.Open(filePath, false);
@@ -194,7 +194,7 @@ public static class DocumentConverter
             sb.AppendLine();
 
             bool anyText = false;
-            foreach (var shape in slide.CommonSlideData?.ShapeTree?.Elements<DocumentFormat.OpenXml.Presentation.Shape>() ?? Enumerable.Empty<DocumentFormat.OpenXml.Presentation.Shape>())
+            foreach (var shape in slide!.CommonSlideData?.ShapeTree?.Elements<DocumentFormat.OpenXml.Presentation.Shape>() ?? Enumerable.Empty<DocumentFormat.OpenXml.Presentation.Shape>())
             {
                 if (sb.Length >= maxChars) break;
                 var text = shape.TextBody?.InnerText;

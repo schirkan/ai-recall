@@ -126,8 +126,9 @@ public class OutlookAppReaderTests : IDisposable
         // wenn doch, ist das Test-Resultat trotzdem konsistent (true).
         // Wir akzeptieren beide Ergebnisse, weil der Test selbst auf
         // einer Workstation mit Outlook ablaufen koennte.
-        var result = OutlookAppReader.IsOutlookProcessRunning();
-        Assert.True(result is true or false);
+        // Bool wird immer zu true/false ausgewertet — wenn der Aufruf
+        // werfen wuerde, schlaegt der Test vorher fehl.
+        _ = OutlookAppReader.IsOutlookProcessRunning();
     }
 
     // ============================================================

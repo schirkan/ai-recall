@@ -149,7 +149,7 @@ public sealed class TeamsAppReader : AppReaderBase
 
             // 9) Markdown-Composition
             var md = BuildFullMarkdown(
-                hierarchy, captured.BodyMarkdown, captured.Source,
+                hierarchy, captured!.BodyMarkdown, captured!.Source ?? "",
                 senderList, cfg);
 
             // 10) AppReaderResult
@@ -161,7 +161,7 @@ public sealed class TeamsAppReader : AppReaderBase
                 ["chatType"] = titleInfo.ChatTypeLabel,
                 ["isMeeting"] = titleInfo.IsMeeting ? "true" : "false",
                 ["senderCount"] = senderList.Length.ToString(),
-                ["source"] = captured.Source,
+                ["source"] = captured!.Source ?? "",
                 ["strategy"] = cfg.PreferredStrategy,
             };
 
@@ -368,14 +368,14 @@ public sealed class TeamsAppReader : AppReaderBase
     /// Presence brauchen wir nur Title, nicht Content. CDP/UIA wird im <see cref="Read"/>-Pfad
     /// fuer die Capture-Extraktion genutzt.
     /// </remarks>
-    public static async Task<MeetingPresenceSnapshot> TryGetActiveMeetingAsync(
+    public static Task<MeetingPresenceSnapshot> TryGetActiveMeetingAsync(
         AiRecall.Core.Configuration.TeamsConfig cfg,
         Serilog.ILogger? logger,
         CancellationToken ct)
     {
         if (!cfg.Enabled)
         {
-            return new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null);
+            return Task.FromResult(new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null));
         }
 
         try
@@ -404,11 +404,11 @@ public sealed class TeamsAppReader : AppReaderBase
                     logger?.Debug("TeamsAppReader.TryGetActiveMeetingAsync: meeting detected: {Title} -> topic='{Topic}', chatIdShort={ChatIdShort}",
                         title, topic, chatIdShort);
 
-                    return new MeetingPresenceSnapshot(
+                    return Task.FromResult(new MeetingPresenceSnapshot(
                         IsActive: true,
                         Topic: topic,
                         WindowTitle: title,
-                        ChatIdShort: chatIdShort);
+                        ChatIdShort: chatIdShort));
                 }
             }
             finally
@@ -425,7 +425,7 @@ public sealed class TeamsAppReader : AppReaderBase
             logger?.Warning(ex, "TeamsAppReader.TryGetActiveMeetingAsync: failed");
         }
 
-        return new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null);
+        return Task.FromResult(new MeetingPresenceSnapshot(IsActive: false, Topic: null, WindowTitle: null, ChatIdShort: null));
     }
 
     /// <summary>

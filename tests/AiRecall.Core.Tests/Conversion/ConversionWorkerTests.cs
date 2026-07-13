@@ -197,7 +197,7 @@ public class ConversionWorkerTests : IDisposable
     }
 
     [Fact]
-    public async Task TryEnqueue_NullOrEmpty_NoIncrement()
+    public void TryEnqueue_NullOrEmpty_NoIncrement()
     {
         using var worker = new ConversionWorker(Cfg(), Logger());
         Assert.False(worker.TryEnqueue(""));
