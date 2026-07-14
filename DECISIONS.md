@@ -5,6 +5,44 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-14 — Spec 0014 (Tray Audio Indicator + Manual Audio Control) v1.0 ABGESCHLOSSEN
+
+**Anlass:** Spec 0014 v1.0 abgeschlossen nach Iter. 1+1b+2+3 + Flake-Fix + Doc-Cluster.
+Commits: `a8a70e3` (Iter. 1) → `07575bc` (Iter. 1b) → `1a715a3` (Iter. 2) →
+`1d6ef22` (Iter. 3) → `2814d5b` (Flake-Fix) → Doc-Cluster (dieser Commit).
+Test-Stand: 820/820 (nach Iter. 3) → 829/829 (nach `058c023` App-Capture-Helper) → 829/829 stabil nach Flake-Fix (5/5 Counter/Async-Runs).
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Tray-Icon-Priorität (Iter. 2) | **Audio > Capture > Idle** (3-stufige Kaskade). Audio-Recording zeigt roten Kreis + „M" (`tray-audio-recording.ico`), Capture zeigt 👁️ (`tray-recording.ico`), Idle zeigt ⚫ (`tray-idle.ico`). | Martin-Direktive: „Bei laufender Audio-Aufzeichnung soll sich das Icon ändern". Audio hat Vorrang vor Capture, weil Audio explizit vom User ausgelöst wurde — Capture ist Hintergrund. Invariante explizit testbar als `internal static string ResolveTrayIconKey(TriggerState, bool)`. |
+| 2 | Gate-First-Pattern (Iter. 3) | **Privacy-First-Gate VOR State-Logik** in `ApplyRecordingEnabledState()`. Reihenfolge: (1) Audio.Enabled-Check, (2) IsRecording-Check, (3) Enable/Disable-Logik. Niemals State-Logik vor Gate-Check, sonst kann State den Gate umgehen. | Bug während Iter. 3: `IsRecording=true` enablete Stop-Item obwohl `Audio.Enabled=false`. Fix: beide Items disabled wenn Gate nicht erfüllt, unabhängig von `IsRecording`. Lesson: bei „enabled iff Gate AND State" → Gate ZUERST. |
+| 3 | Single-Active-Recording-Constraint (Iter. 1b) | **`StartManualAsync()` wirft `InvalidOperationException`** wenn schon eine Aufnahme läuft (egal ob Auto oder Manual). User muss erst `StopAsync()` aufrufen. | Martin-Direktive 2026-07-10 19:11. Variante A aus 3 Vorschlägen (InvalidOperationException, Auto-Stop+Wins, Silent-NoOp). Klar + deterministisch; Tray-Menu-Items sorgen für korrekten Enabled/Disabled-State, sodass User gar nicht erst klicken kann wenn schon läuft. |
+| 4 | IRecordingControl-Provider-Pattern (Iter. 3) | **`Func<IRecordingControl?>? recordingControlProvider = null`** als optionaler Konstruktor-Parameter im `TrayIconController`. `RebindRecordingControl()` idempotent via `ReferenceEquals` — alte Control via `-=` abmelden, neue via `+=` anmelden. Wird bei jedem `Supervisor.StateChanged` aufgerufen, damit Hot-Reload (Service-Restart mit neuer `MeetingTrigger`-Instanz) automatisch die richtige Control bindet. | Pattern analog zum `ConversionWorker`-Pattern in `TriggerService` (Spec 0007). Vermeidet harte Service-Abhängigkeit im Tray-Controller → testbar mit `FakeRecordingControl` ohne WinForms-Threading. |
+| 5 | ToolStripMenuItem.Visible .NET-8 Quirk | **`Visible = false` ist Default** in .NET 8 / WinForms (anders als ältere .NET Framework). Tests prüfen NUR `Enabled`, NICHT `Visible` — sonst flaken Tests je nach Framework-Version. | Empirisch beobachtet beim Schreiben der `TrayIconControllerAudioItemsTests`. Pragmatisch: Gate über `Visible` (User sieht Items erst wenn Audio.Enabled=true), State über `Enabled` (klickbar/nicht klickbar). |
+| 6 | async-void-Race-Fix (`2814d5b`) | **`OnPresenceChanged` ist nicht mehr `async void`**, sondern synchron + Fire-and-Forget via `_ = StopRecordingFireAndForgetAsync(...)` mit eigenem try/catch (kein unbeobachteter Task). | Sporadischer Flake in `MeetingTriggerTests.RecordingStateChanged_Fired_OnAutoStop` (1-2 von 5 Runs). Root-Cause: `async void` Event-Handler yieldet am ersten await; Continuation läuft mit `ConfigureAwait(false)` auf Threadpool, Test-Thread liest parallel → `List<T>.Add` race (List<T> ist nicht thread-safe). Fix 5/5 Counter/Async-Runs grün. Lesson: `async void` nur für top-level Event-Handler wenn die Aufruf-Semantik explizit fire-and-forget ist UND keine Test-Synchronisation nötig. In Tests wird das meistens verletzt. |
+
+### Martin-Direktiven 2026-07-10 (Übersicht)
+
+| # | Thema | Direktive | Auswirkung |
+| - | - | - | - |
+| Q | Tray-Icon-Indikator | „Bei laufender Audio-Aufzeichnung soll sich das Icon ändern" | Audio > Capture > Idle Priorität (Decision 1) |
+| R | Manuelle Steuerung | „Steuerung für Audio-Aufzeichnung im Tray-Menu (Start, Stop)" | Iter. 3 mit `Func<IRecordingControl?>?`-Provider-Pattern (Decision 4) |
+| S | Single-Active-Constraint | „Es kann immer nur eine aktive Audio-Aufnahme geben" | `StartManualAsync` wirft `InvalidOperationException` (Decision 3) |
+| T | API-Vereinfachung | „`StopAsync()` ohne Key-Parameter" | `StopAsync(string?)` → `StopAsync()` in Iter. 1b |
+
+### Lessons
+
+- **Iter.-Plan mit Sub-Commits pro logischer Einheit** (Iter. 1, 1b, 2, 3, 4) statt eines Mega-Commits → gezieltes Review/Revert pro Schicht möglich.
+- **Counter/Async-Regel** (10+ Runs für Flake-Detektion, DECISIONS.md 2026-07-09): vor diesem Fix 1/3 Runs flake, nach Fix 5/5 stabil. Lesson: async-void-Pattern in produktivem Code mit Tests = fast immer Race-Kandidat, auch wenn Test-Suite in Isolation läuft.
+- **Pattern-Wiederverwendung**: `Func<IRecordingControl?>?`-Provider-Pattern + `_owns*`-Flag ist eine Variante des `ConversionWorker`-Patterns (Spec 0007) und des `MeetingTrigger`-Patterns (Spec 0013 Iter. 4). Martin-approved Standard für optionale, hot-reloadbare Komponenten.
+
+### Folge-Cluster (nach v1.0-Abnahme)
+
+- **Spec 0014 Iter. 3.1**: `trigger_source: manual-audio` im MD-Frontmatter (Parametrisierung von `RecordingSession.WriteInitialMetaMd`), bisher hardcoded `polling`.
+- **Outlook-Speaker-Mapping** (Spec 0013 v0.4): wartet auf v0.3-Abnahme (bereits abgenommen am 2026-07-14).
+
+---
+
 ## 2026-07-09 — MVP 3 Audio Notes IMPLEMENTATION (Spec 0013 v0.3 abgeschlossen)
 
 **Anlass:** Iter. 1-4 Implementations-Cluster nach der Spec-Definition

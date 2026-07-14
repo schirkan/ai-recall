@@ -1,6 +1,6 @@
 # 0014 — Tray Audio-Indikator + Manuelle Audio-Steuerung
 
-> **Status:** 🟡 **GENEHMIGT v0.1 (2026-07-10)** — Scoping beantwortet (Martin 2026-07-10 18:02); **API-Vereinfachung** (Martin 2026-07-10 19:11)
+> **Status:** 🟢 **ABGESCHLOSSEN v1.0 (2026-07-14)** — Alle Iter. (1, 1b, 2, 3, 4) implementiert + gepusht. Test-Stand 829/829 grün. Scoping beantwortet (Martin 2026-07-10 18:02); API-Vereinfachung Single-Active-Constraint (Martin 2026-07-10 19:11)
 > **Owner:** Martin
 > **Abhängig von:** Spec 0006 (Tray-EXE), Spec 0009 (Settings-Dialog), Spec 0013 (Audio Notes / `MeetingTrigger`)
 
@@ -211,11 +211,25 @@ Hinweis zur Icon-Groesse: 32x32 Single-Resolution statt 16+32 Multi-Resolution. 
 - **Test-Hooks:** `internal void RebindRecordingControlForTest()` und `internal ToolStripMenuItem StartAudioItemForTest` / `StopAudioItemForTest` für deterministische Tests ohne WinForms-Threading-Komplexität im Click-Handler.
 - **Persistenz manueller Aufnahmen:** landen im selben Pfad-Schema wie Meeting-Aufnahmen (`{rootPath}/yyyy-MM-dd/audio/{key}/` mit Key `manual-{guid}`). `trigger_source` im MD-Frontmatter ist aktuell hardcoded `polling` (siehe `RecordingSession.WriteInitialMetaMd`); eine Parametrisierung auf `manual-audio` ist explizit als TODO für Spec 0014 Iter. 3.1 vorgemerkt, aber für Iter. 3 nicht blockierend.
 
-### Iter. 4 — Doku-Cluster
-- `PROJECT.md`: Punkt 8 erweitern (MVP 3 Audio Notes → Audio Indicator)
-- `DECISIONS.md`: Neue Top-Level-Eintrag „2026-07-10 — MVP 3 Audio Indicator & Manual Control"
-- `README.md`: Feature-Block „Tray audio indicator + manual recording control"
-- Spec 0014 v0.1 → v1.0
+### Iter. 4 — Doku-Cluster (🟢 ABGESCHLOSSEN, 2026-07-14)
+
+**Status:** Alle 4 Doku-Dateien aktualisiert + 1 Commit `???` (folgt nach diesem Edit).
+
+**Geaenderte Dateien:**
+- `PROJECT.md`: Test-Count 777 → 829, Spec-Table-Eintrag für 0014 v1.0 ABGESCHLOSSEN, neue Zeile in Open-Punkte-Liste (Spec 0014 abhaekelt)
+- `DECISIONS.md`: Neuer Top-Level-Eintrag „2026-07-14 — Spec 0014 (Tray Audio Indicator + Manual Audio Control)" mit 6 Decisions:
+  - Audio-Prioritaet-Pattern (Audio > Capture > Idle) fuer Tray-Icon
+  - Gate-First-Pattern (Privacy-First-Gate VOR State-Logik)
+  - Single-Active-Recording-Constraint (`StartManualAsync` wirft `InvalidOperationException`)
+  - IRecordingControl-Provider-Pattern (`Func<IRecordingControl?>?` als optionaler Konstruktor-Parameter)
+  - ToolStripMenuItem.Visible .NET-8-Quirk (Default `false`)
+  - async-void-Race-Fix in `MeetingTrigger.OnPresenceChanged`
+- `README.md`: Neuer Feature-Block „Tray Audio Indicator + Manual Audio Control" mit allen 3 Audio-Items + Icon-Prioritaet; Test-Count 777 → 829
+- `specs/0014-tray-audio-indicator.md` (diese Datei): Status 🟡 → 🟢 v1.0, alle Iter. abgehakt, Change-History v1.0-Eintrag
+
+**Lessons:**
+- Doc-Cluster bleibt EIN Commit (Martin-Pattern „one directive, one commit") — auch wenn 4 Dateien betroffen sind, gehoert das thematisch zusammen.
+- Specs sind Source of Truth: Status-Aenderung der Spec (v0.1 → v1.0) MUSS zuerst passieren, dann PROJECT.md/DECISIONS.md/README.md koennen darauf referenzieren.
 
 ## Offene Fragen für Martin
 
@@ -249,3 +263,11 @@ Alle Iter. respektieren die existierenden Gates:
   - `StopAsync()` parameterlos (kein Key mehr).
   - `StartManualAsync` muss Single-Active-Invariante garantieren.
   - Iter. 1b (Refactor) hinzugefügt zwischen Iter. 1 und Iter. 2.
+- **v1.0** (2026-07-14): Alle Iter. abgeschlossen + gepusht.
+  - Iter. 1 (Recording-State-API): `a8a70e3 feat(audio): Audio Indicator MVP3.5 Iter. 1`
+  - Iter. 1b (Single-Active-Refactor): `07575bc refactor(audio): Spec 0014 Iter. 1b`
+  - Iter. 2 (Tray-Icon): `1a715a3 feat(audio): Spec 0014 Iter. 2 — Tray-Icon zeigt Audio-Recording`
+  - Iter. 3 (Tray-Menu-Items): `1d6ef22 feat(audio): Spec 0014 Iter. 3 — Tray-Menu-Items`
+  - Flake-Fix (async-void-Race in `MeetingTrigger.OnPresenceChanged`): `2814d5b fix(trigger)`
+  - Doc-Cluster (dieser Iter. 4): Commit folgt nach diesem Edit
+  - Test-Stand: 777 (vor Iter. 1) → 820 (nach Iter. 3) → 829 (nach App-Capture-Helper `058c023`) → 829 stabil nach Flake-Fix.
