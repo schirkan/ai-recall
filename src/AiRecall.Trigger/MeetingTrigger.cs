@@ -106,22 +106,44 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable, IRecordingCo
         _logger?.Information("MeetingTrigger stopped");
     }
 
-    private async void OnPresenceChanged(object? sender, MeetingPresenceStateChangedEventArgs e)
+    private void OnPresenceChanged(object? sender, MeetingPresenceStateChangedEventArgs e)
+    {
+        // Flake-Fix 2026-07-14: kein async void mehr. Bei schnell aufeinander
+        // folgenden PresenceChanged-Events (z. B. zwei RaisePresenceChangedForTest-
+        // Calls in Tests) lief die async-void-Continuation auf einem anderen
+        // Threadpool-Thread als der Test-Thread, was bei thread-unsicherem
+        // List<RecordingStateChangedEventArgs>.Add zu Flakes fuehrte
+        // (RecordingStateChanged_Fired_OnAutoStop flake-t sporadisch).
+        // Mit synchronem Handler bleibt die Reihenfolge deterministisch:
+        // StartRecording (sync) immer komplett vor StopRecordingFireAndForgetAsync.
+        if (e.IsActive)
+        {
+            StartRecording(e, RecordingSource.MeetingAuto);
+        }
+        else
+        {
+            // Fire-and-forget via _ = SomeAsyncMethod()-Pattern: die Task wird
+            // gestartet aber nicht awaited. Exceptions landen im Helper-try/catch
+            // (kein unbeobachteter Task). ConfigureAwait(false) im Helper sorgt
+            // fuer Threadpool-Continuations ohne SyncContext-Capture.
+            _ = StopRecordingFireAndForgetAsync(e.ChatIdShort);
+        }
+    }
+
+    /// <summary>
+    /// Fire-and-Forget-Wrapper fuer <see cref="StopRecordingAsync"/> aus dem
+    /// Event-Handler. Loggt und schluckt Exceptions, damit der Event-Invoker
+    /// (Poller) nie eine unbeobachtete Task hat.
+    /// </summary>
+    private async Task StopRecordingFireAndForgetAsync(string? key)
     {
         try
         {
-            if (e.IsActive)
-            {
-                StartRecording(e, RecordingSource.MeetingAuto);
-            }
-            else
-            {
-                await StopRecordingAsync(e.ChatIdShort, RecordingSource.MeetingAuto).ConfigureAwait(false);
-            }
+            await StopRecordingAsync(key, RecordingSource.MeetingAuto).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger?.Error(ex, "MeetingTrigger: unerwarteter Fehler bei {IsActive}", e.IsActive);
+            _logger?.Error(ex, "MeetingTrigger: unerwarteter Fehler bei Auto-Stop fuer {Key}", key);
         }
     }
 
