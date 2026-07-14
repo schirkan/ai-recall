@@ -1,0 +1,48 @@
+# AI Recall — Line-Ending + Binary-Attribute
+# Detail-Spec + Begruendung: DECISIONS.md-Eintrag 2026-07-14,
+# MEMORY.md-Konventionen (2026-07-14 lessons learned).
+#
+# Strategie: per-File-Type-Entscheidung
+#   - LF   fuer Cross-Plattform-Code/Doku (C#, Markdown, JSON, YAML)
+#   - CRLF fuer Windows-native Scripts/Loesungen (.ps1, .sln)
+#   - binary fuer ausfuehrbare Binaries/Images/tessdata
+#
+# * text=auto  = Git erkennt Text-Dateien automatisch und normalisiert
+#                sie gem. EOL-Regel. Untracked Files werden so behandelt,
+#                als waeren sie Text, wenn sie ueberwiegend ASCII sind.
+
+# Default
+*               text=auto
+
+# Quellcode + Doku -> LF (Industriestandard, dotnet-format-kompatibel)
+*.md            text eol=lf
+*.cs            text eol=lf
+*.xaml          text eol=lf
+*.csproj        text eol=lf
+*.props         text eol=lf
+*.targets       text eol=lf
+
+# Build-Konfig / Datenformate -> LF
+*.json          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.config        text eol=lf
+*.xml           text eol=lf
+
+# Windows-native Scripts / Loesungen -> CRLF
+*.sln           text eol=crlf
+*.ps1           text eol=crlf
+*.psm1          text eol=crlf
+*.psd1          text eol=crlf
+*.cmd           text eol=crlf
+*.bat           text eol=crlf
+
+# Ausfuehrbare Binaries / Assets / trainierte Modelle -> no normalization
+*.dll           binary
+*.exe           binary
+*.ico           binary
+*.png           binary
+*.gif           binary
+*.jpg           binary
+*.jpeg          binary
+*.traineddata   binary
