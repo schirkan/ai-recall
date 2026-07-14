@@ -19,6 +19,9 @@ $RECYCLE.BIN/
 *.bak
 *.orig
 .cache/
+# projektinterner Hilfsordner (Commit-Msg-Entwuerfe, Build-Logs, PS-Helper).
+# Nicht zu verwechseln mit dem Workspace-level C:\Users\Admin\.openclaw\workspace\temp\.
+temp/
 
 # --- Secrets / Env ---
 .env
