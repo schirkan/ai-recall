@@ -195,7 +195,7 @@ public sealed class TrayIconController : IDisposable
         // GDI+-Runtime-Rendering, daher zuverlaessig fuer NotifyIcon.
         _notifyIcon = new NotifyIcon
         {
-            Icon = ResolveTrayIcon(_supervisor.State),
+            Icon = ResolveTrayIcon(),
             Text = "AiRecall",
             Visible = true,
             ContextMenuStrip = _menu
@@ -459,6 +459,10 @@ public sealed class TrayIconController : IDisposable
         Log.Debug("TrayIconController: RecordingStateChanged received (IsRecording={IsRecording}, Source={Source})",
             e.IsRecording, e.Source);
         ApplyRecordingEnabledState();
+        // Spec 0014 Iter. 2: Audio hat Prioritaet vor Capture-Icon.
+        // Wenn Audio laeuft, zeigen wir das Mikrofon-Icon statt des
+        // Eye-Icons — auch wenn Supervisor.State==Running.
+        UpdateTrayIcon();
     }
 
     private void RefreshStatus()
@@ -551,27 +555,56 @@ public sealed class TrayIconController : IDisposable
     internal IRecordingControl? BoundRecordingControlForTest => _boundRecordingControl;
 
     /// <summary>
-    /// Liefert das Tray-<see cref="Icon"/> fuer den aktuellen
-    /// <see cref="TriggerState"/> aus dem Embedded-Resource-Cache.
-    /// Running -> tray-recording.ico (👁️), alles andere -> tray-idle.ico
-    /// (⚫). Bei Crashed bewusst Idle, weil die Aufnahme nicht laeuft.
+    /// Liefert das Tray-<see cref="Icon"/> fuer den aktuellen Zustand aus
+    /// dem Embedded-Resource-Cache. Prioritaet (Spec 0014 Iter. 2):
+    ///   Audio laeuft           -> tray-audio-recording.ico (roter Kreis + M)
+    ///   Capture laeuft         -> tray-recording.ico       (👁️ Eye)
+    ///   sonst                  -> tray-idle.ico           (⚫ Black Circle)
+    /// Bei Crashed bewusst Idle, weil keine Aufnahme laeuft.
     /// </summary>
-    private Icon ResolveTrayIcon(TriggerState state)
+    private Icon ResolveTrayIcon()
     {
-        var key = state == TriggerState.Running ? "tray-recording.ico" : "tray-idle.ico";
+        var key = ResolveTrayIconKey();
         return _menuImages.GetOrAddEmbeddedIcon(key);
+    }
+
+    /// <summary>
+    /// Berechnet den Resource-Key fuer <see cref="ResolveTrayIcon"/>.
+    /// Audio hat Vorrang vor Capture (Spec 0014 Iter. 2), weil Audio
+    /// explizit manuell ausgeloest wurde und der User wissen soll, dass
+    /// sein Mikrofon aktiv ist — Capture ist da eher Hintergrund.
+    /// </summary>
+    private string ResolveTrayIconKey() =>
+        ResolveTrayIconKey(_supervisor.State, _boundRecordingControl?.IsRecording ?? false);
+
+    /// <summary>
+    /// Pure-Function-Variante von <see cref="ResolveTrayIconKey()"/>.
+    /// <c>internal</c> fuer Tests (InternalsVisibleTo AiRecall.Core.Tests
+    /// ist im csproj gesetzt), damit State-Kombinationen ohne
+    /// NotifyIcon-Instanziierung geprueft werden koennen — keine WinForms-
+    /// Handle-Leaks in Tests.
+    /// </summary>
+    internal static string ResolveTrayIconKey(TriggerState supervisorState, bool isAudioRecording)
+    {
+        if (isAudioRecording)
+            return "tray-audio-recording.ico";
+        return supervisorState == TriggerState.Running
+            ? "tray-recording.ico"
+            : "tray-idle.ico";
     }
 
     /// <summary>
     /// Aktualisiert das Tray-Icon idempotent. Wir setzen das Icon nur
     /// bei State-Wechsel neu, weil NotifyIcon sonst den HFON-Cache
     /// staendig invalidiert und das Shell-Paint stoert.
+    /// Wird von OnSupervisorStateChanged UND OnRecordingStateChanged
+    /// aufgerufen (Spec 0014 Iter. 2).
     /// </summary>
     private void UpdateTrayIcon()
     {
-        var key = _supervisor.State == TriggerState.Running ? "tray-recording.ico" : "tray-idle.ico";
+        var key = ResolveTrayIconKey();
         if (_currentTrayIconKey == key) return;
-        _notifyIcon.Icon = ResolveTrayIcon(_supervisor.State);
+        _notifyIcon.Icon = ResolveTrayIcon();
         _currentTrayIconKey = key;
     }
 

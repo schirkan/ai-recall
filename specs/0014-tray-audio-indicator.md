@@ -173,10 +173,23 @@ Items „Audio aufnehmen" / „Audio stoppen" nur sichtbar/aktiv wenn `Audio.Ena
 - Neuer Test: `StartManualAsync_WhileAutoRecording_Throws`
 - Tests: 11 → ~12 Tests (1 hinzu, ~3 umbenannt/angepasst)
 
-### Iter. 2 — Tray-Icon-Indikator
-- `tray-audio-recording.ico` generieren (EmojiIconGen-Tool, 🎙-Emoji)
-- `TrayIconController` abonniert `IRecordingControl.RecordingStateChanged`
-- Icon-Priorität: Audio > Capture > Idle
+### Iter. 2 — Tray-Icon-Indikator (🟢 ABGESCHLOSSEN, 2026-07-14)
+
+Implementiert:
+- `src/AiRecall.TrayApp/Resources/Icons/tray-audio-recording.ico` generiert (32x32, 766 Bytes, roter Kreis + weisses M — via `temp/gen-tray-audio-icon.ps1` mit System.Drawing.Common)
+- `TrayIconController.ResolveTrayIconKey(TriggerState, bool isAudioRecording)` als `internal static` pure function — Audio hat IMMER Vorrang vor Capture (Prioritaet-Invariante explizit getestet)
+- `TrayIconController.ResolveTrayIcon()` jetzt parameterlos
+- `TrayIconController.UpdateTrayIcon()` wird von `OnSupervisorStateChanged` UND `OnRecordingStateChanged` aufgerufen (Audio-Start triggert sofortigen Icon-Wechsel, nicht erst beim naechsten Supervisor-Tick)
+- 6 neue Tests in `tests/.../TrayApp/TrayIconControllerAudioStateTests.cs` (Pure-Function-Tests, keine NotifyIcon-Instanziierung, kein Handle-Leak)
+
+Test-Stand: 826/826 gruen stabil in 3 Runs.
+
+Geaenderte Dateien:
+- `src/AiRecall.TrayApp/TrayIconController.cs` (+52 Zeilen: pure-function + Audio-Prioritaet)
+- `src/AiRecall.TrayApp/Resources/Icons/tray-audio-recording.ico` (NEU, 766 Bytes)
+- `tests/AiRecall.Core.Tests/TrayApp/TrayIconControllerAudioStateTests.cs` (NEU, 82 Zeilen, 6 Tests)
+
+Hinweis zur Icon-Groesse: 32x32 Single-Resolution statt 16+32 Multi-Resolution. Pragmatisch — Windows skaliert 32x32 ICO via GDI+ sauber auf 16x16/24x24 Tray-Slots. Multi-Resolution-ICO braucht einen Custom-Binary-Writer (ICO-Header + mehrere PNG/BMP-Entries), waere Over-Engineering fuer eine Tray-Icon-Datei.
 - `_statusRefreshTimer` triggert auch Icon-Refresh bei Audio-State-Change
 - Tests: ~5 Tests (Icon-State-Machine, Edge-Cases: Audio-Start während Capture-Running)
 
