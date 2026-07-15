@@ -1,8 +1,9 @@
 # 0012 — Tessdata First-Run Download
 
-> **Status:** 🟡 **GEPLANT v0.1 (2026-07-06)**
+> **Status:** ✅ **abgeschlossen (2026-07-15)** — `TessdataManager` (Core) + `TessdataFirstRunDialog` (TrayApp) + `OcrConfig.AutoDownloadTessdata` Setting, sequentieller Download mit Retry, `osd`-Filter, Fallback-Pfad `%LOCALAPPDATA%/AiRecall/tessdata/`.
+> **Implements:** Modal-Dialog beim ersten Start, wenn `Ocr.Engine == "tesseract"` UND `AutoDownloadTessdata == true` UND mindestens eine konfigurierte Sprache lokal fehlt. „Nie fragen" persistiert das Setting in `%APPDATA%/AiRecall/config.json`.
 > **Owner:** Martin
-> **Abhängig von:** Spec 0006 (Tray-EXE Foundation), Spec 0009 (Settings-Dialog), Tesseract `tessdata_fast` (Apache-2.0)
+> **Abhängig von:** Spec 0006 (Tray-EXE Foundation) — erledigt, Spec 0009 (Settings-Dialog) — erledigt, Tesseract `tessdata_fast` (Apache-2.0)
 
 ## Ziel
 
@@ -160,10 +161,24 @@ public sealed class OcrConfig
 - **LICENSE-File mitkopieren**: Nach Download `LICENSE` und `NOTICE` (falls vorhanden)
   aus dem Repo mit herunterladen und nach `%LOCALAPPDATA%/AiRecall/tessdata/LICENSE`
   ablegen. Wird in v0.2 nachgerüstet (siehe Chat-Log 2026-07-06 Lizenz-Frage).
+  → **v0.1 bewusst zurückgestellt**: User hat dem Download explizit zugestimmt,
+  Quell-URL wird im Dialog angezeigt, kein Silent-Tracking.
 - **Update-Mechanismus** (neue tessdata-Version): out-of-scope für v0.1, später
   via Trigger-Pipeline vergleichbar zu `0007-async-conversion`.
+  → **v0.1 bewusst zurückgestellt**: First-Run-Dialog deckt nur die initiale
+  Einrichtung ab; Updates würden eine eigene Heuristik (Mtime-Check,
+  Hash-Vergleich) benötigen.
 - **Mehrere Sprachen parallel herunterladen**: aktuell sequentiell. Bei vielen
   Sprachen wäre Parallel-Download sinnvoll — v0.2.
+  → **v0.1 bewusst sequentiell**: `DownloadAsync` ruft `DownloadFileAsync`
+  pro Sprache in einer Schleife (`await` aufeinanderfolgend). Implementiert
+  in [src/AiRecall.Core/Tessdata/TessdataManager.cs](src/AiRecall.Core/Tessdata/TessdataManager.cs).
+  Bei Default-Sprachen (deu/eng) sind es eh nur 1–2 Dateien — Parallelisierung
+  lohnt erst bei 4+ Sprachen.
 - **"Nie fragen"-Reset via Settings-Dialog**: User soll in Settings den Wert
   wieder auf `true` setzen können (PropertyGrid macht das automatisch, kein
   Extra-UI nötig).
+  → **erledigt**: `OcrConfig.AutoDownloadTessdata` hat ein `[Description(...)]`-
+  Attribut und wird vom dynamischen `SettingsDialog`-PropertyGrid
+  (Spec 0009) automatisch gerendert. Persistenz läuft via
+  `TrayAppContext.TryPersistOcrConfig()` — siehe [src/AiRecall.TrayApp/TrayAppContext.cs](src/AiRecall.TrayApp/TrayAppContext.cs).

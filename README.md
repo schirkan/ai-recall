@@ -3,7 +3,7 @@
 > Lokales, persönliches „Recall"-Tool für Windows — Screenshot-basiertes
 > Memory für Bildschirmarbeit, Mails, Dokumente und (später) Meetings.
 
-⚠️ **Status:** MVP1 + MVP2 + MVP3 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release. **777/777 Tests grün stabil** (Stand 2026-07-09).
+⚠️ **Status:** MVP1 + MVP2 + MVP3 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release. **829/829 Tests grün stabil** (Stand 2026-07-15).
 
 ## Vision
 
@@ -13,7 +13,7 @@ läuft aber **komplett lokal**, ist **Open Source (MIT)** und fokussiert auf
 
 Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
 
-## Features (Stand 2026-07-09)
+## Features (Stand 2026-07-15)
 
 - ✅ `recall list-windows` — alle Top-Level-Fenster auflisten
 - ✅ `recall active-window` — aktives Fenster (oder per `--hwnd`) capturen
@@ -61,6 +61,18 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
   `ITriggerService`, Hot-Reload via `TriggerSupervisor.Restart`, SingleInstance-Mutex,
   + Live Logviewer ([Spec 0008](./specs/0008-live-logviewer.md), Ringbuffer 10k + Filter + Auto-Scroll)
   + Settings-Dialog ([Spec 0009](./specs/0009-settings-dialog.md), dynamische Form-Generierung via Reflection auf `AppConfig`)
+- ✅ First-Run Settings-Dialog ([Spec 0016](./specs/0016-first-run-settings-dialog.md)) —
+  beim ersten Start der TrayApp (keine User-Config vorhanden) wird automatisch
+  modal der Settings-Dialog angezeigt, damit der User die wichtigsten Werte prüfen
+  kann, bevor die Pipeline produktiv läuft. Über `App.FirstRun = false` deaktivierbar
+  (Use-Case: stille Erstinstallation via Deployment-Script); erscheint **vor** dem
+  Tessdata-Dialog aus [Spec 0012](./specs/0012-tessdata-first-run.md).
+- ✅ Default-Credentials für HTTP-Downloads ([Spec 0015](./specs/0015-default-credentials-for-downloads.md)) —
+  `HttpClientFactory.CreateDefaultHandler()` aktiviert `UseDefaultCredentials = true`
+  und `DefaultProxyCredentials = CredentialCache.DefaultCredentials`, damit
+  Downloads hinter einem NTLM-/Kerberos-Proxy ohne User-Interaktion authentifiziert
+  werden. Genutzt von `TessdataManager` (tessdata-Download) und `AppCaptureHttpClient`.
+  System-Proxy-Discovery (WPAD/PAC, `netsh winhttp`) bleibt aktiv (`UseProxy = true`).
 - ✅ **MVP3 Audio Notes** ([Spec 0013](./specs/0013-audio-notes-mvp3.md), v0.3 Update 8 abgeschlossen 2026-07-09):
   - Teams-Meeting-Polling (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection,
     Start-Debounce `MinMeetingDurationSeconds=30s`)
@@ -135,13 +147,17 @@ Sprachen und Pfad stehen in `default-config.json` (`ocr.languages`,
 ```bash
 # Fenster aus list-windows picken
 dotnet run --project src/AiRecall.Cli -- list-windows
-# ...
-dotnet run --project src/AiRecall.Cli -- active-window --hwnd 0x0000090068
-```
+# ...829/829 Tests grün, 5/5 Runs stabil** (MVP1 + MVP2 + MVP3 Audio Notes + Spec 0014 Tray-Audio + Spec 0015 Default-Credentials + Spec 0016 First-Run-Dialog).
 
-Hilfreich für Skripte und headless Tests.
-
-## Tests
+Iterations-Stand 2026-07-15:
+- MVP1: 650 Tests nach Bug-Bash 2026-07-06 (`d245dd2`)
+- MVP3 (Audio Notes): +104 Tests (Iter. 1-4 vom 2026-07-08/09, Bug-Fix
+  `TranscriptionWorker`-Counter-Race in Iter. 4)
+- Spec 0014 (Tray-Audio-Indicator): +52 Tests (Iter. 1-3 + Flake-Fix `2814d5b`),
+  Total 820 → nach `058c023` App-Capture-Helper 829/829 stabil.
+- Spec 0015 (Default-Credentials): +7 Tests (`HttpClientFactory` × 5 + `TessdataManager`-Reflection × 2).
+- Spec 0016 (First-Run-Dialog): +5 Tests (`UserConfigLocator` × 4 + `AppSettings.FirstRun`-Default × 1).
+- Total: **829/829
 
 ```bash
 dotnet test

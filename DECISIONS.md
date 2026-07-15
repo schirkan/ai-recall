@@ -963,34 +963,34 @@ Test-Count 425 → **525/525 grün** (+100). Modul komplett neu in
 
 ---
 
-## 2026-07-06 â€” Roadmap-Reshuffle: MVP 3 (Audio Notes) + MVP 4 (Auto Wiki)
+## 2026-07-06 ” Roadmap-Reshuffle: MVP 3 (Audio Notes) + MVP 4 (Auto Wiki)
 
-**Direktive Martin 2026-07-06 (kurz, Telegram):** â€žMvp 4 auto wiki Â· Mvp 3 audio notes.
+**Direktive Martin 2026-07-06 (kurz, Telegram):** „Mvp 4 auto wiki · Mvp 3 audio notes.
 Details folgen. Nur kurz dokumentieren."
 
 **Entscheidung:** Roadmap-Nummerierung wird verschoben.
 
 | #     | Alt (Spec 0001)                  | Neu                                                      |
 |-------|----------------------------------|----------------------------------------------------------|
-| MVP 1 | Screen Recorder + App Reader     | unverÃ¤ndert (abgeschlossen)                              |
-| MVP 2 | Tray-Icon-EXE / Trigger          | unverÃ¤ndert (abgeschlossen)                              |
+| MVP 1 | Screen Recorder + App Reader     | unverändert (abgeschlossen)                              |
+| MVP 2 | Tray-Icon-EXE / Trigger          | unverändert (abgeschlossen)                              |
 | MVP 3 | **Auto Knowledge Base / Wiki**   | **Audio Notes** (neu)                                    |
-| MVP 4 | â€”                                | **Auto Knowledge Base / Wiki** (Wiki-Scope wandert von 3 nach 4) |
+| MVP 4 | ”                                | **Auto Knowledge Base / Wiki** (Wiki-Scope wandert von 3 nach 4) |
 
-**BegrÃ¼ndung:** Die ursprÃ¼nglich unter MVP 3 zusammengefassten Scopes
+**Begründung:** Die ursprünglich unter MVP 3 zusammengefassten Scopes
 (Audio-Capture + Wiki/Index) werden entzerrt, weil Audio-Capture
-eigenstÃ¤ndige KomplexitÃ¤t mitbringt (NAudio/Whisper-Kette,
+eigenständige Komplexität mitbringt (NAudio/Whisper-Kette,
 Kalender-Integration, Meeting-Start/Stop) und das Wiki darauf
 aufbaut, aber separat releasebar ist.
 
 **Konsequenz / Folge-Aktionen:**
 
 - specs/0001-vision.md Roadmap-Sektion entsprechend reshufflet.
-- PROJECT.md â€žOffene Punkte" bekommt einen kurzen MVP-3/4-Block.
+- PROJECT.md „Offene Punkte" bekommt einen kurzen MVP-3/4-Block.
 - Spec-Detail-Specs (vermutlich  013-audio-notes.md,  014-auto-wiki.md)
   werden separat erstellt, sobald Martin die Details liefert.
 - Hinweis: specs/0012-tessdata-first-run.md (Bug-Bash 2026-07-06) belegt
-  bereits die 0012-Nummer â€” Audio-Notes/Wiki-Specs verschieben sich daher
+  bereits die 0012-Nummer ” Audio-Notes/Wiki-Specs verschieben sich daher
   auf 0013+.
 
 ---
@@ -1040,41 +1040,41 @@ Test-Count 650/650 gr�n (vorher 589).
 
 ---
 
-## 2026-07-06 â€” Bug-Bash TrayApp + Trigger-Pipeline v2 (Teil 2 â€” Spec 0005/0006/0009)
+## 2026-07-06 ” Bug-Bash TrayApp + Trigger-Pipeline v2 (Teil 2 ” Spec 0005/0006/0009)
 
 Fortsetzung des Bug-Bash vom 2026-07-06, Commit d245dd2. 27 Issues aus
 Real-Tests der TrayApp-Flows adressiert (I-18 bis I-25 in DECISIONS
 dokumentiert; vorhergehender Block I-4 bis I-17 separat in 4e5e617).
-Test-Count **650 â†’ 673 grÃ¼n** (+23).
+Test-Count **650 ’ 673 grün** (+23).
 
-| #   | ID    | Thema                                                       | Entscheidung                                                                                                                              | BegrÃ¼ndung                                                                                                                                  |
+| #   | ID    | Thema                                                       | Entscheidung                                                                                                                              | Begründung                                                                                                                                  |
 |-----|-------|-------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| 1   | I-23  | Periodic Capture                                            | TriggerService verdrahtet neuen PeriodicCaptureThread (3â€“10 s); TriggerKind.Periodic neu                                            | Video-Streams / Slideshows Ã¤ndern visuell, aber Hwnd + Titel bleiben gleich â†’ WinEventHook feuert nicht.                                    |
-| 2   | I-24  | PollThread-Konsolidierung                                   | HeartbeatThread + PeriodicCaptureThread werden dÃ¼nne Wrapper um neuen internen PollThread                                          | Loop-Logik war 1:1 identisch (Cancellation-aware Sleep + GetForegroundWindow); Deduplication ~110 LoC.                                  |
-| 3   | I-18  | ConfigSchemaReflection rekursiv                           | BuildSection/BuildTreeNode traversieren Property-BÃ¤ume rekursiv; IsExpandableConfigType prÃ¼ft Property-Typ                           | Vorher: nur Top-Level-Sektionen (rowser, pdf, ...); Sub-Sub-Configs (rowser.cdp, 	rigger.winEvents) fehlten komplett im Tree.     |
+| 1   | I-23  | Periodic Capture                                            | TriggerService verdrahtet neuen PeriodicCaptureThread (3“10 s); TriggerKind.Periodic neu                                            | Video-Streams / Slideshows ändern visuell, aber Hwnd + Titel bleiben gleich ’ WinEventHook feuert nicht.                                    |
+| 2   | I-24  | PollThread-Konsolidierung                                   | HeartbeatThread + PeriodicCaptureThread werden dünne Wrapper um neuen internen PollThread                                          | Loop-Logik war 1:1 identisch (Cancellation-aware Sleep + GetForegroundWindow); Deduplication ~110 LoC.                                  |
+| 3   | I-18  | ConfigSchemaReflection rekursiv                           | BuildSection/BuildTreeNode traversieren Property-Bäume rekursiv; IsExpandableConfigType prüft Property-Typ                           | Vorher: nur Top-Level-Sektionen (rowser, pdf, ...); Sub-Sub-Configs (rowser.cdp, 	rigger.winEvents) fehlten komplett im Tree.     |
 | 4   | I-21  | IsExpandableConfigType Property-Typ-Check                 | Typbasierte Erkennung statt Klassen-Attribut                                                                                              | Attribute-Drift war nicht garantiert; Property-Typ ist single-source-of-truth.                                                              |
-| 5   | I-25  | Description-Attribute in AppConfig                        | 77 [Description]-Texte (deutsch) hinzugefÃ¼gt                                                                                            | Settings-Dialog soll pro Editor einen Hover-Text anzeigen; manuelles Doku-Drift vermeiden.                                                  |
-| 6   | I-25 | Nullable-Editoren in PropertyEditorFactory                | ool?/int?/string?/Enum? mit â€žnull"-Sentinel-Wert                                                                                 | ool.Parse("null") warf im ersten Wurf; jetzt OrdinalIgnoreCase-Switch.                                                                 |
+| 5   | I-25  | Description-Attribute in AppConfig                        | 77 [Description]-Texte (deutsch) hinzugefügt                                                                                            | Settings-Dialog soll pro Editor einen Hover-Text anzeigen; manuelles Doku-Drift vermeiden.                                                  |
+| 6   | I-25 | Nullable-Editoren in PropertyEditorFactory                | ool?/int?/string?/Enum? mit „null"-Sentinel-Wert                                                                                 | ool.Parse("null") warf im ersten Wurf; jetzt OrdinalIgnoreCase-Switch.                                                                 |
 | 7   | I-16 | SettingsDialog proportionaler Splitter                       | SplitContainer.FixedPanel = Panel1, ~30 % TreeView, Editoren dehnen sich                                                                 | SplitterDistance war fixer Pixelwert (220 px); Editoren hingen auf 360 px.                                                                  |
-| 8   | I-18 | SettingsDialog rekursive Section-Nodes                      | TreeView-Builder ruft sich rekursiv auf                                                                                                    | Vorher: 15+ flache Top-Level-Knoten; jetzt echte Baumstruktur (z. B. Browser â†’ CDP â†’ enabled).                                            |
-| 9   | I-19 | SettingsDialog Layout                                       | StatusStrip + ButtonPanel in split.Panel2                                                                                                | Resize-Grip war unter den Buttons â†’ unbenutzbar.                                                                                            |
+| 8   | I-18 | SettingsDialog rekursive Section-Nodes                      | TreeView-Builder ruft sich rekursiv auf                                                                                                    | Vorher: 15+ flache Top-Level-Knoten; jetzt echte Baumstruktur (z. B. Browser ’ CDP ’ enabled).                                            |
+| 9   | I-19 | SettingsDialog Layout                                       | StatusStrip + ButtonPanel in split.Panel2                                                                                                | Resize-Grip war unter den Buttons ’ unbenutzbar.                                                                                            |
 | 10  | I-20 | SettingsDialog Editor-Lookup                                | OrdinalIgnoreCase statt ool.Parse                                                                                                    | ool.Parse("null") warf bei Nullable<bool>; Switches auf String-Compare.                                                                  |
 | 11  | I-25 | Description-Label                                           | 1-zeiliges Label unter jedem Editor                                                                                                       | User soll pro Feld Hover-Hilfe sehen ohne PropertyGrid-Tooltips.                                                                            |
-| 12  | I-15 | 1-Hz-StatusRefresh-Timer                                    | TrayIconController hÃ¤lt Capture-Counter live                                                                                             | StateChanged feuert nur bei Transition; CaptureCount ist zwischen Events eingefroren.                                                   |
-| 13  | I-UE | Quit-Icon via EmojiIconFactory                              | â€žx"-Emoji via COLR/CPAL statt embedded .ico                                                                                             | Single-Color-Fallback-Pfad fÃ¼r monochrome Tray-Icons reicht; reduziert Embedded-Ressourcen.                                                 |
-| 14  | I-12 | Tessdata First-Run (Spec 0012)                              | Multi-Path-Suche (config-Pfad â†’ %LOCALAPPDATA%\AiRecall\tessdata â†’ BaseDirectory) + One-Shot-Ballon                                | 	essdata neben EXE auf Dev-Maschinen oft leer; Balloon-Hinweis besser als Silent-Crash.                                                   |
-| 15  | I-22 | OcrEngine Tesseract-Pfad-Suche                            | 3-Pfad-Suche mit aussagekrÃ¤ftiger Error-Message                                                                                            | User sieht ohne Suche nicht, welcher Pfad eigentlich geprÃ¼ft wurde.                                                                         |
+| 12  | I-15 | 1-Hz-StatusRefresh-Timer                                    | TrayIconController hält Capture-Counter live                                                                                             | StateChanged feuert nur bei Transition; CaptureCount ist zwischen Events eingefroren.                                                   |
+| 13  | I-UE | Quit-Icon via EmojiIconFactory                              | „x"-Emoji via COLR/CPAL statt embedded .ico                                                                                             | Single-Color-Fallback-Pfad für monochrome Tray-Icons reicht; reduziert Embedded-Ressourcen.                                                 |
+| 14  | I-12 | Tessdata First-Run (Spec 0012)                              | Multi-Path-Suche (config-Pfad ’ %LOCALAPPDATA%\AiRecall\tessdata ’ BaseDirectory) + One-Shot-Ballon                                | 	essdata neben EXE auf Dev-Maschinen oft leer; Balloon-Hinweis besser als Silent-Crash.                                                   |
+| 15  | I-22 | OcrEngine Tesseract-Pfad-Suche                            | 3-Pfad-Suche mit aussagekräftiger Error-Message                                                                                            | User sieht ohne Suche nicht, welcher Pfad eigentlich geprüft wurde.                                                                         |
 
 ### Neue Spec / Datei
 
-- specs/0012-tessdata-first-run.md (169 LoC): Auto-Download-Plan fÃ¼r 	essdata_fast-Repo,
+- specs/0012-tessdata-first-run.md (169 LoC): Auto-Download-Plan für 	essdata_fast-Repo,
   modaler TessdataFirstRunDialog, SHA-Check verworfen (Repo publiziert keine
-  pro-File-Checksums), Apache-2.0-Hinweis, sequentieller Download mit 3Ã—Retry + Exponential-Backoff.
+  pro-File-Checksums), Apache-2.0-Hinweis, sequentieller Download mit 3—Retry + Exponential-Backoff.
 - 	ools/EmojiIconGen/Program.cs (144 LoC): Dev-Tool zum COLR/CPAL-Icon-Generieren.
 
 ### Tests
 
-- Test-Count gesamt: **673 / 673 grÃ¼n** (vorher 650).
+- Test-Count gesamt: **673 / 673 grün** (vorher 650).
 - +23 Tests in TessdataManagerTests (187 LoC), TreeDumpTest, PeriodicCaptureThreadTests,
   PropertyEditorFactoryTests, ConfigSchemaReflectionTests, TriggerEventTests,
   TriggerServiceConversionTests.
@@ -1084,12 +1084,12 @@ Test-Count **650 â†’ 673 grÃ¼n** (+23).
 
 - **MenuImageCache (screenshots/menus duplicate icon-stub)**: Dead-Code aus Vor-Spec-0006
   Phase, entfernt.
-- **ppReader.maxContentKB Property**: durch Kommentar mit BegrÃ¼ndung ersetzt;
+- **ppReader.maxContentKB Property**: durch Kommentar mit Begründung ersetzt;
   pro-App-Reader-MaxContentKB ist weiterhin pro DLL vorhanden (Outlook, OneNote, Teams).
-- **CounterChanged-Event am TriggerSupervisor**: wÃ¼rde Engine-Side-Ã„nderungen erfordern
+- **CounterChanged-Event am TriggerSupervisor**: würde Engine-Side-„nderungen erfordern
   (Event in TriggerWorker.CaptureCount++ emittieren). 1-Hz-Timer-Poll ist schlanker.
 - **Auto-Download tessdata silent (ohne User-Dialog)**: gegen Spec-0002-Prinzip
-  â€žUser gibt Initial-Setup selbst". Spec 0012 sieht expliziten User-Confirm vor.
+  „User gibt Initial-Setup selbst". Spec 0012 sieht expliziten User-Confirm vor.
 
 ### Auswirkungen (Code-Dateien)
 
@@ -1116,5 +1116,5 @@ Test-Count **650 â†’ 673 grÃ¼n** (+23).
 
 ### Folge-Aktionen (offene Spec-Updates)
 
-Diese Doku-Eintragung referenziert die I-23 bis I-25 Decisions; die zugehÃ¶rigen
+Diese Doku-Eintragung referenziert die I-23 bis I-25 Decisions; die zugehörigen
 Specs ( 005,  006,  009) werden in einem Folge-Cluster mit-diffed.

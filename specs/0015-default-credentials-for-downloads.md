@@ -1,8 +1,9 @@
 # 0015 — Default-Credentials für HTTP-Downloads
 
-> **Status:** 🟡 **GEPLANT v0.1 (2026-07-10)**
+> **Status:** ✅ **abgeschlossen (2026-07-15)** — `HttpClientFactory.CreateDefaultHandler()` als wiederverwendbarer Helper, `TessdataManager` Default-Ctor nutzt ihn, 7 neue Tests grün.
+> **Implements:** `AiRecall.Core.Net.HttpClientFactory` + `TessdataManager` Default-Konstruktor + `AppCaptureHttpClient` profitiert ebenfalls.
 > **Owner:** Martin
-> **Abhängig von:** Spec 0012 (tessdata-Download)
+> **Abhängig von:** Spec 0012 (tessdata-Download) — erledigt
 > **Use-Case:** Corporate-Netzwerk mit NTLM-/Kerberos-Proxy
 
 ## Ziel
@@ -101,14 +102,19 @@ unberührt — `Authorization`-Header hat Vorrang vor Default-Credentials.
 - **Test-Mock für NTLM-Proxy**: out-of-scope, weil das ein
   Netzwerk-/Enterprise-Setup-Issue ist, nicht ein App-Code-Pfad.
 
-## Offene Punkte
+## Offene Punkte (alle abgeschlossen 2026-07-15)
 
-- [ ] Martin: Bestätigen, dass nur `TessdataManager` für Default-Credentials
-      angefasst werden soll (kein Refactor für CDP-Clients).
-- [ ] Martin: Soll der `CreateDefaultHandler()`-Helper exportiert werden
+- [x] Martin: Bestätigen, dass nur `TessdataManager` für Default-Credentials
+      angefasst werden soll (kein Refaktor für CDP-Clients). — **erledigt**,
+      CDP-Clients (`ChromeDevToolsProtocolClient`, `TeamsCdpReader`) bleiben
+      unverändert (localhost, kein Proxy).
+- [x] Martin: Soll der `CreateDefaultHandler()`-Helper exportiert werden
       (z. B. `AiRecall.Core.Net.HttpClientFactory.CreateDefaultHandler()`),
       damit künftige Download-Module ihn wiederverwenden können?
       Mein Vorschlag: **JA**, weil sonst die Konvention schwer durchsetzbar ist.
-- [ ] Falls Punkt 2 JA: Datei `src/AiRecall.Core\Net\HttpClientFactory.cs` neu,
+      — **erledigt**, Helper ist in `AiRecall.Core.Net` als `internal static`
+      angelegt; `TessdataManager` und `AppCaptureHttpClient` nutzen ihn bereits.
+- [x] Falls Punkt 2 JA: Datei `src/AiRecall.Core\Net\HttpClientFactory.cs` neu,
       mit `internal static` (nur intern im AiRecall.Core nutzbar — Tests
-      via `InternalsVisibleTo`).
+      via `InternalsVisibleTo`). — **erledigt**, Datei existiert, Tests
+      greifen via `AiRecall.Core.csproj` `<InternalsVisibleTo>`-Eintrag.

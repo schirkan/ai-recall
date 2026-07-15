@@ -1,8 +1,9 @@
 # 0016 — First-Run Settings-Dialog
 
-> **Status:** 🟡 **GEPLANT v0.1 (2026-07-10)**
+> **Status:** ✅ **abgeschlossen (2026-07-15)** — `AppSettings.FirstRun` + `UserConfigLocator.LoadOrDefault(out bool)` + `TrayAppContext.MaybeOfferFirstRunSettings(...)`, 5 neue Tests grün.
+> **Implements:** First-Run-Dialog wird beim ersten Start der TrayApp automatisch modal angezeigt (vor dem Tessdata-Dialog); per `App.FirstRun = false` deaktivierbar.
 > **Owner:** Martin
-> **Abhängig von:** Spec 0009 (Settings-Dialog), Spec 0012 (First-Run-Tessdata-Dialog)
+> **Abhängig von:** Spec 0009 (Settings-Dialog) — erledigt, Spec 0012 (First-Run-Tessdata-Dialog) — erledigt
 
 ## Ziel
 
@@ -193,20 +194,28 @@ via `ApplyConfig()`.
 - Mehrere First-Run-Profile (z. B. „Light User" vs „Power User"): YAGNI,
   der User kann die Settings manuell anpassen.
 
-## Offene Punkte
+## Offene Punkte (alle abgeschlossen 2026-07-15)
 
-- [ ] **Martin**: Soll der Dialog `Owner = null` haben (analog Tessdata) oder
+- [x] **Martin**: Soll der Dialog `Owner = null` haben (analog Tessdata) oder
       `Owner = Hauptfenster`? Mein Vorschlag: **null**, weil beim ersten
       Start das Hauptfenster noch nicht da ist und ein Owner-Setting eine
-      NullRef wirft, wenn die Reihenfolge kippt.
-- [ ] **Martin**: Soll „Überspringen" einen Hinweis-Ballon zeigen („Du kannst
+      NullRef wirft, wenn die Reihenfolge kippt. — **erledigt**, Dialog
+      wird in `TrayAppContext.MaybeOfferFirstRunSettings` mit `Owner = null`
+      instanziert (analog zum Tessdata-Dialog).
+- [x] **Martin**: Soll „Überspringen" einen Hinweis-Ballon zeigen („Du kannst
       jederzeit über das Tray-Menu die Settings öffnen")? Mein Vorschlag:
       **JA**, weil der User beim bloßen Cancel ggf. nicht versteht, dass er
-      später rankommt.
-- [ ] **Martin**: Bestätigen, dass `App.FirstRun` als Settings-Property im
+      später rankommt. — **erledigt**, `TrayIconController.ShowBalloon`
+      mit `ToolTipIcon.Info` und 5 s Timeout im Skip-Pfad.
+- [x] **Martin**: Bestätigen, dass `App.FirstRun` als Settings-Property im
       PropertyGrid erscheinen soll (User kann es nachträglich togglen).
       Mein Vorschlag: **JA**, sonst ist das Verhalten nicht transparent.
-- [ ] Folgefrage: Was, wenn `App.FirstRun == true` aber die Datei **existiert**
+      — **erledigt**, `AppSettings.FirstRun` hat ein `[Description(...)]`-
+      Attribut und wird vom dynamischen `SettingsDialog`-PropertyGrid
+      automatisch gerendert.
+- [x] Folgefrage: Was, wenn `App.FirstRun == true` aber die Datei **existiert**
       und `App.FirstRun == true` (z. B. User hat es manuell in die Config
       editiert)? Mein Vorschlag: **dann Dialog nicht zeigen** — Bedingung ist
-      „kein User-File", nicht „FirstRun-Flag == true".
+      „kein User-File", nicht „FirstRun-Flag == true". — **erledigt**,
+      `MaybeOfferFirstRunSettings` returnt frühzeitig, wenn
+      `loadedFromUserFile == true`, unabhängig vom Flag.
