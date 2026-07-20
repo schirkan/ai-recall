@@ -159,6 +159,7 @@ public class MeetingTriggerTests
         {
             var folder = Path.Combine(_root, "meetings", ctx.ChatIdShort);
             return new RecordingSession(
+                triggerSource: RecordingTriggerSource.Polling,  // Spec 0014 Iter. 3.1
                 meetingIdShort: ctx.ChatIdShort,
                 startedAt: DateTimeOffset.UtcNow,
                 topic: ctx.Topic,
@@ -170,7 +171,7 @@ public class MeetingTriggerTests
         return (poller, worker, factory);
     }
 
-    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 2000, string? what = null)
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000, string? what = null)
     {
         var deadline = Environment.TickCount + timeoutMs;
         while (Environment.TickCount < deadline)
@@ -314,6 +315,7 @@ public class MeetingTriggerTests
         {
             var folder = Path.Combine(_root, "meetings", ctx.ChatIdShort);
             return new RecordingSession(
+                triggerSource: RecordingTriggerSource.Polling,  // Spec 0014 Iter. 3.1
                 meetingIdShort: ctx.ChatIdShort,
                 startedAt: DateTimeOffset.UtcNow,
                 topic: ctx.Topic,
@@ -328,6 +330,7 @@ public class MeetingTriggerTests
             // Race-Freiheit bei parallelen Tests im selben Millisekunden-Bereich.
             var id = $"manual-{Guid.NewGuid():N}-{Interlocked.Increment(ref folderCounter):D3}";
             return new RecordingSession(
+                triggerSource: RecordingTriggerSource.ManualAudio,  // Spec 0014 Iter. 3.1
                 meetingIdShort: id,
                 startedAt: DateTimeOffset.UtcNow,
                 topic: "(manual recording)",

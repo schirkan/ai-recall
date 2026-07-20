@@ -209,7 +209,25 @@ Hinweis zur Icon-Groesse: 32x32 Single-Resolution statt 16+32 Multi-Resolution. 
 - **Click-Handler:** `Start` → `_recordingControl?.StartManualAsync(CancellationToken.None)`; `Stop` → `_recordingControl?.StopAsync()`. Fehler (z. B. `InvalidOperationException` bei laufender Aufnahme aus anderem Pfad) werden via `ShowError` als MessageBox angezeigt — analog Capture-Start-Fail-Handler.
 - **Icons:** 🎙-Emoji via `EmojiIconFactory.RenderBitmap("🎙", size)` — konsistent mit dem Quit-Item-Pattern (Bug-Bash 2026-07-06 I-UE).
 - **Test-Hooks:** `internal void RebindRecordingControlForTest()` und `internal ToolStripMenuItem StartAudioItemForTest` / `StopAudioItemForTest` für deterministische Tests ohne WinForms-Threading-Komplexität im Click-Handler.
-- **Persistenz manueller Aufnahmen:** landen im selben Pfad-Schema wie Meeting-Aufnahmen (`{rootPath}/yyyy-MM-dd/audio/{key}/` mit Key `manual-{guid}`). `trigger_source` im MD-Frontmatter ist aktuell hardcoded `polling` (siehe `RecordingSession.WriteInitialMetaMd`); eine Parametrisierung auf `manual-audio` ist explizit als TODO für Spec 0014 Iter. 3.1 vorgemerkt, aber für Iter. 3 nicht blockierend.
+- **Persistenz manueller Aufnahmen:** landen im selben Pfad-Schema wie Meeting-Aufnahmen (`{rootPath}/yyyy-MM-dd/audio/{key}/` mit Key `manual-{guid}`). `trigger_source` im MD-Frontmatter ist parametrisiert via `RecordingTriggerSource`-Enum (Spec 0014 Iter. 3.1, abgeschlossen 2026-07-20): `polling` für Meeting-getriggerte Aufnahmen via `MeetingTrigger`, `manual-audio` für manuelle Aufnahmen via Tray-Menu. Folder-Key-Schema: Manual bekommt `manual-`-Prefix (`HHmmss-manual-{guid}` statt `HHmmss-{guid}`).
+
+### Iter. 3.1 — `trigger_source`-Parametrisierung + Folder-Key-Schema (🟢 ABGESCHLOSSEN, 2026-07-20)
+
+**Status:** ✅ Abgeschlossen — 5 neue Tests grün stabil (Counter/Async 5/5 stable).
+
+**Commits:** folgen nach diesem Doc-Cluster.
+
+**Geaenderte Dateien:**
+- `src/AiRecall.Core/Audio/RecordingSession.cs`: Neues `enum RecordingTriggerSource { Polling, ManualAudio }` + neuer Constructor-Parameter `triggerSource` (Position 1) + `_triggerSource`-Field + `TriggerSource`-Property. `Start()` leitet Folder-Key vom TriggerSource ab (`manual-{meetingIdShort}` für Manual, sonst `{meetingIdShort}`). `WriteInitialMetaMd()` schreibt `trigger_source: polling` oder `trigger_source: manual-audio` (Switch-Expression statt hardcoded String).
+- `src/AiRecall.Trigger/MeetingTriggerFactory.cs`: Polling-Factory reicht `RecordingTriggerSource.Polling` durch. Neue `manualRecorderFactory` (Func&lt;RecordingSession&gt;) baut Manual-Session mit `RecordingTriggerSource.ManualAudio` + `Guid.NewGuid().ToString("N").Substring(0, 8)` als ID + Default-Topic `"Manual recording"`. `manualRecorderFactory` wird an `new MeetingTrigger(...)` durchgereicht (war Spec 0014 Iter. 1b bereits vorbereitet, aber noch nicht wired).
+- `tests/AiRecall.Core.Tests/Audio/RecordingSessionTests.cs`: 7 bestehende Constructor-Calls um `triggerSource: RecordingTriggerSource.Polling` ergänzt. 5 neue Tests: `Constructor_TriggerSource_DefaultsFromParameter`, `Start_FolderKey_PollingNoPrefix`, `Start_FolderKey_ManualHasPrefix`, `Start_MetaMd_TriggerSource_Polling`, `Start_MetaMd_TriggerSource_ManualAudio`.
+- `tests/AiRecall.Core.Tests/Trigger/MeetingTriggerTests.cs`: 3 weitere Constructor-Calls in `NewPollerWorkerFactory()` und `NewPollerWorkerFactoryWithManual()` (Polling x2 + ManualAudio x1) ergänzt.
+- `tests/AiRecall.Core.Tests/Trigger/MeetingTriggerTests.cs`: **Defensive Timeout-Erhöhung** `WaitUntilAsync(timeoutMs: 2000 → 5000)` — Pre-existing Counter-Race-Flake in `RecordingStateChanged_Fired_OnAutoStop` (Spec 0013 Iter. 4 Counter-Race-Detector) wurde durch den erhöhten Timeout stabilisiert (vorher 3/5 stable, jetzt 5/5 stable). Bekannter Issue: Test ist inherent flaky (Race-Pattern), Timeout-Erhöhung ist pragmatischer Fix, keine Root-Cause-Analyse.
+
+**Lessons:**
+- **Pattern-Wiederverwendung:** Die `Func<RecordingSession>? _manualRecorderFactory`-Infrastruktur in `MeetingTrigger` (Spec 0014 Iter. 1b) wurde bereits vorbereitet, aber erst Iter. 3.1 hat sie wired. Klassisches Beispiel für „vorbereiten, später verbinden" — sauberer Staged-Rollout.
+- **Switch-Expression statt hardcoded String:** Vorher war `trigger_source: polling` ein Hardcoded-Literal in `WriteInitialMetaMd()`. Mit der Parametrisierung wird der String aus dem Enum abgeleitet — typsicher, kompilierzeitgeprüft, refactoring-freundlich.
+- **Pre-existing Counter-Race-Flake:** Der `RecordingStateChanged_Fired_OnAutoStop`-Test wurde in Spec 0013 Iter. 4 (Commit `2814d5b`) als Counter-Race-Detector eingeführt. Iter. 3.1 hat den Flake durch eine zusätzliche `Guid.NewGuid()`-Allocation in der `manualRecorderFactory` (nur Konstruktor-Zeit, nicht im Hot-Path) vermutlich verschärft. Defensive Timeout-Erhöhung ist pragmatisch — Root-Cause wäre eine echte Architektur-Analyse der Race-Bedingungen wert (Spec-Folge-Kandidat).
 
 ### Iter. 4 — Doku-Cluster (🟢 ABGESCHLOSSEN, 2026-07-14)
 

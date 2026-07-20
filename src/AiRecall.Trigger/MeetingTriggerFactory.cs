@@ -73,6 +73,7 @@ public static class MeetingTriggerFactory
                 DateTime.UtcNow.ToString("yyyy-MM-dd"),
                 $"{DateTime.UtcNow:HHmmss}-{ctx.ChatIdShort}");
             return new RecordingSession(
+                triggerSource: RecordingTriggerSource.Polling,  // Spec 0014 Iter. 3.1
                 meetingIdShort: ctx.ChatIdShort,
                 startedAt: DateTimeOffset.UtcNow,
                 topic: ctx.Topic,
@@ -82,9 +83,26 @@ public static class MeetingTriggerFactory
                 deviceProvider: deviceProvider);
         };
 
-        // 5. Trigger
+        // 5. Spec 0014 Iter. 3.1: Manual-Factory fuer Tray-Menu-gestartete Aufnahmen
+        //    (Ctrl+Shift+R). Erzeugt eine eigene Session mit RecordingTriggerSource.ManualAudio,
+        //    Folder-Key "manual-{guid}", und Default-Topic "Manual recording".
+        Func<RecordingSession> manualRecorderFactory = () =>
+        {
+            var manualIdShort = Guid.NewGuid().ToString("N").Substring(0, 8);
+            return new RecordingSession(
+                triggerSource: RecordingTriggerSource.ManualAudio,  // Spec 0014 Iter. 3.1
+                meetingIdShort: manualIdShort,
+                startedAt: DateTimeOffset.UtcNow,
+                topic: "Manual recording",
+                config: config.Audio,
+                logger: logger,
+                recorderFactory: recorderFactory,
+                deviceProvider: deviceProvider);
+        };
+
+        // 6. Trigger
         var trigger = new MeetingTrigger(
-            poller, worker, recorderCtxFactory, resolvedOptions, logger);
+            poller, worker, recorderCtxFactory, resolvedOptions, logger, manualRecorderFactory);
 
         // 6. Poller starten (in Start()-Phase des TriggerSupervisors kommt das)
         logger.Information(

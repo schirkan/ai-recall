@@ -4,6 +4,21 @@ using Serilog;
 namespace AiRecall.Core.Audio;
 
 /// <summary>
+/// Auslöser einer <see cref="RecordingSession"/> (Spec 0014 Iter. 3.1).
+/// Wird im MD-Frontmatter als <c>trigger_source</c> geschrieben
+/// (Polling -> "polling", ManualAudio -> "manual-audio")
+/// und beeinflusst das Folder-Key-Schema (ManualAudio bekommt "manual-"-Prefix).
+/// </summary>
+public enum RecordingTriggerSource
+{
+    /// <summary>Meeting-getriggerte Aufnahme via <c>MeetingTrigger</c> (Spec 0013).</summary>
+    Polling,
+
+    /// <summary>Manuelle Aufnahme via Tray-Menu (Ctrl+Shift+R, Spec 0014 Iter. 1+3).</summary>
+    ManualAudio,
+}
+
+/// <summary>
 /// Orchestriert eine einzelne Meeting-Aufnahme (Spec 0013 v0.3 Update 8).
 ///
 /// <para>
@@ -30,6 +45,7 @@ namespace AiRecall.Core.Audio;
 /// </summary>
 public sealed class RecordingSession : IAsyncDisposable
 {
+    private readonly RecordingTriggerSource _triggerSource;
     private readonly AudioConfig _config;
     private readonly ILogger _logger;
     private readonly IAudioRecorderFactory _recorderFactory;
@@ -58,8 +74,21 @@ public sealed class RecordingSession : IAsyncDisposable
     public DateTimeOffset StartedAt => _startedAt;
 
     /// <summary>
+    /// Ausloeser der Session (Spec 0014 Iter. 3.1). Beeinflusst MD-Frontmatter
+    /// (<c>trigger_source</c>-Feld) und Folder-Key-Schema
+    /// (ManualAudio bekommt <c>"manual-"</c>-Prefix).
+    /// </summary>
+    public RecordingTriggerSource TriggerSource => _triggerSource;
+
+    /// <summary>
     /// Erstellt eine neue Recording-Session fuer ein Meeting.
     /// </summary>
+    /// <param name="triggerSource">
+    /// Ausloeser der Aufnahme (Spec 0014 Iter. 3.1). Polling fuer Meeting-getriggerte
+    /// Aufnahmen via <c>MeetingTrigger</c>, ManualAudio fuer manuelle Aufnahmen
+    /// via Tray-Menu. Bestimmt MD-Frontmatter-Feld <c>trigger_source</c>
+    /// und Folder-Key-Schema.
+    /// </param>
     /// <param name="meetingIdShort">Eindeutige 8-hex-ID (vom Caller bestimmt).</param>
     /// <param name="startedAt">Start-Zeitpunkt (vom Caller bestimmt, fuer deterministische Pfade).</param>
     /// <param name="topic">Meeting-Topic (fuer meta.md).</param>
@@ -68,6 +97,7 @@ public sealed class RecordingSession : IAsyncDisposable
     /// <param name="recorderFactory">Factory fuer IAudioRecorder (DI-faehig fuer Tests).</param>
     /// <param name="deviceProvider">Provider fuer Audio-Devices.</param>
     public RecordingSession(
+        RecordingTriggerSource triggerSource,
         string meetingIdShort,
         DateTimeOffset startedAt,
         string topic,
@@ -78,6 +108,7 @@ public sealed class RecordingSession : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(meetingIdShort))
             throw new ArgumentException("must not be empty", nameof(meetingIdShort));
+        _triggerSource = triggerSource;
         _meetingIdShort = meetingIdShort;
         _startedAt = startedAt;
         _topic = topic;
@@ -103,7 +134,13 @@ public sealed class RecordingSession : IAsyncDisposable
         var storageRoot = ResolveStorageRoot(_config.StorageRoot);
         var datePart = _startedAt.ToString("yyyy-MM-dd");
         var timePart = _startedAt.ToString("HHmmss");
-        _folder = Path.Combine(storageRoot, datePart, $"{timePart}-{_meetingIdShort}");
+        // Spec 0014 Iter. 3.1: Manual-Audio bekommt "manual-"-Prefix im Key
+        // (Spec: "{rootPath}/yyyy-MM-dd/audio/{key}/ mit Key manual-{guid}"),
+        // Polling bleibt beim gewohnten Schema (kompatibel zu Spec 0013).
+        var keyPart = _triggerSource == RecordingTriggerSource.ManualAudio
+            ? $"manual-{_meetingIdShort}"
+            : _meetingIdShort;
+        _folder = Path.Combine(storageRoot, datePart, $"{timePart}-{keyPart}");
         Directory.CreateDirectory(_folder);
 
         // 2) Recorder erzeugen
@@ -237,7 +274,16 @@ public sealed class RecordingSession : IAsyncDisposable
         sb.AppendLine("ended_at: null");
         sb.AppendLine("duration_seconds: null");
         sb.AppendLine($"topic: \"{EscapeYaml(_topic)}\"");
-        sb.AppendLine("trigger_source: polling");
+        // Spec 0014 Iter. 3.1: trigger_source wird aus _triggerSource abgeleitet.
+        // Polling -> "polling" (Spec 0013 kompatibel),
+        // ManualAudio -> "manual-audio" (Spec 0014 Tray-Manuelle-Aufnahme).
+        var triggerSourceStr = _triggerSource switch
+        {
+            RecordingTriggerSource.Polling => "polling",
+            RecordingTriggerSource.ManualAudio => "manual-audio",
+            _ => "unknown",
+        };
+        sb.AppendLine($"trigger_source: {triggerSourceStr}");
         sb.AppendLine("audio_files: []");
         sb.AppendLine("transcript_status: pending");
         sb.AppendLine("diarization: required");

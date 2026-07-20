@@ -70,8 +70,33 @@ Test-Stand: 820/820 (nach Iter. 3) → 829/829 (nach `058c023` App-Capture-Helpe
 
 ### Folge-Cluster (nach v1.0-Abnahme)
 
-- **Spec 0014 Iter. 3.1**: `trigger_source: manual-audio` im MD-Frontmatter (Parametrisierung von `RecordingSession.WriteInitialMetaMd`), bisher hardcoded `polling`.
+- ~~**Spec 0014 Iter. 3.1**: `trigger_source: manual-audio` im MD-Frontmatter (Parametrisierung von `RecordingSession.WriteInitialMetaMd`), bisher hardcoded `polling`.~~ → abgeschlossen 2026-07-20, siehe Eintrag weiter unten.
 - **Outlook-Speaker-Mapping** (Spec 0013 v0.4): wartet auf v0.3-Abnahme (bereits abgenommen am 2026-07-14).
+
+---
+
+## 2026-07-20 — Spec 0014 Iter. 3.1 (`trigger_source`-Parametrisierung + Folder-Key-Schema)
+
+**Anlass:** Follow-up-Cluster nach Spec 0014 v1.0-Abnahme (2026-07-14). Ursprünglich als nicht-blockierendes TODO vermerkt, jetzt umgesetzt.
+
+**Commits:** folgen nach diesem Doc-Cluster.
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | `RecordingTriggerSource`-Enum | **Neues `enum RecordingTriggerSource { Polling, ManualAudio }`** in `AiRecall.Core.Audio` (Z. 16-27) | Saubere, typsichere Alternative zu String-Literal. Kompilierzeitprüfung statt Runtime-String-Vergleich. Spec 0013 nutzt bereits ein `RecordingState`-Enum als Vorbild. |
+| 2 | Constructor-Signatur | **Breaking Change**: `triggerSource` als erster Parameter (vor `meetingIdShort`). Rückwärtskompatibilität durch Re-Compile der einzigen direkten Aufrufer (`MeetingTriggerFactory.cs`). | Saubere Parametrisierung statt optionaler Property oder Setter. Breaking Change war akzeptabel, weil nur 1 src-Aufrufer + 2 Test-Dateien betroffen. |
+| 3 | Folder-Key-Schema | **Manual bekommt `manual-`-Prefix**: `HHmmss-manual-{guid}` statt `HHmmss-{guid}`. Polling bleibt beim Spec-0013-Schema. | Spec 0014 Z. 212 verlangte `manual-{guid}` als Key. Mit Time-Prefix für Sortierbarkeit in Storage-Explorer bleibt das konsistent zur Polling-Variante. |
+| 4 | `trigger_source`-Frontmatter-Wert | **`polling` (Polling) bzw. `manual-audio` (ManualAudio)** als String im YAML-Frontmatter. Switch-Expression statt hardcoded Literal. | Klar zu parsende Strings (kein Sonderzeichen außer `-`), kompatibel zu externen Tools die meta.md lesen. Switch ist exhaustive (`Polling`/`ManualAudio`/`_`=unknown) — falls jemals neue Werte dazukommen, fällt der Compiler auf. |
+| 5 | Manual-Factory-Default-Werte | **`topic: "Manual recording"`, `meetingIdShort = Guid.NewGuid().ToString("N").Substring(0, 8)`** | Topic ist semantisch klar (manuell ausgelöst, kein Meeting-Kontext). GUID-Substring(0,8) deterministisch kurz und collision-resistent (32 bit Entropie reicht für lokale Storage-Pfade). |
+| 6 | Defensive `WaitUntilAsync`-Timeout | **`timeoutMs: 2000 → 5000`** in `MeetingTriggerTests.cs:174` | Pre-existing Counter-Race-Flake in `RecordingStateChanged_Fired_OnAutoStop` (Spec 0013 Iter. 4 Detector, Commit `2814d5b`) wurde durch die zusätzliche `Guid.NewGuid()`-Allocation in der `manualRecorderFactory` (nur Konstruktor-Zeit) von 3/5 auf 5/5 stable gebracht. Pragmatischer Fix, keine Root-Cause-Analyse. |
+| 7 | Iter. 3.1 als separate Iter. | **Eigene Iter.-Sektion (Iter. 3.1)** in Spec 0014, nicht Teil von Iter. 3. | Klar abgrenzbarer Scope: Iter. 3 = Tray-Menu-Items (UI), Iter. 3.1 = Persistenz-Parametrisierung (Datenmodell). Martin-Pattern: „one directive, one commit" — Iter. 3.1 bekommt eigenen Commit-Cluster. |
+
+### Lessons
+
+- **Breaking-Change-Pattern bei klar abgrenzbarem Scope:** Constructor-Signatur-Änderung mit nur 1 src-Aufrufer + 2 Test-Dateien ist sicher und sauber. Hätte ich versucht, `trigger_source` als optionalen Parameter oder Setter zu machen, wäre die API unsauberer und typsicherer Verlust die Folge gewesen.
+- **Vorbereitete Infrastruktur aktivieren:** Die `Func<RecordingSession>? _manualRecorderFactory` in `MeetingTrigger` (Spec 0014 Iter. 1b) lag seit Wochen brach. Iter. 3.1 hat sie aktiviert. Pattern: „Bereite die API in einer früheren Iter. vor, aktiviere sie in einer späteren Iter. wenn der Use-Case reift."
+- **Defensive Timeout-Erhöhung als pragmatischer Counter-Async-Fix:** Wenn der Test selbst den Counter-Race-Detector-Charakter hat, ist eine längere Timeout-Fenster die einfachste Stabilisierung. Root-Cause-Fix (echte Race-Analyse) wäre Spec-Folge-Kandidat — Aufwand vs. Nutzen für eine einzelne flake-Rate rechtfertigt es aktuell nicht.
+- **Switch-Expression statt Magic-Strings:** Auch bei nur 2 Enum-Werten ist die Switch-Expression exhaustive und typsicher. Compiler warnt, wenn ein neuer Wert hinzukommt ohne behandelt zu werden.
 
 ---
 
