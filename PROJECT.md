@@ -206,6 +206,22 @@ Ausführlich: `specs/0001-vision.md`
 | `capture/`                                                                           | (Laufzeit, gitignored) Screenshots + MD-Extraktionen                                                                                              |
 | `logs/`                                                                              | (Laufzeit, gitignored) Serilog Rolling-Logs                                                                                                       |
 | `tessdata/`                                                                          | (Laufzeit, gitignored) Tesseract-Sprachdateien (manuell)                                                                                          |
+| `.github/workflows/release.yml`                                                      | **CI/CD Release-Pipeline (Spec 0017 v1.0, 2026-07-20):** Tag-getriggerter Build+Test+ZIP+GitHub-Release-Workflow                                                                                                                  |
+
+## CI/CD
+
+- **Plattform:** GitHub Actions
+- **Workflow-Datei(en):** `.github/workflows/release.yml`
+- **Trigger:** Tag-Push mit Pattern `v*` (z. B. `v0.1.0-rc1`, `v1.2.3-beta.1`) — kein PR-Build, kein Push-auf-main-Build. Zusätzlich `workflow_dispatch` für Notfall-Rebuilds.
+- **Was wird gebaut:** `AiRecall.TrayApp` (Spec 0006, MVP2-Tray-Icon-EXE) als verteilbares Multi-File-Binary (`dotnet publish`).
+- **Output / Artefakte:** GitHub-Release mit Auto-generierten Release-Notes (`generate_release_notes: true`) und ZIP-Asset `AiRecall-{version}-win-x64.zip` als Release-Anhang.
+- **Pipeline-Struktur:** 2 Jobs — `build-and-test` (Restore + Build Release + xUnit-Tests + Publish + ZIP + Artifact-Upload) → `release` (`needs: build-and-test`, GitHub-Release erstellen). Tests-MUSS-grün-Gate vor Release-Erstellung.
+- **Runner:** `windows-latest` (Pflicht, weil `net8.0-windows` Win32-P/Invoke benötigt; `ubuntu-latest` würde Build brechen).
+- **.NET-Version:** `actions/setup-dotnet@v4` mit `dotnet-version: 8.0.x` (kompatibel mit `global.json`-Pin 8.0.422 + `latestFeature`-Rollforward).
+- **Externe Actions:** `actions/checkout@v4`, `actions/setup-dotnet@v4`, `actions/cache@v4` (NuGet), `actions/upload-artifact@v4`, `actions/download-artifact@v4`, `softprops/action-gh-release@v2`.
+- **Letzter bekannter Lauf:** Spec-Erstellung 2026-07-20, Erst-Tag `v0.1.0-rc1` (Pipeline-Lauf wird nach Tag-Push dokumentiert).
+- **Spec:** `specs/0017-ci-cd-release-pipeline.md`
+- **Decisions:** siehe `DECISIONS.md` Eintrag „2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)"
 
 ## Konventionen
 

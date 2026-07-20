@@ -5,6 +5,38 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)
+
+**Anlass:** Martin-Direktive 2026-07-20 19:54 — „Lege eine CI-Pipeline an, die bei neuen Tags triggert. Dokumentiere diese und erstelle Tag v0.1.0-rc1". Variante A bestätigt: Voll-Pipeline (Build + Test + ZIP-Artefakt + GitHub-Release mit Asset). Erst-Release-Ziel: `v0.1.0-rc1` (Spec 0014 v1.0 = stabiles MVP-1+2+3-Feature-Set).
+
+| # | Thema | Entscheidung | Begründung |
+|---|---|---|---|
+| 1 | Plattform | **GitHub Actions** (kein GitLab CI / Jenkins) | Repo ist GitHub (`origin = github.com/schirkan/ai-recall`), GitHub-Actions ist direkt integriert, kein zusätzliches CI-Setup nötig. Alternative Plattformen würden Continuous-Integration-Drittsystem erfordern. |
+| 2 | Trigger-Scope | **Nur Tag-Push mit Pattern `v*`** (kein PR-Build, kein Push-auf-main-Build) | Martin-Direktive wörtlich: „bei neuen Tags triggert". PR-Builds sind nicht angefragt — kann in Folge-Spec nachgerüstet werden, falls Qualitätssicherung es erfordert. Concurrency-Group `release-${{ github.ref }}` verhindert parallele Release-Läufe. |
+| 3 | Pipeline-Umfang (Variante A) | **Build + Test + ZIP-Artefakt + GitHub-Release mit Asset** | Martin bestätigt 19:56 mit „A". Voll-Pipeline ist Standard für Binary-Tools; ermöglicht direkten Download der fertigen `AiRecall.TrayApp.exe`-Distribution pro Release-Tag. |
+| 4 | Runner | **`windows-latest`** (kein Cross-Platform-Matrix) | Projekt targettet `net8.0-windows` mit Win32-P/Invoke (`oleaut32.dll!GetActiveObject`, `TextRenderer.DrawText`, NAudio.Wasapi). `ubuntu-latest` würde das Build brechen. Cross-Platform wäre Spec-Folge mit größerem Architektur-Refactor (Spec-Kandidat 0016). |
+| 5 | .NET-Version | **`dotnet-version: 8.0.x`** (kein Pin auf 8.0.422) | `global.json` pinnt auf 8.0.422 mit `latestFeature`-Rollforward. `8.0.x` in `setup-dotnet` ist mit diesem Rollforward-Modus kompatibel und nimmt automatisch den jeweils neuesten 8.0.x-Patch auf dem Runner (höhere Sicherheit). Konflikt mit `global.json` würde zu Build-Error führen — empirisch verifiziert in der Vergangenheit. |
+| 6 | Release-Action | **`softprops/action-gh-release@v2`** | Standard-Action für GitHub-Release-Erstellung mit `generate_release_notes: true` (Auto-Changelog aus Commits seit letztem Tag) und `fail_on_unmatched_files: true` (verhindert leere Releases wenn ZIP fehlt). Alternative `gh release create` per CLI wäre möglich, aber Action ist deklarativer. |
+| 7 | Artifact-Caching | **`actions/cache@v4`** für `~/.nuget/packages` mit Key über `hashFiles('**/*.csproj')` | Spart ~30–60 s pro Run bei wachsender Paketliste. Restore-Keys als Fallback. Kein Build-Output-Caching, weil Output deterministisch aus Source gebaut werden soll. |
+| 8 | Permissions-Prinzip | **Job-spezifische `permissions:`-Blocks** statt Workflow-globalem `write-all` | Build-Job: `contents: read` (Default). Release-Job: `contents: write` (nur was `softprops/action-gh-release` braucht). Kein `packages: write`, kein `id-token: write` → least-privilege. |
+| 9 | Publish-Strategie | **`PublishSingleFile=false`** (Multi-File-Publish) | Spec 0006 v1.0 Standard. Multi-File ermöglicht einfacheres Debuggen (PDB neben EXE), höhere Kompatibilität mit Win32-Dependencies. Single-File-Optimization ist Spec-Folge, falls Release-Größe wichtiger wird. |
+| 10 | Tag-Konvention | **`v`-Prefix + SemVer** (`v0.1.0-rc1`, `v1.0.0`, `v0.2.0-beta.1`) | GitHub erkennt das `-` im Tag automatisch als Pre-Release-Markierung (UI-Pre-Release-Box aktiv). `v`-Prefix ist GitHub-Konvention, macht Tags leichter scanbar in `git tag --list`. Pre-Releases wie `-rc1` zeigen sich klar als „noch nicht stabil" im UI. |
+| 11 | Pipeline-Struktur | **2 Jobs (`build-and-test` → `release`)** mit `needs: build-and-test` | Tests-MUSS-grün-Gate vor Release-Erstellung. Alternative: alles in einem Job — würde aber Tests nicht als hartes Gate durchsetzen (Release-Action könnte auch bei roten Tests feuern). |
+| 12 | Erst-Tag | **`v0.1.0-rc1`** | Martin-Direktive explizit. RC1 = Release-Candidate 1, semantisch korrekt: Feature-Set ist komplett (MVP1+2+3+Spec 0014 v1.0), aber externe Smoke-Tests stehen aus → kein `v0.1.0` (Stable), sondern `v0.1.0-rc1`. |
+
+### Lessons
+
+- **Frage-vor-Annahme-Pattern hat sich bewährt:** Variante A/B-Abfrage hat Mehrdeutigkeit aufgelöst (ZIP-Artefakt ja/nein). Lesson aus MEMORY.md „Interpretiere Rueckfragen nicht" greift hier erneut — auch wenn eine schnelle Default-Antwort verfügbar gewesen wäre (Variante A als Default).
+- **Plattform-Wahl = Repo-Lock-in:** GitHub Actions ist implizit, sobald Repo auf GitHub liegt. Wer Cross-Platform-CI möchte, muss früher entscheiden.
+- **windows-latest + net8.0-windows = bewusste Bindung:** Solange net8.0-windows das Target ist, gibt es keine sinnvolle CI auf Linux/macOS. Cross-Platform-CI würde .NET-Multi-Targeting-Architektur-Refactor erfordern (Spec-Kandidat 0016).
+- **`generate_release_notes: true` spart manuelles Changelog:** GitHub generiert die Notes aus Commits seit letztem Tag, gruppiert nach Conventional-Commits-Stil. Reicht v1.0; strukturiertes `CHANGELOG.md` wäre Spec-Folge.
+
+### Spec-Verweis
+
+- **Spec:** `specs/0017-ci-cd-release-pipeline.md` (v1.0, 2026-07-20)
+
+---
+
 ## 2026-07-14 — Spec 0014 (Tray Audio Indicator + Manual Audio Control) v1.0 ABGESCHLOSSEN
 
 **Anlass:** Spec 0014 v1.0 abgeschlossen nach Iter. 1+1b+2+3 + Flake-Fix + Doc-Cluster.

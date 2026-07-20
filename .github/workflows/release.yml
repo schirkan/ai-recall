@@ -1,0 +1,120 @@
+# GitHub Actions Workflow — Spec 0015 CI/CD Release-Pipeline
+# Trigger: Tag-Push mit Pattern 'v*' (z. B. v0.1.0-rc1, v1.0.0)
+# Plattform: GitHub Actions
+# Runner:    windows-latest (net8.0-windows erfordert Win32)
+# Spec:      specs/0015-ci-cd-release-pipeline.md
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'                      # z. B. v0.1.0-rc1, v1.2.3, v2.0.0-beta.1
+  workflow_dispatch:               # manueller Trigger für Notfall-Rebuilds
+
+permissions:
+  contents: read                   # default; build-and-test braucht nur Read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false        # laufende Releases nicht abbrechen
+
+jobs:
+  build-and-test:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # volle Historie fuer Release-Notes
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x    # global.json pinnt auf 8.0.422; 8.0.x = latestFeature-Rollforward
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore AiRecall.sln
+
+      - name: Build (Release)
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        run: dotnet test -c Release --no-build --logger trx --logger "console;verbosity=normal"
+
+      - name: Publish TrayApp
+        run: dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -o publish/AiRecall.TrayApp --no-build
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart('v')
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Tag: $tag"
+          Write-Host "Version: $version"
+
+      - name: ZIP publish output
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $zipName = "AiRecall-$version-win-x64.zip"
+          Compress-Archive -Path "publish/AiRecall.TrayApp/*" -DestinationPath $zipName -Force
+          Write-Host "Created: $zipName"
+          Get-Item $zipName | Format-List Name, Length, LastWriteTime
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: recall-zip
+          path: AiRecall-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build-and-test          # nur bei gruenen Tests releasen
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write               # softprops/action-gh-release braucht Write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: recall-zip
+          path: dist
+
+      - name: List artifacts
+        shell: pwsh
+        run: |
+          Write-Host "Downloaded artifacts:"
+          Get-ChildItem -Recurse dist | Format-Table FullName, Length
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: AI Recall ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.zip
