@@ -219,9 +219,9 @@ Ausführlich: `specs/0001-vision.md`
 - **Runner:** `windows-latest` (Pflicht, weil `net8.0-windows` Win32-P/Invoke benötigt; `ubuntu-latest` würde Build brechen).
 - **.NET-Version:** `actions/setup-dotnet@v4` mit `dotnet-version: 8.0.x` (kompatibel mit `global.json`-Pin 8.0.422 + `latestFeature`-Rollforward).
 - **Externe Actions:** `actions/checkout@v4`, `actions/setup-dotnet@v4`, `actions/cache@v4` (NuGet), `actions/upload-artifact@v4`, `actions/download-artifact@v4`, `softprops/action-gh-release@v2`.
-- **Letzter bekannter Lauf:** Spec-Erstellung 2026-07-20, Erst-Tag `v0.1.0-rc1` (Pipeline-Lauf wird nach Tag-Push dokumentiert).
+- **Letzter bekannter Lauf:** `v0.1.0` stable (Pipeline-Run #29803125302 success, 2026-07-21 05:11 UTC, 3 Min 10 Sek Laufzeit), Commit `26a54c8` mit `PostBuildRuntimesTrim` (c0070e2) + `PostPublishRuntimesTrim` (06237dc). ZIP-Groesse 12,10 MiB (83 % kleiner als v0.1.0 — 70,86 MiB → 12,10 MiB durch RID-Trim der 17 Nicht-Windows-x64-Plattformen).
 - **Spec:** `specs/0017-ci-cd-release-pipeline.md`
-- **Decisions:** siehe `DECISIONS.md` Eintrag „2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)"
+- **Decisions:** siehe `DECISIONS.md` Eintraäge „2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)" und „2026-07-21 — PostPublishRuntimesTrim (CI/CD-Pipeline-Optimierung)"
 
 ## Konventionen
 

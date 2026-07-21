@@ -211,6 +211,27 @@ Compress-Archive -Path publish/AiRecall.TrayApp/* -DestinationPath AiRecall-0.1.
 
 ---
 
+## Build-Trim-Targets (Iter. 1.1, 2026-07-21)
+
+**Anlass:** `Microsoft.CognitiveServices.Speech 1.40.0` liefert per Default Runtimes fuer 18 Plattformen → ~197 MB pro Projekt in `bin/Debug/.../runtimes/`. Projekt ist explizit Windows-x64-only (DECISIONS.md 2026-07-02 „Windows only").
+
+**Commits:** `c0070e2` (10:31, PostBuildRuntimesTrim) + `06237dc` (10:54, PostPublishRuntimesTrim).
+
+**Zwei Trim-Targets** (PowerShell-Exec statt MSBuild-ItemGroup, weil `<ItemGroup Include="dir\*">` per Default nur Files matched, keine Directories):
+
+| Target | AfterTargets | Output-Pfad | Workflow |
+|---|---|---|---|
+| `PostBuildRuntimesTrim` | `Build` | `$(MSBuildProjectDirectory)\$(OutputPath)runtimes\` (also `bin/.../runtimes/`) | Dev/IDE (`dotnet run`, VS-Startprojekt) |
+| `PostPublishRuntimesTrim` | `Publish` | `$(PublishDir)runtimes\` (also `publish/AiRecall.TrayApp/runtimes/`) | CI/CD (`dotnet publish` ohne vorgeschalteten `dotnet build`) |
+
+Beide Targets behalten `win-x64` und loeschen den Rest (~17 RID-Ordner).
+
+**Implementierung:** in Cli.csproj + TrayApp.csproj (gespiegelt). Grund: .NET legt RID-Ordner im Output jedes konsumierenden Projekts an, nicht nur im liefernden Projekt (Transcription.csproj). PostBuild-Target allein reicht NICHT fuer CI, weil die Release-Pipeline nur `dotnet publish` aufruft, nicht `dotnet build`.
+
+**Resultat:** ZIP-Groesse 70,86 MiB → 12,10 MiB (83 % kleiner). Lokal verifiziert nach `c0070e2` + `06237dc` (HEAD `26a54c8`).
+
+---
+
 ## Bekannte Limitierungen / Spec-Folge-Iterationen
 
 1. **Keine SBOM / Vulnerability-Scan** — Spec-Kandidat 0018 (später, falls Security-Audit gewünscht).

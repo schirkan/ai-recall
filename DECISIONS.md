@@ -5,6 +5,29 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-07-21 — PostPublishRuntimesTrim (CI/CD-Pipeline-Optimierung)
+
+**Anlass:** ZIP-Groesse nach `c0070e2` (PostBuildRuntimesTrim) noch 68,56 MiB im Publish-Output — die CI-Pipeline ruft nur `dotnet publish` auf, nicht `dotnet build`. Daher feuerte PostBuildRuntimesTrim in CI NICHT. Martin hat in `06237dc` (10:54) ein zweites Target `PostPublishRuntimesTrim` mit `AfterTargets="Publish"` hinzugefuegt. Commit `26a54c8` (10:54) ergaenzt `.gitignore` um `publish/`.
+
+**Commits:** `c0070e2` (PostBuildRuntimesTrim) + `06237dc` (PostPublishRuntimesTrim) + `26a54c8` (.gitignore `publish/`).
+
+| # | Thema | Entscheidung | Begruendung |
+|---|---|---|---|
+| 1 | PostBuildRuntimesTrim (c0070e2) | Trim in `bin/.../runtimes/` fuer Dev-Workflow | Microsoft.CognitiveServices.Speech 1.40.0 liefert 18 RID-Ordner (Android/iOS/Linux/macOS/Windows-ARM/x86/x64); Projekt ist Windows-x64-only |
+| 2 | PostPublishRuntimesTrim (06237dc) | Trim in `$(PublishDir)runtimes/` fuer CI-Pipeline | CI ruft nur `dotnet publish`, nicht `dotnet build` — PostBuild-Target feuert dort NICHT |
+| 3 | Beide Targets: PowerShell-Exec | Statt MSBuild-ItemGroup | `<ItemGroup Include="dir\*">` matched nur Files, keine Directories |
+| 4 | Implementierung in Cli.csproj + TrayApp.csproj | Nicht in Transcription.csproj | .NET legt RID-Ordner im Output jedes konsumierenden Projekts an, nicht nur im liefernden Projekt |
+| 5 | ZIP-Groesse: 70,86 MiB → 12,10 MiB | 83 % kleiner | ~17 RID-Ordner × ~3-5 MiB pro RID |
+
+### Lessons
+
+- **Zwei Targets fuer zwei Workflows:** PostBuildRuntimesTrim (Dev/IDE) + PostPublishRuntimesTrim (CI/CD) — sauberer Staged-Ansatz statt eines einzelnen Targets, das in CI nicht feuert.
+- **PowerShell-Exec statt MSBuild-ItemGroup:** Pragmatischer Workaround fuer Directory-Matching-Limitation. Funktioniert auf Windows out-of-the-box ohne Custom-MSBuild-Tasks.
+- **Strikte Windows-x64-only-Disziplin:** Aktiv beim Trim, weil nur 1 von 18 RID-Ordnern behalten wird. Reduziert ZIP-Groesse um Faktor ~6 ohne Code-Aenderung.
+- **`publish/` in `.gitignore`:** Separater Working-Tree-Output-Ordner — sollte nie eingecheckt werden (CI erzeugt das ZIP daraus).
+
+---
+
 ## 2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)
 
 **Anlass:** Martin-Direktive 2026-07-20 19:54 — „Lege eine CI-Pipeline an, die bei neuen Tags triggert. Dokumentiere diese und erstelle Tag v0.1.0-rc1". Variante A bestätigt: Voll-Pipeline (Build + Test + ZIP-Artefakt + GitHub-Release mit Asset). Erst-Release-Ziel: `v0.1.0-rc1` (Spec 0014 v1.0 = stabiles MVP-1+2+3-Feature-Set).
