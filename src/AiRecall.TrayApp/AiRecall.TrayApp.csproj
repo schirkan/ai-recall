@@ -7,6 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AiRecall.TrayApp</RootNamespace>
     <AssemblyName>AiRecall.TrayApp</AssemblyName>
+    <!--
+      Windows-only (DECISIONS.md 2026-07-02): Standard-Layout beibehalten,
+      stattdessen trimmt das PostBuildRuntimesTrim-Target in
+      AiRecall.Transcription.csproj die ungewuenschten RID-Ordner im
+      gemeinsamen bin/-Baum weg. Spart ~190 MB, ohne die EXE in einen
+      win-x64/-Subfolder zu verschieben.
+    -->
     <!-- Tray-Icon-Resource folgt in Schritt 1+ (Spec 0006 §Resources) -->
     <!-- <ApplicationIcon>Resources\tray-icon.ico</ApplicationIcon> -->
   </PropertyGroup>
@@ -39,4 +46,27 @@
   <ItemGroup>
     <InternalsVisibleTo Include="AiRecall.Core.Tests" />
   </ItemGroup>
+
+  <!--
+    PostBuild: loescht nicht-benoetigte RID-Ordner unter bin/.../runtimes/
+    (alles ausser win-x64). Spart ~190 MB pro Build-Output. Wird hier im
+    TrayApp-Projekt (und gespiegelt in AiRecall.Cli) ausgefuehrt, weil die
+    Speech-Lib transitiv ueber AiRecall.Transcription referenziert wird und
+    .NET die RID-Ordner im **Output jedes konsumierenden Projekts** anlegt.
+
+    Implementation: MSBuild's <ItemGroup Include="dir\*"> matched per Default
+    nur Files, nicht Directories. Workaround: wir nutzen die .NET-Build-Helper-
+    Eigenschaft, dass der OutputPath auf einen absoluten Pfad zeigt und setzen
+    ihn als Property. Dann loeschen wir per Exec mit robuster PowerShell-Logik
+    (keine ItemGroup-Magie noetig). Funktioniert auf Windows out-of-the-box.
+  -->
+  <Target Name="PostBuildRuntimesTrim" AfterTargets="Build">
+    <PropertyGroup>
+      <_RuntimesDir>$(MSBuildProjectDirectory)\$(OutputPath)runtimes</_RuntimesDir>
+      <_KeepRid>win-x64</_KeepRid>
+    </PropertyGroup>
+    <Exec Command="powershell.exe -NoProfile -Command &quot;if (Test-Path '$(_RuntimesDir)') { Get-ChildItem '$(_RuntimesDir)' -Directory | Where-Object { $_.Name -ne '$(_KeepRid)' } | Remove-Item -Recurse -Force }&quot;"
+          Condition="Exists('$(_RuntimesDir)')" />
+    <Message Text="PostBuildRuntimesTrim: behalten $(_KeepRid), Rest geloescht in $(_RuntimesDir)" Importance="high" />
+  </Target>
 </Project>

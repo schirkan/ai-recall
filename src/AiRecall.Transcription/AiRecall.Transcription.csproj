@@ -4,6 +4,21 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      Microsoft.CognitiveServices.Speech 1.40.0 liefert per Default Runtimes
+      fuer alle 18 Plattformen (Android/iOS/Linux/macOS/Windows-ARM/x86/x64)
+      => ~197 MB pro Projekt in bin/Debug/.../runtimes/.
+
+      Wir sind explizit Windows-x64-only (DECISIONS.md 2026-07-02 "Windows
+      only"). Das PostBuildRuntimesTrim-Target wird in jedem KONSUMENTEN
+      (AiRecall.TrayApp, AiRecall.Cli) ausgefuehrt, weil .NET die RID-Ordner
+      im Output jedes konsumierenden Projekts anlegt — nicht hier.
+
+      Alternative waere <RuntimeIdentifier>win-x64</RuntimeIdentifier>, aber
+      das verschiebt die EXE nach bin/.../win-x64/ und bricht Standard-Dev-
+      Workflows (dotnet run, VS-Startprojekt). Der Trim-Ansatz haelt das
+      gewohnte flache Layout.
+    -->
   </PropertyGroup>
 
   <ItemGroup>

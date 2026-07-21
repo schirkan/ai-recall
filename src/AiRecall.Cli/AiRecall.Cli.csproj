@@ -31,6 +31,34 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      Windows-only (DECISIONS.md 2026-07-02): Standard-Layout beibehalten,
+      stattdessen trimmt das PostBuildRuntimesTrim-Target unten die
+      ungewuenschten RID-Ordner im bin/-Baum weg. Spart ~190 MB, ohne die
+      EXE in einen win-x64/-Subfolder zu verschieben.
+    -->
   </PropertyGroup>
+
+  <!--
+    PostBuild: loescht nicht-benoetigte RID-Ordner unter bin/.../runtimes/
+    (alles ausser win-x64). Spart ~190 MB pro Build-Output. Wird hier im
+    Cli-Projekt ausgefuehrt, weil die Speech-Lib transitiv ueber
+    AiRecall.Transcription referenziert wird und .NET die RID-Ordner im
+    Output jedes konsumierenden Projekts anlegt. Gespiegelt in
+    AiRecall.TrayApp.csproj. Kommentar dort fuer Details.
+
+    Implementation: MSBuild's <ItemGroup Include="dir\*"> matched per Default
+    nur Files, nicht Directories. Workaround: PowerShell-Exec mit robuster
+    Directory-Logik (siehe TrayApp-Variante). Funktioniert auf Windows.
+  -->
+  <Target Name="PostBuildRuntimesTrim" AfterTargets="Build">
+    <PropertyGroup>
+      <_RuntimesDir>$(MSBuildProjectDirectory)\$(OutputPath)runtimes</_RuntimesDir>
+      <_KeepRid>win-x64</_KeepRid>
+    </PropertyGroup>
+    <Exec Command="powershell.exe -NoProfile -Command &quot;if (Test-Path '$(_RuntimesDir)') { Get-ChildItem '$(_RuntimesDir)' -Directory | Where-Object { $_.Name -ne '$(_KeepRid)' } | Remove-Item -Recurse -Force }&quot;"
+          Condition="Exists('$(_RuntimesDir)')" />
+    <Message Text="PostBuildRuntimesTrim: behalten $(_KeepRid), Rest geloescht in $(_RuntimesDir)" Importance="high" />
+  </Target>
 
 </Project>
