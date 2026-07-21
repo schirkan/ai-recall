@@ -69,4 +69,22 @@
           Condition="Exists('$(_RuntimesDir)')" />
     <Message Text="PostBuildRuntimesTrim: behalten $(_KeepRid), Rest geloescht in $(_RuntimesDir)" Importance="high" />
   </Target>
+
+  <!--
+    PostPublish: dieselbe Logik fuer den Publish-Output. $(PublishDir) ist
+    waehrend des Publish-Targets der Zielpfad (z. B. publish/AiRecall.TrayApp/),
+    nicht $(OutputPath) (das bleibt bin/Release/.../). Wichtig fuer CI:
+    das Release-Workflow fuehrt `dotnet publish` ohne vorgeschalteten
+    Build-Schritt aus, daher feuert PostBuildRuntimesTrim dort NICHT
+    (nur dieser Target laeuft).
+  -->
+  <Target Name="PostPublishRuntimesTrim" AfterTargets="Publish">
+    <PropertyGroup>
+      <_PublishRuntimesDir>$(PublishDir)runtimes</_PublishRuntimesDir>
+      <_KeepRid>win-x64</_KeepRid>
+    </PropertyGroup>
+    <Exec Command="powershell.exe -NoProfile -Command &quot;if (Test-Path '$(_PublishRuntimesDir)') { Get-ChildItem '$(_PublishRuntimesDir)' -Directory | Where-Object { $_.Name -ne '$(_KeepRid)' } | Remove-Item -Recurse -Force }&quot;"
+          Condition="Exists('$(_PublishRuntimesDir)')" />
+    <Message Text="PostPublishRuntimesTrim: behalten $(_KeepRid), Rest geloescht in $(_PublishRuntimesDir)" Importance="high" />
+  </Target>
 </Project>

@@ -55,6 +55,7 @@ data/
 bin/
 obj/
 out/
+publish/                # dotnet publish Output (CI erzeugt das ZIP daraus, siehe release.yml)
 *.user
 *.suo
 .vs/
