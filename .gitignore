@@ -76,3 +76,6 @@ tessdata/
 !**/Tessdata/*.cs
 !src/AiRecall.Core/Tessdata/
 !src/AiRecall.TrayApp/Tessdata/
+
+# CodeGraph
+.codegraph/
