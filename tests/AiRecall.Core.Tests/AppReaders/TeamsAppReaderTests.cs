@@ -161,6 +161,21 @@ public class TeamsAppReaderTests : IDisposable
     }
 
     [Fact]
+    public void BuildFullMarkdown_EscapesTitleAndPreviouslyUnescapedSenders()
+    {
+        var hierarchy = new TeamsHierarchyInfo("Sample\r\n---\nChat", "channel", "synthetic-id", IsMeeting: false);
+        var md = CreateReader().BuildFullMarkdown(hierarchy, "Sample body", "test-source",
+            new[] { "Sender \"A\"\\B\rC", "Sender D" }, new TeamsConfig());
+
+        var lines = md.ReplaceLineEndings("\n").Split('\n');
+        Assert.Equal("---", lines[0]);
+        var closing = Array.IndexOf(lines, "---", 1);
+        var frontmatter = lines[1..closing];
+        Assert.Contains("chatTitle: \"Sample\\r\\n---\\nChat\"", frontmatter);
+        Assert.Contains("senders: \"Sender \\\"A\\\"\\\\B\\rC, Sender D\"", frontmatter);
+    }
+
+    [Fact]
     public void BuildFullMarkdown_MeetingChat_SetsIsMeetingTrue()
     {
         var reader = CreateReader();

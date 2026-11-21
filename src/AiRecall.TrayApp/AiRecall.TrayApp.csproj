@@ -94,6 +94,12 @@
       <ResolvedFileToPublish Remove="@(_ExcludedBundleAsset)" />
     </ItemGroup>
   </Target>
+  <!-- Keep the assembly identity/resource names; only the shipped apphost filename changes. -->
+  <Target Name="NameReleaseExecutable" AfterTargets="Publish"
+          Condition="'$(PublishSingleFile)' == 'true' and '$(AiRecallReleaseExecutableName)' != ''">
+    <Copy SourceFiles="$(PublishedSingleFilePath)" DestinationFiles="$(PublishDir)$(AiRecallReleaseExecutableName)" />
+    <Delete Files="$(PublishedSingleFilePath)" />
+  </Target>
   <Target Name="PostPublishRuntimesTrim" AfterTargets="Publish" Condition="'$(PublishSingleFile)' != 'true'">
     <PropertyGroup>
       <_PublishRuntimesDir>$(PublishDir)runtimes</_PublishRuntimesDir>

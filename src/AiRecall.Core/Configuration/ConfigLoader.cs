@@ -15,11 +15,17 @@ public static class ConfigLoader
     public const string DefaultConfigFileName = "default-config.json";
     public const string AppDataSubdirectory = "AiRecall";
 
+    public static JsonDocumentOptions DocumentOptions => new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
+        ReadCommentHandling = DocumentOptions.CommentHandling,
+        AllowTrailingCommas = DocumentOptions.AllowTrailingCommas
     };
 
     public static AppConfig Load(string? explicitPath = null)

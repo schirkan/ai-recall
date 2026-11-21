@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 
 using AiRecall.Core.Audio;
 
+using AiRecall.Core.Util;
 using Serilog;
 
 namespace AiRecall.Transcription;
@@ -33,9 +34,7 @@ public sealed class TranscriptionWorker : IDisposable
     private readonly ILogger? _logger;
     private readonly int _maxParallel;
     private readonly Channel<AudioTranscriptionTask> _channel;
-    private readonly CancellationTokenSource _cts;
-    private readonly Task[] _workerTasks;
-    private bool _disposed;
+    private readonly WorkerShutdown _shutdown;
 
     private int _pendingCount;
     private int _completedCount;
@@ -74,12 +73,14 @@ public sealed class TranscriptionWorker : IDisposable
             SingleReader = false,  // Multi-Worker
             SingleWriter = false,
         });
-        _cts = new CancellationTokenSource();
-        _workerTasks = new Task[_maxParallel];
+        var cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        var workerTasks = new Task[_maxParallel];
         for (int i = 0; i < _maxParallel; i++)
         {
-            _workerTasks[i] = Task.Run(() => RunWorkerAsync(_cts.Token));
+            workerTasks[i] = Task.Run(() => RunWorkerAsync(token));
         }
+        _shutdown = new(() => _channel.Writer.TryComplete(), Task.WhenAll(workerTasks), cancellation, TimeSpan.FromSeconds(30));
         _logger?.Information("TranscriptionWorker started (maxParallel={MaxParallel}, provider={Provider})",
             _maxParallel, _provider.Name);
     }
@@ -89,19 +90,20 @@ public sealed class TranscriptionWorker : IDisposable
     /// </summary>
     public bool TryEnqueue(AudioTranscriptionTask task)
     {
-        if (_disposed) return false;
         if (task is null) throw new ArgumentNullException(nameof(task));
         Interlocked.Increment(ref _pendingCount);
-        return _channel.Writer.TryWrite(task);
+        if (_channel.Writer.TryWrite(task)) return true;
+        Interlocked.Decrement(ref _pendingCount);
+        return false;
     }
 
     /// <summary>Async-Variante von <see cref="TryEnqueue"/>.</summary>
     public ValueTask EnqueueAsync(AudioTranscriptionTask task, CancellationToken ct = default)
     {
-        if (_disposed) return ValueTask.CompletedTask;
         if (task is null) throw new ArgumentNullException(nameof(task));
-        Interlocked.Increment(ref _pendingCount);
-        return _channel.Writer.WriteAsync(task, ct);
+        if (ct.IsCancellationRequested) return ValueTask.FromCanceled(ct);
+        TryEnqueue(task);
+        return ValueTask.CompletedTask;
     }
 
     private async Task RunWorkerAsync(CancellationToken ct)
@@ -238,24 +240,7 @@ public sealed class TranscriptionWorker : IDisposable
     }
 
     /// <summary>Stoppt den Worker sauber. Idempotent.</summary>
-    public void Stop()
-    {
-        if (_disposed) return;
-        _channel.Writer.TryComplete();
-        try
-        {
-            Task.WhenAll(_workerTasks).Wait(TimeSpan.FromSeconds(30));
-        }
-        catch (AggregateException) { /* Tasks koennen gecancelt sein */ }
-        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
-        _logger?.Information("TranscriptionWorker stopped by user");
-    }
+    public void Stop() => _shutdown.Stop();
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        Stop();
-        _cts.Dispose();
-    }
+    public void Dispose() => Stop();
 }

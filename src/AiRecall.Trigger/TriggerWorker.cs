@@ -308,7 +308,7 @@ public sealed class TriggerWorker : IDisposable
             readerResult = _appReaderRegistry.TryRead(window, context);
         }
 
-        if (IgnoreMatcher.IsIgnored(window, readerResult?.ContextUrl, _config.ScreenRecorder))
+        if (IgnoreMatcher.IsUrlIgnored(readerResult?.ContextUrl, _config.ScreenRecorder))
         {
             BlacklistCount++;
             return;
@@ -324,7 +324,7 @@ public sealed class TriggerWorker : IDisposable
     private bool IsWindowIgnored(WindowInfo window) =>
         MatchesAny(window.ProcessName, _config.Trigger.Blacklist.Processes) ||
         MatchesAny(window.Title, _config.Trigger.Blacklist.WindowTitles) ||
-        IgnoreMatcher.IsIgnored(window, null, _config.ScreenRecorder);
+        IgnoreMatcher.IsWindowIgnored(window, _config.ScreenRecorder);
 
     private void CommitCapture(TriggerEvent ev, WindowInfo window, WindowInfo? parentWindow,
         byte[] pngBytes, string hash, AppReaderResult? readerResult)
@@ -354,28 +354,13 @@ public sealed class TriggerWorker : IDisposable
         //     kommt async aus dem ConversionWorker.
         if (readerResult is not null && !readerResult.IsThinReader)
         {
-            var coreRecord = new AppContentRecord(
-                readerResult.ContentMarkdown,
-                readerResult.ContextLabel,
-                readerResult.ContextKind,
-                readerResult.ReaderName,
-                readerResult.ReaderVersion,
-                readerResult.Extra);
+            var coreRecord = readerResult.ToContentRecord();
             CaptureWriter.WriteContent(coreRecord, window, item.Timestamp, captureRoot, readerResult.ContextLabel);
         }
 
         // 12. Async Conversion-Worker (Spec 0007) — enqueue der MD-Pfad
-        if (_conversionWorker is not null)
-        {
-            try
-            {
-                _conversionWorker.EnqueueAsync(item.MarkdownPath);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warning(ex, "ConversionWorker.EnqueueAsync failed for {MdPath}", item.MarkdownPath);
-            }
-        }
+        if (_conversionWorker is not null && !_conversionWorker.TryEnqueue(item.MarkdownPath))
+            _logger.Warning("Conversion worker did not accept {MdPath}; capture remains pending", item.MarkdownPath);
 
         // 13. State aktualisieren
         _hwndThrottle.Mark(rootHwnd, ev.Timestamp);

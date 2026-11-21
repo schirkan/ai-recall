@@ -1,6 +1,6 @@
 # Spec 0017 — CI/CD Release-Pipeline
 
-**Status:** v1.0 (in Umsetzung)
+**Status:** implementiert
 **Datum:** 2026-07-20
 **Autor:** Pia (mit Martin-Direktive)
 **Repo:** `schirkan/ai-recall` (public, MIT)
@@ -93,7 +93,8 @@ Begründung Tag-only-Trigger: Pull-Request-Builds sind hier explizit nicht gewü
 | Build | `dotnet build -c Release --no-restore` | Compile, Warnings-as-errors (siehe `.editorconfig` falls vorhanden, sonst nur default) |
 | Test | `dotnet test -c Release --no-build --logger trx --logger "console;verbosity=normal"` | xUnit-Suite, **Counter/Async-Regel** bleibt aktiv (Spec 0013 Iter. 4 Counter-Race-Fix) |
 | Publish | `dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:PublishProfile=WinX64SingleFile -o publish/AiRecall.TrayApp` | Eine frameworkabhängige Windows-x64-EXE (.NET 10 Desktop Runtime erforderlich) |
-| ZIP | PowerShell `Compress-Archive` | `publish/AiRecall.TrayApp/` → `AiRecall-{version}-win-x64.zip` |
+| Paketprüfung | Isolierte Kopie mit `AiRecall.exe --verify-package` starten | Genau eine Datei namens `AiRecall.exe`; prüft Reader, WinForms, Konfiguration sowie OCR- und Speech-Nativbibliotheken |
+| ZIP | PowerShell `Compress-Archive` | Nur `publish/AiRecall.TrayApp/AiRecall.exe` → `AiRecall-{version}-win-x64.zip` |
 | Upload Artifact | `actions/upload-artifact@v4` mit `if-no-files-found: error` | ZIP als Workflow-Artifact (Zwischenspeicher für Job 2) |
 
 ### Version-Extraktion
@@ -198,15 +199,15 @@ Pre-Releases (`-rc1`, `-rc2`, `-beta.1`) werden von GitHub als Pre-Release marki
 
 ## Lokales Nachvollziehen (für Tests)
 
-Wer das Build lokal reproduzieren will, kann auf seinem Windows-Entwicklungsrechner:
+Wer das Build lokal reproduzieren will, kann auf seinem Windows-Entwicklungsrechner PowerShell verwenden:
 
-```bash
+```powershell
 dotnet restore AiRecall.sln
 dotnet build -c Release
 dotnet test -c Release --no-build
 dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:PublishProfile=WinX64SingleFile -o publish/AiRecall.TrayApp
 # manuelles Zippen:
-Compress-Archive -LiteralPath publish/AiRecall.TrayApp/AiRecall.TrayApp.exe -CompressionLevel Optimal -DestinationPath AiRecall-0.2.0-win-x64.zip
+Compress-Archive -LiteralPath publish/AiRecall.TrayApp/AiRecall.exe -CompressionLevel Optimal -DestinationPath AiRecall-0.2.1-win-x64.zip
 ```
 
 ---

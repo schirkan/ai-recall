@@ -18,6 +18,15 @@ public class AppReaderResultTests
     }
 
     [Fact]
+    public void ToContentRecord_PreservesPersistenceFields()
+    {
+        var extra = new Dictionary<string, string> { ["url"] = "https://example.com" };
+        var result = new AppReaderResult("# content", "tab", "url", "Browser", "1.2", extra);
+        var record = result.ToContentRecord();
+        Assert.Equal(new AiRecall.Core.Models.AppContentRecord("# content", "tab", "url", "Browser", "1.2", extra), record);
+    }
+
+    [Fact]
     public void Extra_DefaultsToNull()
     {
         var r = new AppReaderResult("md", null, null, "r", "1.0");

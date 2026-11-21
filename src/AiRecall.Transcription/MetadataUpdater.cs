@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AiRecall.Core.Persistence;
 
 namespace AiRecall.Transcription;
 
@@ -81,7 +82,7 @@ public sealed class MetadataUpdater
 
         // Frontmatter-Status setzen/ersetzen
         sb = ReplaceFrontmatterField(sb, "transcript_status", "done");
-        sb = ReplaceFrontmatterField(sb, "transcript_provider", result.ProviderName);
+        sb = ReplaceFrontmatterField(sb, "transcript_provider", YamlScalar.Quote(result.ProviderName));
         sb = ReplaceFrontmatterField(sb, "transcript_speaker_count", result.SpeakerCount.ToString());
         sb = ReplaceFrontmatterField(sb, "transcript_audio_duration_seconds",
             result.AudioDuration.TotalSeconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
@@ -92,13 +93,14 @@ public sealed class MetadataUpdater
         var transcript = BuildTranscriptMarkdown(result, maxChars);
         var block = $"{startMarker}\n{transcript}\n{endMarker}\n";
 
-        var existingStart = original.IndexOf(startMarker, StringComparison.Ordinal);
-        var existingEnd = original.IndexOf(endMarker, StringComparison.Ordinal);
+        var updated = sb.ToString();
+        var existingStart = updated.IndexOf(startMarker, StringComparison.Ordinal);
+        var existingEnd = updated.IndexOf(endMarker, StringComparison.Ordinal);
         if (existingStart >= 0 && existingEnd > existingStart)
         {
             // ersetzen
-            var before = original[..existingStart];
-            var after = original[(existingEnd + endMarker.Length)..];
+            var before = updated[..existingStart];
+            var after = updated[(existingEnd + endMarker.Length)..];
             return before + block + after.TrimStart('\n', '\r');
         }
         else
@@ -118,42 +120,25 @@ public sealed class MetadataUpdater
         var sb = new StringBuilder(original);
         sb = ReplaceFrontmatterField(sb, "transcript_status", "failed");
         sb = ReplaceFrontmatterField(sb, "transcript_error",
-            (result.ErrorMessage ?? "unknown").Replace("\n", " "));
+            YamlScalar.Quote(result.ErrorMessage ?? "unknown"));
         return sb.ToString();
     }
 
     private static StringBuilder ReplaceFrontmatterField(StringBuilder sb, string key, string value)
     {
-        var text = sb.ToString();
-        var pattern = $"^{key}:.*$";
-        var lines = text.Split('\n');
-        var replaced = false;
-        for (int i = 0; i < lines.Length; i++)
+        var lines = sb.ToString().Split('\n').ToList();
+        if (lines[0].Trim() != "---") return sb;
+        var closing = lines.FindIndex(1, line => line.Trim() == "---");
+        if (closing < 0) return sb;
+
+        var prefix = $"{key}:";
+        for (int i = 1; i < closing; i++)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(lines[i].TrimStart(), pattern))
-            {
-                lines[i] = $"{key}: {value}";
-                replaced = true;
-                break;
-            }
+            if (!lines[i].StartsWith(prefix, StringComparison.Ordinal)) continue;
+            lines[i] = $"{prefix} {value}" + (lines[i].EndsWith('\r') ? "\r" : "");
+            return new StringBuilder(string.Join('\n', lines));
         }
-        if (!replaced)
-        {
-            // in Frontmatter einfuegen (zwischen erste "---" und zweite "---")
-            var firstDash = Array.FindIndex(lines, l => l.Trim() == "---");
-            var secondDash = firstDash >= 0
-                ? Array.FindIndex(lines, firstDash + 1, l => l.Trim() == "---")
-                : -1;
-            if (firstDash >= 0 && secondDash > firstDash)
-            {
-                var insertLine = secondDash;
-                var newLines = new string[lines.Length + 1];
-                Array.Copy(lines, newLines, insertLine);
-                newLines[insertLine] = $"{key}: {value}";
-                Array.Copy(lines, insertLine, newLines, insertLine + 1, lines.Length - insertLine);
-                lines = newLines;
-            }
-        }
+        lines.Insert(closing, $"{prefix} {value}" + (lines[closing].EndsWith('\r') ? "\r" : ""));
         return new StringBuilder(string.Join('\n', lines));
     }
 

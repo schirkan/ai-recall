@@ -151,11 +151,7 @@ public sealed class TrayAppContext : ApplicationContext
         // NotifyIcon ist aber sichtbar — deshalb Owner=null (Balloon-Auslöser
         // übernimmt die Aufmerksamkeit). Spec 0012 §Auslöser.
         var targetDir = manager.ResolveTargetDirectory(_config.Ocr);
-        var persistCallback = new Action<bool>(disable =>
-        {
-            _config.Ocr.AutoDownloadTessdata = disable;
-            TryPersistOcrConfig();
-        });
+        var persistCallback = new Action<bool>(disable => TryPersistOcrConfig(!disable));
         using var dialog = new TessdataFirstRunDialog(
             missing,
             manager,
@@ -210,39 +206,22 @@ public sealed class TrayAppContext : ApplicationContext
     /// <c>%APPDATA%/AiRecall/config.json</c>. Atomar via bestehender
     /// Settings-Persist-Logik; siehe Spec 0009 §Persistenz.
     /// </summary>
-    private void TryPersistOcrConfig()
+    private void TryPersistOcrConfig(bool autoDownload)
     {
         try
         {
-            var path = UserConfigLocator.GetUserConfigPath();
-            if (!File.Exists(path))
-            {
-                Log.Information("No user config at {Path} yet; nothing to persist (defaults already cover autoDownloadTessdata=false)", path);
-                return;
-            }
-            var json = File.ReadAllText(path);
-            var doc = System.Text.Json.JsonDocument.Parse(json);
-            var root = new System.Text.Json.Nodes.JsonObject();
-            foreach (var prop in doc.RootElement.EnumerateObject())
-            {
-                root[prop.Name] = System.Text.Json.Nodes.JsonNode.Parse(prop.Value.GetRawText());
-            }
-            var ocr = root["ocr"] as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
-            ocr["autoDownloadTessdata"] = _config.Ocr.AutoDownloadTessdata;
-            root["ocr"] = ocr;
-            var bak = path + ".bak";
-            if (File.Exists(path)) File.Copy(path, bak, overwrite: true);
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, root.ToJsonString(new System.Text.Json.JsonSerializerOptions
-            {
-                WriteIndented = true
-            }));
-            File.Move(tmp, path, overwrite: true);
-            Log.Information("Persisted ocr.autoDownloadTessdata={Flag}", _config.Ocr.AutoDownloadTessdata);
+            ConfigSerializer.SaveTessdataAutoDownloadAtomic(UserConfigLocator.GetUserConfigPath(), autoDownload);
+            _config.Ocr.AutoDownloadTessdata = autoDownload;
+            Log.Information("Persisted ocr.autoDownloadTessdata={Flag}", autoDownload);
         }
         catch (Exception ex)
         {
             Log.Warning(ex, "Failed to persist ocr.autoDownloadTessdata");
+            _trayIcon.ShowBalloon(
+                title: "AiRecall – OCR-Einstellung nicht gespeichert",
+                text: "Die Tessdata-Abfrage kann beim nächsten Start erneut erscheinen.",
+                icon: ToolTipIcon.Warning,
+                timeoutMs: 8000);
         }
     }
 

@@ -1,3 +1,5 @@
+using AiRecall.Core.Models;
+
 namespace AiRecall.AppReader.Base;
 
 /// <summary>
@@ -31,6 +33,9 @@ public sealed record AppReaderResult(
     bool IsThinReader = false
 )
 {
+    public AppContentRecord ToContentRecord() =>
+        new(ContentMarkdown, ContextLabel, ContextKind, ReaderName, ReaderVersion, Extra);
+
     /// <summary>Actual URL, without treating a browser's fallback tab title as a URL.</summary>
     public string? ContextUrl => Extra?.TryGetValue("url", out var url) == true
         ? url

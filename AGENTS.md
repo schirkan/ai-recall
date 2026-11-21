@@ -9,7 +9,13 @@
 
 - Board `ai-recall`: `1d9e2eb5-1bcb-45a1-90f9-27f968afbc0e` abgeschlossen (Review-Fixes und .NET 10); `56069431-1153-4f7d-b635-bd947f78ec61` verfolgt das Single-EXE-Release und den CI-Nachweis.
 
+- `4f3c2984-7d5d-4fd9-aba6-ed0e0c7fa870` abgeschlossen (Worker-Shutdown, Capture-Regeln und Persistenz).
+
 ## Aktueller Status
+
+**v0.2.1:** Patch-Release mit `AiRecall.exe`, Refactorings und neuem README-Schnellstart. Anwenderrelevante Änderungen stehen in `CHANGELOG.md`.
+
+**2026-11-21 (Refactorings):** Conversion und Transkription nutzen gemeinsamen Queue-Shutdown. CLI und Hintergrundaufnahme teilen Filterstufen und Reader-Mapping. Settings und Tessdata nutzen atomare Konfigurationspersistenz; YAML-Werte einschließlich mehrzeiliger UIA-Inhalte und Windows-Pfade werden korrekt gelesen. Lokal 866/866 Release-Tests und `AiRecall.exe --verify-package` erfolgreich.
 
 **2026-11-21 (Single-EXE):** Windows-x64-Publish mit 1 EXE (32,73 MiB; lokal 11,57 MiB im ZIP). 851/851 Release-Tests und Paket-Smoke mit zehn App-Readern, Konfigurations-Roundtrip, OCR- und Speech-Nativbibliotheken bestanden. Die .NET 10 Desktop Runtime x64 bleibt Voraussetzung.
 
@@ -221,13 +227,13 @@ Ausführlich: `specs/0001-vision.md`
 - **Plattform:** GitHub Actions
 - **Workflow-Datei(en):** `.github/workflows/release.yml`
 - **Trigger:** Tag-Push mit Pattern `v*` (z. B. `v0.1.0-rc1`, `v1.2.3-beta.1`) — kein PR-Build, kein Push-auf-main-Build. Zusätzlich `workflow_dispatch` für Notfall-Rebuilds.
-- **Was wird gebaut:** `AiRecall.TrayApp` mit `WinX64SingleFile` als einzelne EXE; benötigt die .NET 10 Desktop Runtime x64.
+- **Was wird gebaut:** `AiRecall.TrayApp` mit `WinX64SingleFile` als `AiRecall.exe`; benötigt die .NET 10 Desktop Runtime x64. Das bereits veröffentlichte `v0.2.0` enthält noch `AiRecall.TrayApp.exe`.
 - **Output / Artefakte:** GitHub-Release mit Auto-generierten Release-Notes (`generate_release_notes: true`) und ZIP-Asset `AiRecall-{version}-win-x64.zip` als Release-Anhang.
 - **Pipeline-Struktur:** 2 Jobs — `build-and-test` (Restore + Build Release + xUnit-Tests + Publish + ZIP + Artifact-Upload) → `release` (`needs: build-and-test`, GitHub-Release erstellen). Tests-MUSS-grün-Gate vor Release-Erstellung.
 - **Runner:** `windows-latest` (`net10.0-windows`, Win32 und Windows Desktop).
 - **.NET-Version:** `actions/setup-dotnet@v4` liest `global.json` (SDK `10.0.402`, `latestFeature`); Paketmatrix: `specs/0018-dotnet-10-migration.md`.
 - **Externe Actions:** `actions/checkout@v4`, `actions/setup-dotnet@v4`, `actions/cache@v4` (NuGet), `actions/upload-artifact@v4`, `actions/download-artifact@v4`, `softprops/action-gh-release@v2`.
-- **Letzter bekannter Lauf:** `v0.1.0` stable (Pipeline-Run #29803125302 success, 2026-07-21 05:11 UTC, 3 Min 10 Sek Laufzeit), Commit `26a54c8` mit `PostBuildRuntimesTrim` (c0070e2) + `PostPublishRuntimesTrim` (06237dc). ZIP-Groesse 12,10 MiB (83 % kleiner als v0.1.0 — 70,86 MiB → 12,10 MiB durch RID-Trim der 17 Nicht-Windows-x64-Plattformen).
+- **Letzter bekannter Lauf:** `v0.2.0`, [Run #44952847103](https://github.com/schirkan/ai-recall/actions/runs/44952847103) erfolgreich (2026-11-21, Commit `9c680ab`). Veröffentlichtes ZIP: 11,93 MiB.
 - **Spec:** `specs/0017-ci-cd-release-pipeline.md`
 - **Decisions:** siehe `DECISIONS.md` Eintraäge „2026-07-20 — CI/CD Release-Pipeline (Spec 0017 v1.0)" und „2026-07-21 — PostPublishRuntimesTrim (CI/CD-Pipeline-Optimierung)"
 

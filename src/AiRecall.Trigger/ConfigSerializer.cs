@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using AiRecall.Core.Configuration;
 
@@ -17,6 +18,9 @@ public static class ConfigSerializer
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = ConfigLoader.DocumentOptions.CommentHandling,
+        AllowTrailingCommas = ConfigLoader.DocumentOptions.AllowTrailingCommas,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
@@ -37,16 +41,59 @@ public static class ConfigSerializer
     }
 
     /// <summary>
-    /// Writes <paramref name="config"/> atomically to <paramref name="path"/>:
-    /// 1. backup existing file to <c>{path}.bak</c> (best-effort)
-    /// 2. write to <c>{path}.tmp</c>
-    /// 3. move tmp to path (overwrite)
+    /// Saves all settings, retaining unrecognized properties in an existing JSON object.
+    /// A malformed file can be repaired from Settings; the original is still backed up.
     /// </summary>
     public static void SaveAtomic(AppConfig config, string path)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrEmpty(path);
 
+        JsonObject root;
+        try { root = ReadExisting(path); }
+        catch (JsonException) { root = new JsonObject(); }
+
+        Overlay(root, (JsonObject)JsonSerializer.SerializeToNode(config, Options)!);
+        WriteAtomic(root, path);
+    }
+
+    /// <summary>Updates only the tessdata prompt preference, even before Settings have been saved.</summary>
+    public static void SaveTessdataAutoDownloadAtomic(string path, bool enabled)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        var root = ReadExisting(path);
+        Overlay(root, new JsonObject
+        {
+            ["ocr"] = new JsonObject { ["autoDownloadTessdata"] = enabled }
+        });
+        WriteAtomic(root, path);
+    }
+
+    private static JsonObject ReadExisting(string path)
+    {
+        if (!File.Exists(path)) return new JsonObject();
+
+        return JsonNode.Parse(File.ReadAllText(path), documentOptions: ConfigLoader.DocumentOptions) as JsonObject
+            ?? throw new JsonException("Expected a configuration JSON object");
+    }
+
+    private static void Overlay(JsonObject target, JsonObject changes)
+    {
+        foreach (var (name, value) in changes)
+        {
+            // Like the case-insensitive loader, apply updates to the last matching property.
+            // Do not use a case-insensitive DOM: distinct unknown keys must survive unchanged.
+            var key = target.LastOrDefault(p => p.Key.Equals(name, StringComparison.OrdinalIgnoreCase)).Key ?? name;
+            if (value is JsonObject patch && target[key] is JsonObject existing)
+                Overlay(existing, patch);
+            else
+                target[key] = value?.DeepClone();
+        }
+    }
+
+    private static void WriteAtomic(JsonObject root, string path)
+    {
+        path = Path.GetFullPath(path);
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
         {
@@ -70,13 +117,18 @@ public static class ConfigSerializer
             }
         }
 
-        // 2. Write tmp
-        var tmpPath = path + ".tmp";
-        var json = Serialize(config);
-        File.WriteAllText(tmpPath, json);
-
-        // 3. Atomic move (Replace wenn Ziel existiert, sonst Move)
-        if (File.Exists(path)) File.Replace(tmpPath, path, destinationBackupFileName: null);
-        else File.Move(tmpPath, path);
+        var tmpPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tmpPath, root.ToJsonString(Options));
+            if (File.Exists(path)) File.Replace(tmpPath, path, destinationBackupFileName: null);
+            else File.Move(tmpPath, path);
+        }
+        finally
+        {
+            try { File.Delete(tmpPath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

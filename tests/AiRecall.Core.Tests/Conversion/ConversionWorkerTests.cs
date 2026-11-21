@@ -44,15 +44,6 @@ public class ConversionWorkerTests : IDisposable
         var item = CaptureWriter.WritePending(Win(title), pngBytes, "hash123",
             captureRoot, filePath: filePath);
 
-        // Setze filePath in der MD manuell (WritePending erstellt ohne filePath; fuer Test injizieren)
-        if (filePath != null)
-        {
-            var content = File.ReadAllText(item.MarkdownPath);
-            content = content.Replace("conversion: \"pending\"",
-                $"filePath: \"{filePath}\"\nconversion: \"pending\"");
-            File.WriteAllText(item.MarkdownPath, content);
-        }
-
         // Bug-Bash 2026-07-06 I-17: Den "_(conversion pending)_"-Platzhalter
         // NICHT mehr vorab befuellen. Der Worker schreibt den Content jetzt
         // in-place in die Haupt-MD (Replace auf den Platzhalter). Wenn er
@@ -78,7 +69,7 @@ public class ConversionWorkerTests : IDisposable
     [Fact]
     public void ParseFrontmatter_ValidYaml_ParsesFields()
     {
-        var content = "---\nfilePath: \"C:\\test.docx\"\nscreenshot: 123-doc.png\nhash: abc\nconversion: \"pending\"\n---\n\n# Body";
+        var content = "---\nfilePath: \"C:\\\\test.docx\"\nscreenshot: 123-doc.png\nhash: abc\nconversion: \"pending\"\n---\n\n# Body";
         var fm = ConversionWorker.ParseFrontmatter(content);
 
         Assert.Equal(@"C:\test.docx", fm["filePath"]);
@@ -112,6 +103,22 @@ public class ConversionWorkerTests : IDisposable
         var worker = new ConversionWorker(Cfg(), Logger());
         worker.Dispose();
         worker.Dispose(); // kein Throw
+    }
+
+    [Fact]
+    public void Dispose_DrainsAcceptedCapturesAndRejectsNewOnes()
+    {
+        var source = Path.Combine(_tempDir, "dispose.txt");
+        File.WriteAllText(source, "Drain this capture");
+        var (path, _) = CreatePendingCapture("dispose", filePath: source);
+        using var worker = new ConversionWorker(Cfg(), Logger());
+        Assert.True(worker.TryEnqueue(path));
+        worker.Dispose();
+
+        Assert.Equal(1, worker.CompletedCount);
+        Assert.Contains("conversion: \"done\"", File.ReadAllText(path));
+        Assert.False(worker.TryEnqueue(path));
+        Assert.Equal(0, worker.PendingCount);
     }
 
     // ----- Enqueue + Process -----

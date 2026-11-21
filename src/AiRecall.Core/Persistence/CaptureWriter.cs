@@ -216,11 +216,11 @@ public static class CaptureWriter
             var trimmed = frontmatter[i].TrimStart();
             if (trimmed.StartsWith(key + ":"))
             {
-                frontmatter[i] = $"{key}: \"{EscapeYaml(value)}\"";
+                frontmatter[i] = $"{key}: {YamlScalar.Quote(value)}";
                 return;
             }
         }
-        frontmatter.Add($"{key}: \"{EscapeYaml(value)}\"");
+        frontmatter.Add($"{key}: {YamlScalar.Quote(value)}");
     }
 
     private static void RemoveFrontmatterField(List<string> frontmatter, string key)
@@ -241,27 +241,29 @@ public static class CaptureWriter
         var sb = new StringBuilder();
         sb.AppendLine("---");
         sb.AppendLine($"timestamp: {timestamp:O}");
-        sb.AppendLine($"process: \"{EscapeYaml(window.ProcessName)}\"");
+        sb.AppendLine($"process: {YamlScalar.Quote(window.ProcessName)}");
         sb.AppendLine($"pid: {window.ProcessId}");
         sb.AppendLine($"hwnd: 0x{window.Handle.ToInt64():X}");
-        sb.AppendLine($"title: \"{EscapeYaml(window.Title)}\"");
+        sb.AppendLine($"title: {YamlScalar.Quote(window.Title)}");
         if (parentWindow is not null)
         {
             sb.AppendLine($"parentHwnd: 0x{parentWindow.Handle.ToInt64():X}");
-            sb.AppendLine($"parentTitle: \"{EscapeYaml(parentWindow.Title)}\"");
-            sb.AppendLine($"parentProcess: \"{EscapeYaml(parentWindow.ProcessName)}\"");
+            sb.AppendLine($"parentTitle: {YamlScalar.Quote(parentWindow.Title)}");
+            sb.AppendLine($"parentProcess: {YamlScalar.Quote(parentWindow.ProcessName)}");
         }
         if (!string.IsNullOrEmpty(appContext))
         {
-            sb.AppendLine($"context: \"{EscapeYaml(appContext)}\"");
+            sb.AppendLine($"context: {YamlScalar.Quote(appContext)}");
         }
         if (!string.IsNullOrEmpty(filePath))
         {
-            sb.AppendLine($"filePath: \"{EscapeYaml(filePath)}\"");
+            sb.AppendLine($"filePath: {YamlScalar.Quote(filePath)}");
         }
         if (!string.IsNullOrEmpty(uiaContent))
         {
-            sb.AppendLine($"uiaContent: \"{EscapeYaml(uiaContent)}\"");
+            // ConversionWorker reads one field per line and does not decode YAML escapes.
+            // Fold line breaks to spaces instead of dropping every line after the first.
+            sb.AppendLine($"uiaContent: {YamlScalar.Quote(uiaContent)}");
         }
         sb.AppendLine($"screenshot: {screenshotFileName}");
         sb.AppendLine($"hash: {contentHash}");
@@ -342,19 +344,19 @@ public static class CaptureWriter
         var sb = new StringBuilder();
         sb.AppendLine("---");
         sb.AppendLine($"timestamp: {timestamp:O}");
-        sb.AppendLine($"process: \"{EscapeYaml(window.ProcessName)}\"");
+        sb.AppendLine($"process: {YamlScalar.Quote(window.ProcessName)}");
         sb.AppendLine($"pid: {window.ProcessId}");
         sb.AppendLine($"hwnd: 0x{window.Handle.ToInt64():X}");
-        sb.AppendLine($"title: \"{EscapeYaml(window.Title)}\"");
+        sb.AppendLine($"title: {YamlScalar.Quote(window.Title)}");
         if (parentWindow is not null)
         {
             sb.AppendLine($"parentHwnd: 0x{parentWindow.Handle.ToInt64():X}");
-            sb.AppendLine($"parentTitle: \"{EscapeYaml(parentWindow.Title)}\"");
-            sb.AppendLine($"parentProcess: \"{EscapeYaml(parentWindow.ProcessName)}\"");
+            sb.AppendLine($"parentTitle: {YamlScalar.Quote(parentWindow.Title)}");
+            sb.AppendLine($"parentProcess: {YamlScalar.Quote(parentWindow.ProcessName)}");
         }
         if (!string.IsNullOrEmpty(appContext))
         {
-            sb.AppendLine($"context: \"{EscapeYaml(appContext)}\"");
+            sb.AppendLine($"context: {YamlScalar.Quote(appContext)}");
         }
         sb.AppendLine($"screenshot: {screenshotFileName}");
         sb.AppendLine($"hash: {contentHash}");
@@ -418,11 +420,6 @@ public static class CaptureWriter
         return timestamp.ToString("HHmmss-fff");
     }
 
-    private static string EscapeYaml(string value)
-    {
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
-
     private static string RenderContentMarkdown(
         AppContentRecord result,
         WindowInfo window,
@@ -432,20 +429,24 @@ public static class CaptureWriter
         var sb = new StringBuilder();
         sb.AppendLine("---");
         sb.AppendLine($"timestamp: {timestamp:O}");
-        sb.AppendLine($"kind: \"{EscapeYaml(result.ContextKind ?? "unknown")}\"");
-        sb.AppendLine($"reader: \"{EscapeYaml(result.ReaderName)}\"");
-        sb.AppendLine($"readerVersion: \"{EscapeYaml(result.ReaderVersion)}\"");
+        sb.AppendLine($"kind: {YamlScalar.Quote(result.ContextKind ?? "unknown")}");
+        sb.AppendLine($"reader: {YamlScalar.Quote(result.ReaderName)}");
+        sb.AppendLine($"readerVersion: {YamlScalar.Quote(result.ReaderVersion)}");
         if (!string.IsNullOrEmpty(result.ContextLabel))
         {
-            sb.AppendLine($"context: \"{EscapeYaml(result.ContextLabel)}\"");
+            sb.AppendLine($"context: {YamlScalar.Quote(result.ContextLabel)}");
         }
-        sb.AppendLine($"process: \"{EscapeYaml(window.ProcessName)}\"");
+        sb.AppendLine($"process: {YamlScalar.Quote(window.ProcessName)}");
         sb.AppendLine($"pid: {window.ProcessId}");
         if (result.Extra is { Count: > 0 })
         {
             foreach (var kv in result.Extra)
             {
-                sb.AppendLine($"{kv.Key}: \"{EscapeYaml(kv.Value)}\"");
+                var key = kv.Key.Length > 0 && char.IsAsciiLetter(kv.Key[0]) &&
+                    kv.Key.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-')
+                    ? kv.Key
+                    : YamlScalar.Quote(kv.Key);
+                sb.AppendLine($"{key}: {YamlScalar.Quote(kv.Value)}");
             }
         }
         sb.AppendLine("---");

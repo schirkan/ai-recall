@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Persistence;
+using AiRecall.Core.Util;
 using Serilog;
 
 namespace AiRecall.Conversion;
@@ -28,8 +29,6 @@ namespace AiRecall.Conversion;
 public sealed class ConversionWorker : IDisposable
 {
     private readonly Channel<string> _channel;
-    private readonly CancellationTokenSource _cts;
-    private readonly Task _workerTask;
     private readonly ILogger _logger;
     private readonly AppConfig _config;
     private readonly IOcrEngine _ocrEngine;
@@ -40,7 +39,7 @@ public sealed class ConversionWorker : IDisposable
     private int _ocrSkippedCount;
     private int _partialCount;
     private int _ocrErrorCount;
-    private bool _disposed;
+    private readonly WorkerShutdown _shutdown;
 
     /// <summary>Anzahl Captures in der Channel-Queue (noch nicht verarbeitet).</summary>
     public int PendingCount => _pendingCount;
@@ -72,8 +71,10 @@ public sealed class ConversionWorker : IDisposable
             SingleWriter = false
         });
 
-        _cts = new CancellationTokenSource();
-        _workerTask = Task.Run(() => RunWorkerAsync(_cts.Token));
+        var cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        var workerTask = Task.Run(() => RunWorkerAsync(token));
+        _shutdown = new(() => _channel.Writer.TryComplete(), workerTask, cancellation, TimeSpan.FromSeconds(5));
         _logger.Information("ConversionWorker started");
     }
 
@@ -84,11 +85,11 @@ public sealed class ConversionWorker : IDisposable
     /// </summary>
     public ValueTask EnqueueAsync(string captureMdPath, CancellationToken ct = default)
     {
-        if (_disposed) return ValueTask.CompletedTask;
         if (string.IsNullOrWhiteSpace(captureMdPath)) return ValueTask.CompletedTask;
 
-        Interlocked.Increment(ref _pendingCount);
-        return _channel.Writer.WriteAsync(captureMdPath, ct);
+        if (ct.IsCancellationRequested) return ValueTask.FromCanceled(ct);
+        TryEnqueue(captureMdPath);
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -96,9 +97,11 @@ public sealed class ConversionWorker : IDisposable
     /// </summary>
     public bool TryEnqueue(string captureMdPath)
     {
-        if (_disposed || string.IsNullOrWhiteSpace(captureMdPath)) return false;
+        if (string.IsNullOrWhiteSpace(captureMdPath)) return false;
         Interlocked.Increment(ref _pendingCount);
-        return _channel.Writer.TryWrite(captureMdPath);
+        if (_channel.Writer.TryWrite(captureMdPath)) return true;
+        Interlocked.Decrement(ref _pendingCount);
+        return false;
     }
 
     private async Task RunWorkerAsync(CancellationToken ct)
@@ -313,7 +316,7 @@ public sealed class ConversionWorker : IDisposable
             var colonIdx = line.IndexOf(':');
             if (colonIdx <= 0) continue;
             var key = line[..colonIdx].Trim();
-            var value = line[(colonIdx + 1)..].Trim().Trim('"');
+            var value = YamlScalar.Read(line[(colonIdx + 1)..].Trim());
             result[key] = value;
         }
         return result;
@@ -322,24 +325,7 @@ public sealed class ConversionWorker : IDisposable
     /// <summary>
     /// Stoppt den Worker sauber. Idempotent.
     /// </summary>
-    public void Stop()
-    {
-        if (_disposed) return;
-        _channel.Writer.TryComplete();
-        try
-        {
-            _workerTask.Wait(TimeSpan.FromSeconds(5));
-        }
-        catch (AggregateException) { /* Task kann gecancelt sein */ }
-        _cts.Cancel();
-        _logger.Information("ConversionWorker stopped by user");
-    }
+    public void Stop() => _shutdown.Stop();
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        Stop();
-        _cts.Dispose();
-    }
+    public void Dispose() => Stop();
 }

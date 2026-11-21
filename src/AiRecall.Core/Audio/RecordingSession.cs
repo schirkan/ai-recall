@@ -1,4 +1,5 @@
 using NAudio.CoreAudioApi;
+using AiRecall.Core.Persistence;
 using Serilog;
 
 namespace AiRecall.Core.Audio;
@@ -252,7 +253,7 @@ public sealed class RecordingSession : IAsyncDisposable
         sb.AppendLine($"started_at: {_startedAt:O}");
         sb.AppendLine("ended_at: null");
         sb.AppendLine("duration_seconds: null");
-        sb.AppendLine($"topic: \"{EscapeYaml(_topic)}\"");
+        sb.AppendLine($"topic: {YamlScalar.Quote(_topic)}");
         // Spec 0014 Iter. 3.1: trigger_source wird aus _triggerSource abgeleitet.
         // Polling -> "polling" (Spec 0013 kompatibel),
         // ManualAudio -> "manual-audio" (Spec 0014 Tray-Manuelle-Aufnahme).
@@ -333,16 +334,6 @@ public sealed class RecordingSession : IAsyncDisposable
             if (match != null) return match;
         }
         return getDefault();
-    }
-
-    private static string EscapeYaml(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        return s!
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", " ")
-            .Replace("\r", " ");
     }
 
     public async ValueTask DisposeAsync()

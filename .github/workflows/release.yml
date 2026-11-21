@@ -59,13 +59,17 @@ jobs:
         shell: pwsh
         run: |
           $files = @(Get-ChildItem publish/AiRecall.TrayApp -Recurse -File)
-          if ($files.Count -ne 1 -or $files[0].Name -ne 'AiRecall.TrayApp.exe') {
-            throw 'Publish must contain exactly one AiRecall.TrayApp.exe'
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'AiRecall.exe') {
+            throw 'Publish must contain exactly one AiRecall.exe'
           }
-          $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = Join-Path $env:RUNNER_TEMP 'ai-recall-bundle-smoke'
-          $stdout = Join-Path $env:RUNNER_TEMP 'ai-recall-smoke.txt'
-          $stderr = Join-Path $env:RUNNER_TEMP 'ai-recall-smoke.err'
-          $process = Start-Process -FilePath $files[0].FullName -ArgumentList '--verify-package' -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $smokeDir = Join-Path $env:RUNNER_TEMP 'ai-recall-package-smoke'
+          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
+          $smokeExe = Join-Path $smokeDir 'AiRecall.exe'
+          Copy-Item -LiteralPath $files[0].FullName -Destination $smokeExe
+          $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = Join-Path $smokeDir 'extract'
+          $stdout = Join-Path $smokeDir 'stdout.txt'
+          $stderr = Join-Path $smokeDir 'stderr.txt'
+          $process = Start-Process -FilePath $smokeExe -ArgumentList '--verify-package' -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           Get-Content $stdout, $stderr
           if ($process.ExitCode -ne 0) { throw "Package smoke test failed: $($process.ExitCode)" }
 
@@ -75,7 +79,7 @@ jobs:
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           $version = $version -replace '[^a-zA-Z0-9.+-]', '-'
           $zipName = "AiRecall-$version-win-x64.zip"
-          Compress-Archive -LiteralPath 'publish/AiRecall.TrayApp/AiRecall.TrayApp.exe' -DestinationPath $zipName -CompressionLevel Optimal -Force
+          Compress-Archive -LiteralPath 'publish/AiRecall.TrayApp/AiRecall.exe' -DestinationPath $zipName -CompressionLevel Optimal -Force
           Write-Host "Created: $zipName"
           Get-Item $zipName | Format-List Name, Length, LastWriteTime
 

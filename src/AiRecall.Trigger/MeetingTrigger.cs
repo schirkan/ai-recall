@@ -231,11 +231,7 @@ public sealed class MeetingTrigger : IDisposable, IAsyncDisposable, IRecordingCo
                         try { await _poller.DisposeAsync().ConfigureAwait(false); }
                         finally
                         {
-                            if (_ownsWorker && _worker is not null)
-                            {
-                                try { _worker.Stop(); }
-                                finally { _worker.Dispose(); }
-                            }
+                            if (_ownsWorker) _worker?.Dispose();
                         }
                     }
                 }

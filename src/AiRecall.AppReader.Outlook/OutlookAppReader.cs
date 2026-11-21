@@ -3,6 +3,7 @@ using System.Text;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
+using AiRecall.Core.Persistence;
 using Serilog;
 
 namespace AiRecall.AppReader.Outlook;
@@ -307,10 +308,10 @@ public sealed class OutlookAppReader : AppReaderBase
         md.AppendLine($"timestamp: {now:O}");
         md.AppendLine($"kind: \"mail\"");
         md.AppendLine($"direction: \"{direction}\"");
-        md.AppendLine($"entryId: \"{EscapeYaml(mail.EntryId)}\"");
-        md.AppendLine($"subject: \"{EscapeYaml(mail.Subject)}\"");
-        md.AppendLine($"from: \"{EscapeYaml(mail.From)}\"");
-        md.AppendLine($"folder: \"{EscapeYaml(folder)}\"");
+        md.AppendLine($"entryId: {YamlScalar.Quote(mail.EntryId)}");
+        md.AppendLine($"subject: {YamlScalar.Quote(mail.Subject)}");
+        md.AppendLine($"from: {YamlScalar.Quote(mail.From)}");
+        md.AppendLine($"folder: {YamlScalar.Quote(folder)}");
         md.AppendLine($"date: {mail.ReceivedTime:O}");
         md.AppendLine($"lastModificationTime: {mail.LastModificationTime:O}");
         md.AppendLine($"unread: {(mail.UnRead ? "true" : "false")}");
@@ -361,16 +362,6 @@ public sealed class OutlookAppReader : AppReaderBase
         if (string.IsNullOrWhiteSpace(entryId)) return "0";
         var clean = entryId.Replace("-", "").Replace(" ", "");
         return clean.Length >= 8 ? clean[..8] : clean;
-    }
-
-    private static string EscapeYaml(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        return s
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", " ")
-            .Replace("\r", " ");
     }
 
     // ============================================================

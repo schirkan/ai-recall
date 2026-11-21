@@ -48,6 +48,16 @@ public class IgnoreMatcherTests
     }
 
     [Fact]
+    public void UrlAndWindowFilters_AreEvaluatedAtSeparateStages()
+    {
+        var config = new ScreenRecorderConfig { IgnoreUrls = { "private.example" } };
+        var window = Win("chrome", "https://private.example");
+        Assert.False(IgnoreMatcher.IsWindowIgnored(window, config));
+        Assert.False(IgnoreMatcher.IsUrlIgnored(null, config));
+        Assert.True(IgnoreMatcher.IsUrlIgnored("https://PRIVATE.example/", config));
+    }
+
+    [Fact]
     public void NullOrEmptyContext_DoesNotMatchUrls()
     {
         var config = new ScreenRecorderConfig { IgnoreUrls = { "banking" } };

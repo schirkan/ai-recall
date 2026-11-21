@@ -3,6 +3,7 @@ using System.Text;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
+using AiRecall.Core.Persistence;
 using Serilog;
 
 namespace AiRecall.AppReader.OneNote;
@@ -218,18 +219,18 @@ public sealed class OneNoteAppReader : AppReaderBase
         sb.AppendLine("---");
         sb.AppendLine($"timestamp: {now:O}");
         sb.AppendLine($"kind: \"onenote-page\"");
-        sb.AppendLine($"pageId: \"{EscapeYaml(info.PageId)}\"");
-        sb.AppendLine($"pageTitle: \"{EscapeYaml(info.PageTitle)}\"");
+        sb.AppendLine($"pageId: {YamlScalar.Quote(info.PageId)}");
+        sb.AppendLine($"pageTitle: {YamlScalar.Quote(info.PageTitle)}");
 
         if (ShouldIncludeSection(cfg))
         {
-            sb.AppendLine($"section: \"{EscapeYaml(info.SectionTitle)}\"");
-            sb.AppendLine($"sectionId: \"{EscapeYaml(info.SectionId)}\"");
+            sb.AppendLine($"section: {YamlScalar.Quote(info.SectionTitle)}");
+            sb.AppendLine($"sectionId: {YamlScalar.Quote(info.SectionId)}");
         }
         if (ShouldIncludeNotebook(cfg))
         {
-            sb.AppendLine($"notebook: \"{EscapeYaml(info.NotebookTitle)}\"");
-            sb.AppendLine($"notebookId: \"{EscapeYaml(info.NotebookId)}\"");
+            sb.AppendLine($"notebook: {YamlScalar.Quote(info.NotebookTitle)}");
+            sb.AppendLine($"notebookId: {YamlScalar.Quote(info.NotebookId)}");
         }
 
         if (info.LastModified != DateTime.MinValue)
@@ -237,12 +238,12 @@ public sealed class OneNoteAppReader : AppReaderBase
             sb.AppendLine($"lastModified: {info.LastModified:O}");
         }
 
-        sb.AppendLine($"strategy: \"{cfg.ActivePageStrategy}\"");
+        sb.AppendLine($"strategy: {YamlScalar.Quote(cfg.ActivePageStrategy)}");
         sb.AppendLine($"includeImages: {(cfg.IncludeImages ? "true" : "false")}");
         sb.AppendLine($"includeTags: {(cfg.IncludeTags ? "true" : "false")}");
         if (attachments.Count > 0)
         {
-            sb.AppendLine($"attachments: \"{string.Join(", ", attachments)}\"");
+            sb.AppendLine($"attachments: {YamlScalar.Quote(string.Join(", ", attachments))}");
         }
         sb.AppendLine($"source: \"onenote-com\"");
         sb.AppendLine($"reader: \"AiRecall.AppReader.OneNote\"");
@@ -260,19 +261,19 @@ public sealed class OneNoteAppReader : AppReaderBase
         {
             if (!string.IsNullOrEmpty(info.NotebookTitle))
             {
-                sb.Append("*Notebook: ").Append(EscapeYaml(info.NotebookTitle));
+                sb.Append("*Notebook: ").Append(info.NotebookTitle.ReplaceLineEndings(" "));
                 if (!string.IsNullOrEmpty(info.NotebookId))
                 {
-                    sb.Append(" (").Append(EscapeYaml(info.NotebookId)).Append(')');
+                    sb.Append(" (").Append(info.NotebookId.ReplaceLineEndings(" ")).Append(')');
                 }
                 sb.AppendLine("*  ");
             }
             if (!string.IsNullOrEmpty(info.SectionTitle))
             {
-                sb.Append("*Section: ").Append(EscapeYaml(info.SectionTitle));
+                sb.Append("*Section: ").Append(info.SectionTitle.ReplaceLineEndings(" "));
                 if (!string.IsNullOrEmpty(info.SectionId))
                 {
-                    sb.Append(" (").Append(EscapeYaml(info.SectionId)).Append(')');
+                    sb.Append(" (").Append(info.SectionId.ReplaceLineEndings(" ")).Append(')');
                 }
                 sb.AppendLine("*  ");
             }
@@ -330,14 +331,4 @@ public sealed class OneNoteAppReader : AppReaderBase
 
     private static bool ShouldIncludeNotebook(OneNoteConfig cfg) =>
         cfg.HierarchyDepth is "PageAndSectionAndNotebook";
-
-    private static string EscapeYaml(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        return s!
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", " ")
-            .Replace("\r", " ");
-    }
 }

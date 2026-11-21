@@ -3,6 +3,7 @@ using System.Text;
 using AiRecall.AppReader.Base;
 using AiRecall.Core.Configuration;
 using AiRecall.Core.Models;
+using AiRecall.Core.Persistence;
 using Serilog;
 
 namespace AiRecall.AppReader.Teams;
@@ -293,17 +294,17 @@ public sealed class TeamsAppReader : AppReaderBase
         sb.AppendLine("---");
         sb.AppendLine($"timestamp: {now:O}");
         sb.AppendLine($"kind: \"teams-chat\"");
-        sb.AppendLine($"chatId: \"{EscapeYaml(hierarchy.ChatId)}\"");
-        sb.AppendLine($"chatTitle: \"{EscapeYaml(hierarchy.ChatTitle)}\"");
-        sb.AppendLine($"chatType: \"{hierarchy.ChatType}\"");
+        sb.AppendLine($"chatId: {YamlScalar.Quote(hierarchy.ChatId)}");
+        sb.AppendLine($"chatTitle: {YamlScalar.Quote(hierarchy.ChatTitle)}");
+        sb.AppendLine($"chatType: {YamlScalar.Quote(hierarchy.ChatType)}");
         sb.AppendLine($"isMeeting: {(hierarchy.IsMeeting ? "true" : "false")}");
-        sb.AppendLine($"strategy: \"{cfg.PreferredStrategy}\"");
+        sb.AppendLine($"strategy: {YamlScalar.Quote(cfg.PreferredStrategy)}");
         sb.AppendLine($"senderCount: {senderList.Count}");
         if (senderList.Count > 0)
         {
-            sb.AppendLine($"senders: \"{string.Join(", ", senderList)}\"");
+            sb.AppendLine($"senders: {YamlScalar.Quote(string.Join(", ", senderList))}");
         }
-        sb.AppendLine($"source: \"{source}\"");
+        sb.AppendLine($"source: {YamlScalar.Quote(source)}");
         sb.AppendLine($"reader: \"AiRecall.AppReader.Teams\"");
         sb.AppendLine($"readerVersion: \"{version}\"");
         sb.AppendLine("---");
@@ -332,16 +333,6 @@ public sealed class TeamsAppReader : AppReaderBase
             sb.AppendLine(bodyMd);
         }
         return sb.ToString();
-    }
-
-    private static string EscapeYaml(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        return s!
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", " ")
-            .Replace("\r", " ");
     }
 
     // ============================================================================

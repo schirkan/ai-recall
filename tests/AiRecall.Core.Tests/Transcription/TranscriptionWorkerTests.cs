@@ -120,6 +120,22 @@ public class TranscriptionWorkerTests : IDisposable
     }
 
     [Fact]
+    public void Dispose_DrainsAcceptedTasksAndRejectsNewOnes()
+    {
+        var provider = new FakeProvider("fake", new List<TranscriptionSegment>());
+        using var worker = new TranscriptionWorker(provider, maxParallel: 1, logger: _logger);
+        var (folder, mic, loop, meta) = NewMeeting("dispose");
+        var task = NewTask(folder, mic, loop, meta);
+        Assert.True(worker.TryEnqueue(task));
+        worker.Dispose();
+
+        Assert.Equal(1, worker.CompletedCount);
+        Assert.Contains("transcript_status: done", File.ReadAllText(meta));
+        Assert.False(worker.TryEnqueue(task));
+        Assert.Equal(0, worker.PendingCount);
+    }
+
+    [Fact]
     public async Task Enqueue_ProcessesTask()
     {
         var provider = new FakeProvider("fake", new List<TranscriptionSegment>

@@ -108,7 +108,7 @@ internal static class ActiveWindowCommand
         Console.WriteLine($"Active window: {window.ProcessName} (PID {window.ProcessId}) — \"{window.Title}\"");
         Console.WriteLine($"  HWND: 0x{window.Handle.ToInt64():X}, Bounds: {window.Bounds.Width}x{window.Bounds.Height} @ ({window.Bounds.X},{window.Bounds.Y})");
 
-        if (IgnoreMatcher.IsIgnored(window, null, config.ScreenRecorder) && !includeIgnored)
+        if (!includeIgnored && IgnoreMatcher.IsWindowIgnored(window, config.ScreenRecorder))
         {
             var reason = "process or title matches the ignore list";
             Console.WriteLine($"Skipped ({reason}). Use --include-ignored to force capture.");
@@ -137,7 +137,7 @@ internal static class ActiveWindowCommand
             appReaderResult = registry.TryRead(window, new AppReaderContext { Config = config, Logger = logger });
         }
 
-        if (!includeIgnored && IgnoreMatcher.IsIgnored(window, appReaderResult?.ContextUrl, config.ScreenRecorder))
+        if (!includeIgnored && IgnoreMatcher.IsUrlIgnored(appReaderResult?.ContextUrl, config.ScreenRecorder))
         {
             Console.WriteLine("Skipped (URL matches the ignore list). Use --include-ignored to force capture.");
             logger.Information("Skipped window {Process}: URL matches the ignore list", window.ProcessName);
@@ -174,13 +174,7 @@ internal static class ActiveWindowCommand
         string? contentPath = null;
         if (appReaderResult is not null)
         {
-            var coreRecord = new AppContentRecord(
-                appReaderResult.ContentMarkdown,
-                appReaderResult.ContextLabel,
-                appReaderResult.ContextKind,
-                appReaderResult.ReaderName,
-                appReaderResult.ReaderVersion,
-                appReaderResult.Extra);
+            var coreRecord = appReaderResult.ToContentRecord();
             contentPath = CaptureWriter.WriteContent(
                 coreRecord, window, item.Timestamp, config.Capture.RootPath, appReaderResult.ContextLabel);
             logger.Information("AppReader {Reader} produced content for {Process}/{Title} -> {Path}",
