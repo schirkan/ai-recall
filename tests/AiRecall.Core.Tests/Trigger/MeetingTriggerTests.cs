@@ -138,12 +138,11 @@ public class MeetingTriggerTests
         Language: "deu", DiarizationRequired: true, MaxSpeakers: 4, ApiKey: "test", EndpointOverride: null);
 
     /// <summary>Echter RecordingSession mit Fakes (analog RecordingSessionTests).</summary>
-    private (MeetingPresencePoller poller, TranscriptionWorker worker, Func<MeetingRecordingContext, RecordingSession> factory) NewPollerWorkerFactory()
+    private (MeetingPresencePoller poller, TranscriptionWorker worker, Func<MeetingRecordingContext, RecordingSession> factory)
+        NewPollerWorkerFactory(FakeProbe? probe = null, FakeTicker? ticker = null, FakeClock? clock = null)
     {
-        var probe = new FakeProbe();
-        var ticker = new FakeTicker();
-        var clock = new FakeClock();
-        var poller = new MeetingPresencePoller(probe, ticker, clock, _logger);
+        var poller = new MeetingPresencePoller(probe ?? new FakeProbe(), ticker ?? new FakeTicker(),
+            clock ?? new FakeClock(), _logger);
         var worker = new TranscriptionWorker(new FakeProvider(), maxParallel: 1, logger: _logger);
 
         var input = new AudioDeviceInfo("mic-1", "Default Mic", "USB");
@@ -198,12 +197,97 @@ public class MeetingTriggerTests
     public async Task Start_Stop_Idempotent()
     {
         var (poller, worker, factory) = NewPollerWorkerFactory();
-        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger);
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, ownsWorker: true);
         trigger.Start();
         trigger.Start();
+        Assert.True(poller.IsRunning);
         Assert.Equal(0, trigger.ActiveCount);
         trigger.Stop();
         trigger.Stop();
+        Assert.False(poller.IsRunning);
+        trigger.Start();
+        Assert.True(poller.IsRunning);
+    }
+
+    [Fact]
+    public async Task ServiceStart_PollsTeams_AndAnInactiveSnapshotFinalizesTheSameRecording()
+    {
+        var probe = new FakeProbe();
+        var ticker = new FakeTicker();
+        var clock = new FakeClock();
+        var (poller, worker, factory) = NewPollerWorkerFactory(probe, ticker, clock);
+        using var transcription = worker;
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger);
+        var config = new AppConfig();
+        config.AppReader.Teams.MinMeetingDurationSeconds = 2;
+        config.Conversion.Enabled = false;
+        using var service = new TriggerService(config, _logger,
+            enableWinEventHook: false, enableHeartbeat: false, meetingTrigger: trigger);
+        var enqueued = new TaskCompletionSource<MeetingTranscriptEnqueuedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        trigger.TranscriptEnqueued += (_, e) => enqueued.TrySetResult(e);
+
+        async Task TickAsync(MeetingPresenceSnapshot snapshot)
+        {
+            var processed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            poller.OnSnapshotEvaluated = _ => { processed.TrySetResult(); return Task.CompletedTask; };
+            probe.Push(snapshot);
+            ticker.TickOnce();
+            await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        service.Start();
+        Assert.True(poller.IsRunning);
+        var meeting = new MeetingPresenceSnapshot(true, "Planning", "Meeting | Planning - Microsoft Teams", "planning");
+        await TickAsync(meeting);
+        Assert.False(trigger.IsRecording);
+        clock.Advance(TimeSpan.FromSeconds(3));
+        await TickAsync(meeting);
+        Assert.True(trigger.IsRecording);
+        await TickAsync(new MeetingPresenceSnapshot(false, null, null, null));
+
+        var transcript = await enqueued.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await trigger.StopAsync();
+        worker.Stop();
+        Assert.Equal("planning", transcript.ChatIdShort);
+        Assert.False(trigger.IsRecording);
+        Assert.Contains("status: recorded", File.ReadAllText(Path.Combine(transcript.Folder, "meta.md")));
+        service.Stop();
+        Assert.False(poller.IsRunning);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LifecycleStopOrDispose_FinalizesAnActiveManualRecording(bool dispose)
+    {
+        var (poller, worker, factory, manualFactory) = NewPollerWorkerFactoryWithManual();
+        using var transcription = worker;
+        await using var trigger = new MeetingTrigger(poller, worker, factory, DefaultOptions(), _logger, manualFactory);
+        var config = new AppConfig();
+        config.Conversion.Enabled = false;
+        using var service = new TriggerService(config, _logger,
+            enableWinEventHook: false, enableHeartbeat: false, meetingTrigger: trigger);
+        var enqueued = new TaskCompletionSource<MeetingTranscriptEnqueuedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+        trigger.TranscriptEnqueued += (_, e) => enqueued.TrySetResult(e);
+        service.Start();
+        var manualKey = await trigger.StartManualAsync(CancellationToken.None);
+
+        if (dispose) await trigger.DisposeAsync();
+        else service.Stop();
+
+        Assert.True(enqueued.Task.IsCompletedSuccessfully);
+        var transcript = await enqueued.Task;
+        worker.Stop();
+        Assert.Equal(manualKey, transcript.ChatIdShort);
+        Assert.False(poller.IsRunning);
+        Assert.False(trigger.IsRecording);
+        Assert.True(File.Exists(Path.Combine(transcript.Folder, "mic.wav")));
+        Assert.True(File.Exists(Path.Combine(transcript.Folder, "loopback.wav")));
+        Assert.Contains("status: recorded", File.ReadAllText(Path.Combine(transcript.Folder, "meta.md")));
+        if (dispose)
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => trigger.StartManualAsync(CancellationToken.None));
+        else
+            await Assert.ThrowsAsync<InvalidOperationException>(() => trigger.StartManualAsync(CancellationToken.None));
     }
 
     [Fact]

@@ -83,7 +83,7 @@ $e = Get-Process msedge | Where-Object MainWindowHandle | Select-Object -First 1
 Dann:
 
 ```powershell
-cd projects/ai-recall/src/AiRecall.Cli/bin/Debug/net8.0-windows
+cd projects/ai-recall/src/AiRecall.Cli/bin/Debug/net10.0-windows
 ./AiRecall.Cli.exe active-window --config "C:\Users\Admin\.openclaw\workspace\temp\ai-recall-cdp-smoke.json"
 ```
 
@@ -118,7 +118,7 @@ Die Datei-Endung `.content.md` zeigt, dass der BrowserAppReader geliefert hat.
 Get-Process msedge | Stop-Process -Force
 Remove-Item "C:\Users\Admin\.openclaw\workspace\temp\edge-cdp-profile" -Recurse -Force
 Remove-Item "C:\Users\Admin\.openclaw\workspace\temp\ai-recall-cdp-smoke.json"
-Get-ChildItem "projects\ai-recall\src\AiRecall.Cli\bin\Debug\net8.0-windows\capture" `
+Get-ChildItem "projects\ai-recall\src\AiRecall.Cli\bin\Debug\net10.0-windows\capture" `
   -Recurse | Remove-Item -Recurse -Force     # capture/ ist gitignored
 ```
 

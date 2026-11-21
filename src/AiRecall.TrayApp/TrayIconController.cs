@@ -40,6 +40,8 @@ public sealed class TrayIconController : IDisposable
     // Zustandsuebergaengen feuert. StatusRefreshTimer pollt 1/s den Counter
     // und ruft ApplyState, solange der Supervisor laeuft.
     private readonly System.Windows.Forms.Timer _statusRefreshTimer;
+    private readonly int _uiThreadId = Environment.CurrentManagedThreadId;
+    private readonly SynchronizationContext? _uiContext;
     private readonly MenuImageCache _menuImages = new();
     // Welcher Tray-Icon-Key aktuell am _notifyIcon haengt. Idempotente
     // Updates: wir setzen das Icon nur bei State-Wechsel neu (sonst
@@ -209,6 +211,7 @@ public sealed class TrayIconController : IDisposable
         {
             Interval = 1000
         };
+        _uiContext = SynchronizationContext.Current as WindowsFormsSynchronizationContext;
         _statusRefreshTimer.Tick += (_, _) => RefreshStatus();
         _statusRefreshTimer.Start();
 
@@ -456,6 +459,14 @@ public sealed class TrayIconController : IDisposable
     /// </summary>
     private void OnRecordingStateChanged(object? sender, RecordingStateChangedEventArgs e)
     {
+        if (Environment.CurrentManagedThreadId != _uiThreadId)
+        {
+            // Post, do not Send: tray Stop can be waiting for audio finalization.
+            _uiContext?.Post(_ => OnRecordingStateChanged(sender, e), null);
+            return;
+        }
+        if (_disposed || !ReferenceEquals(sender, _boundRecordingControl)) return;
+
         Log.Debug("TrayIconController: RecordingStateChanged received (IsRecording={IsRecording}, Source={Source})",
             e.IsRecording, e.Source);
         ApplyRecordingEnabledState();
@@ -473,6 +484,7 @@ public sealed class TrayIconController : IDisposable
             captureCount: (int)(_supervisor.Service?.CaptureCount ?? 0),
             crashCount: _supervisor.CrashCount);
         ApplyState(state);
+        ApplyRecordingEnabledState();
     }
 
     private void OnDoubleClick(object? sender, EventArgs e)

@@ -60,7 +60,7 @@ Strategie: **Format-Extension-basiert**, alle Konverter in-process (kein Spawn).
 | `.docx`/`.doc`                    | DocumentFormat.OpenXml Wordprocessing             |
 | `.xlsx`/`.xls`                    | DocumentFormat.OpenXml Spreadsheet (MD-Tabelle)   |
 | `.pptx`/`.ppt`                    | DocumentFormat.OpenXml Presentation (Slide-Liste) |
-| `.pdf`                            | UglyToad.PdfPig                                   |
+| `.pdf`                            | PdfPig                                             |
 | `.html`/`.htm`                    | ReverseMarkdown                                   |
 | unbekannt (odt, latex, epub, rtf) | `null` + Log                                      |
 
@@ -179,8 +179,8 @@ Config. Conversion-spezifische Felder unter `conversion.*`.
 | Package                | Version        | Lizenz     | Zweck                         |
 | ---------------------- | -------------- | ---------- | ----------------------------- |
 | DocumentFormat.OpenXml | 3.5.1          | MIT        | docx/xlsx/pptx (MS, 700M+)    |
-| UglyToad.PdfPig        | 1.7.0-custom-5 | Apache 2.0 | PDF (21M+)                    |
-| ReverseMarkdown        | 3.13.0         | MIT        | HTML → MD (bereits vorhanden) |
+| PdfPig                 | 0.1.16         | Apache 2.0 | PDF (21M+)                    |
+| ReverseMarkdown        | 6.3.0          | MIT        | HTML → MD (bereits vorhanden) |
 
 Pandoc, ClosedXML, NPOI, iText7 explizit verworfen — siehe DECISIONS.md.
 

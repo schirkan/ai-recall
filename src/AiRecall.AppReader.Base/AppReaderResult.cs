@@ -29,4 +29,13 @@ public sealed record AppReaderResult(
     string ReaderVersion,
     IReadOnlyDictionary<string, string>? Extra = null,
     bool IsThinReader = false
-);
+)
+{
+    /// <summary>Actual URL, without treating a browser's fallback tab title as a URL.</summary>
+    public string? ContextUrl => Extra?.TryGetValue("url", out var url) == true
+        ? url
+        : string.Equals(ContextKind, "url", StringComparison.OrdinalIgnoreCase) &&
+          Uri.TryCreate(ContextLabel, UriKind.Absolute, out _)
+            ? ContextLabel
+            : null;
+}

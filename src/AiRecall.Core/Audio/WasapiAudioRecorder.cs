@@ -3,157 +3,140 @@ using NAudio.Wave;
 
 namespace AiRecall.Core.Audio;
 
-/// <summary>
-/// NAudio <c>WasapiCapture</c>-basierte Implementierung von <see cref="IAudioRecorder"/>
-/// fuer Input-Devices (Mikrofone).
-///
-/// <para>
-/// Verwendet <see cref="WasapiCapture"/> fuer Capture-Streams und
-/// <see cref="WasapiLoopbackCapture"/> fuer Output-Loopback.
-/// Daten werden im PCM-Format (16-bit, Mono, 16 kHz) per
-/// <see cref="IWaveProvider"/> konvertiert und in einem internen
-/// <see cref="MemoryStream"/> gesammelt.
-/// </para>
-/// </summary>
+/// <summary>WASAPI microphone or loopback capture in the requested PCM WAV format.</summary>
 public sealed class WasapiAudioRecorder : IAudioRecorder
 {
-    private readonly AudioFormat _format;
+    private readonly Func<IWaveIn> _createCapture;
     private readonly MMDevice? _device;
-    private readonly bool _isLoopback;
-    private readonly object _lock = new();
+    private readonly object _lifecycle = new();
+    private IWaveIn? _capture;
     private MemoryStream? _buffer;
     private WaveFileWriter? _writer;
-    private IWaveIn? _capture;
-    private bool _started;
+    private TaskCompletionSource<Exception?>? _recordingStopped;
     private bool _disposed;
 
-    /// <summary>
-    /// Erstellt einen neuen Recorder fuer Input (Mikrofon).
-    /// </summary>
-    /// <param name="device">Device oder null fuer System-Default.</param>
-    /// <param name="format">Gewuenschtes Audio-Format.</param>
     public WasapiAudioRecorder(MMDevice device, AudioFormat format)
+        : this(device, format, loopback: false)
     {
-        _device = device ?? throw new ArgumentNullException(nameof(device));
-        _format = format ?? throw new ArgumentNullException(nameof(format));
-        _isLoopback = false;
     }
 
-    /// <summary>
-    /// Erstellt einen neuen Recorder fuer Output-Loopback (Speaker).
-    /// </summary>
-    /// <param name="device">Device oder null fuer System-Default.</param>
-    /// <param name="format">Gewuenschtes Audio-Format.</param>
     public WasapiAudioRecorder(MMDevice device, AudioFormat format, bool loopback)
+        : this(() => loopback ? new WasapiLoopbackCapture(device) : new WasapiCapture(device), format)
     {
         _device = device ?? throw new ArgumentNullException(nameof(device));
-        _format = format ?? throw new ArgumentNullException(nameof(format));
-        _isLoopback = loopback;
     }
 
-    public AudioFormat Format => _format;
+    internal WasapiAudioRecorder(Func<IWaveIn> createCapture, AudioFormat format)
+    {
+        _createCapture = createCapture ?? throw new ArgumentNullException(nameof(createCapture));
+        Format = format ?? throw new ArgumentNullException(nameof(format));
+    }
+
+    public AudioFormat Format { get; }
 
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        lock (_lock)
+        lock (_lifecycle)
         {
-            if (_started)
-                throw new InvalidOperationException("Recorder already started");
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_capture is not null) throw new InvalidOperationException("Recorder already started");
 
-            _buffer = new MemoryStream();
-            // WaveFileWriter mit PCM-Format initialisieren
-            var waveFormat = new WaveFormat(_format.SampleRate, _format.BitsPerSample, _format.Channels);
-            _writer = new WaveFileWriter(_buffer, waveFormat);
-
-            // Capture starten
-            if (_isLoopback)
+            try
             {
-                var loop = new WasapiLoopbackCapture(_device);
-                _capture = loop;
-                loop.DataAvailable += OnDataAvailable;
-                loop.RecordingStopped += OnRecordingStopped;
-                loop.StartRecording();
-            }
-            else
-            {
-                var cap = new WasapiCapture(_device);
-                _capture = cap;
-                cap.DataAvailable += OnDataAvailable;
-                cap.RecordingStopped += OnRecordingStopped;
-                cap.StartRecording();
-            }
+                // NAudio captures the constructor's SynchronizationContext for
+                // RecordingStopped. A synchronous Stop on the tray thread must
+                // not wait for an event posted back to that same thread.
+                var context = SynchronizationContext.Current;
+                SynchronizationContext.SetSynchronizationContext(null);
+                try { _capture = _createCapture(); }
+                finally { SynchronizationContext.SetSynchronizationContext(context); }
 
-            _started = true;
+                // Shared-mode WASAPI (including loopback) enables AutoConvertPcm
+                // in NAudio. Set the stream format, not just the WAV header.
+                var pcm = new WaveFormat(Format.SampleRate, Format.BitsPerSample, Format.Channels);
+                _capture.WaveFormat = pcm;
+                var actual = _capture.WaveFormat;
+                if (!pcm.Equals(actual))
+                    throw new NotSupportedException($"WASAPI format {actual} does not match requested PCM format {pcm}");
+                _buffer = new MemoryStream();
+                _writer = new WaveFileWriter(_buffer, actual);
+                _recordingStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _capture.DataAvailable += OnDataAvailable;
+                _capture.RecordingStopped += OnRecordingStopped;
+                _capture.StartRecording();
+            }
+            catch
+            {
+                ReleaseCapture();
+                throw;
+            }
         }
     }
 
     public byte[] Stop()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        lock (_lock)
+        lock (_lifecycle)
         {
-            if (!_started)
-                throw new InvalidOperationException("Recorder not started");
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var capture = _capture ?? throw new InvalidOperationException("Recorder not started");
+            try
+            {
+                capture.StopRecording();
+                // StopRecording only requests a stop. The last DataAvailable
+                // may still be in flight; close the WAV only after the event.
+                var error = _recordingStopped!.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                if (error is not null)
+                    throw new IOException("WASAPI capture failed", error);
 
-            _capture?.StopRecording();
-            // OnRecordingStopped schliesst writer und buffer
-            // Wir warten kurz, bis die Events durch sind
-            // (in NAudio werden sie synchron nach StopRecording gefeuert)
-            if (_buffer == null || _writer == null)
-                throw new InvalidOperationException("Recorder buffer not initialized");
-
-            // Daten finalisieren
-            _writer.Flush();
-            var data = _buffer.ToArray();
-
-            _started = false;
-            return data;
+                _writer!.Dispose(); // finalizes RIFF and data chunk lengths
+                _writer = null;
+                return _buffer!.ToArray(); // MemoryStream supports ToArray after Dispose
+            }
+            finally
+            {
+                ReleaseCapture();
+            }
         }
     }
 
-    private void OnDataAvailable(object? sender, WaveInEventArgs e)
-    {
-        lock (_lock)
-        {
-            if (_writer == null) return;
-            // Rohdaten aus NAudio ins WAV schreiben
-            // WasapiCapture liefert bereits PCM-Bytes im Ziel-Format (Mono, 16-bit, 16 kHz)
-            _writer.Write(e.Buffer, 0, e.BytesRecorded);
-        }
-    }
+    private void OnDataAvailable(object? sender, WaveInEventArgs e) =>
+        _writer!.Write(e.Buffer, 0, e.BytesRecorded);
 
-    private void OnRecordingStopped(object? sender, StoppedEventArgs e)
+    private void OnRecordingStopped(object? sender, StoppedEventArgs e) =>
+        _recordingStopped!.TrySetResult(e.Exception);
+
+    // Capture callbacks never take _lifecycle. NAudio Dispose joins the
+    // capture thread, so its writer must remain valid until Dispose returns.
+    private void ReleaseCapture()
     {
-        lock (_lock)
+        try
         {
+            _capture?.Dispose();
+        }
+        finally
+        {
+            if (_capture is not null)
+            {
+                _capture.DataAvailable -= OnDataAvailable;
+                _capture.RecordingStopped -= OnRecordingStopped;
+                _capture = null;
+            }
             _writer?.Dispose();
             _writer = null;
-            // Buffer NICHT disposen — wir brauchen die Daten noch in Stop()
+            _buffer?.Dispose();
+            _buffer = null;
+            _recordingStopped = null;
         }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        lock (_lock)
+        lock (_lifecycle)
         {
-            try { _capture?.StopRecording(); }
-            catch { /* ignore */ }
-
-            if (_capture is IDisposable disp)
-            {
-                try { disp.Dispose(); }
-                catch { /* ignore */ }
-            }
-
-            _writer?.Dispose();
-            _writer = null;
-            _buffer?.Dispose();
-            _buffer = null;
-            _device?.Dispose();
+            if (_disposed) return;
+            _disposed = true;
+            try { ReleaseCapture(); }
+            finally { _device?.Dispose(); }
         }
     }
 }

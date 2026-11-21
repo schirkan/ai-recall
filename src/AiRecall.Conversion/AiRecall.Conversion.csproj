@@ -8,14 +8,14 @@
   <ItemGroup>
     <!-- DocumentFormat.OpenXml: docx/xlsx/pptx (MIT, Microsoft, 700M+ NuGet-Downloads) -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
-    <!-- UglyToad.PdfPig: PDF (Apache 2.0, MIT-kompatibel, 21M NuGet-Downloads) -->
-    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    <!-- PdfPig: PDF (Apache 2.0, MIT-kompatibel, 21M NuGet-Downloads) -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- ReverseMarkdown: HTML -> MD (MIT, bereits im Projekt) -->
-    <PackageReference Include="ReverseMarkdown" Version="3.13.0" />
+    <PackageReference Include="ReverseMarkdown" Version="6.3.0" />
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>

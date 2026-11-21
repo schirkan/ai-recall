@@ -42,7 +42,7 @@ Erst-Release-Ziel: **`v0.1.0-rc1`** (Spec 0014 v1.0 = stabiles MVP-1+2+3-Feature
 │  Job 1: build-and-test      │         │  Job 2: release (needs       │
 │                             │         │        build-and-test)       │
 │  • Checkout                 │         │                             │
-│  • Setup .NET 8 (global.json│         │  • Checkout                  │
+│  • Setup .NET 10 (global.json│         │  • Checkout                  │
 │  • Restore dotnet           │         │  • Download Artifact         │
 │  • Build Release            │         │  • Create GitHub Release     │
 │  • Run xUnit Tests          │         │    - Tag = trigger-tag       │
@@ -76,12 +76,12 @@ Begründung Tag-only-Trigger: Pull-Request-Builds sind hier explizit nicht gewü
 
 ### Runner
 
-- **`runs-on: windows-latest`** — Pflicht, weil das Projekt `net8.0-windows` targettet und Win32-P/Invoke (u. a. `oleaut32.dll`, `TextRenderer`) Windows-spezifisch ist. `ubuntu-latest` würde das Build mit nativen Win32-PInvoke-Aufrufen brechen.
+- **`runs-on: windows-latest`** — Pflicht, weil das Projekt `net10.0-windows` targettet und Win32-P/Invoke (u. a. `oleaut32.dll`, `TextRenderer`) Windows-spezifisch ist. `ubuntu-latest` würde das Build mit nativen Win32-PInvoke-Aufrufen brechen.
 
 ### .NET-SDK
 
-- **`actions/setup-dotnet@v4`** mit explizitem Pin auf **.NET 8.0.x** (latest patch).
-- **Workspace-weites `global.json`** (Commit `2c41fb0`) pinnt auf `8.0.422` mit `latestFeature`-Rollforward → `setup-dotnet` mit `dotnet-version: 8.0.x` ist kompatibel.
+- **`actions/setup-dotnet@v4`** installiert die im `global.json` angegebene SDK-Version (`global-json-file: global.json`).
+- **`global.json`** pinnt auf `10.0.402` mit `latestFeature`-Rollforward innerhalb von .NET 10.0.
 
 ### Build- und Test-Schritte
 
@@ -92,7 +92,7 @@ Begründung Tag-only-Trigger: Pull-Request-Builds sind hier explizit nicht gewü
 | Restore | `dotnet restore AiRecall.sln` | NuGet-Pakete |
 | Build | `dotnet build -c Release --no-restore` | Compile, Warnings-as-errors (siehe `.editorconfig` falls vorhanden, sonst nur default) |
 | Test | `dotnet test -c Release --no-build --logger trx --logger "console;verbosity=normal"` | xUnit-Suite, **Counter/Async-Regel** bleibt aktiv (Spec 0013 Iter. 4 Counter-Race-Fix) |
-| Publish | `dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -o publish/AiRecall.TrayApp -p:PublishSingleFile=false --no-build` | TrayApp als verteilbares Binary (Multi-File für einfacheres Debuggen, Spec 0006 v1.0) |
+| Publish | `dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:PublishProfile=WinX64SingleFile -o publish/AiRecall.TrayApp` | Eine frameworkabhängige Windows-x64-EXE (.NET 10 Desktop Runtime erforderlich) |
 | ZIP | PowerShell `Compress-Archive` | `publish/AiRecall.TrayApp/` → `AiRecall-{version}-win-x64.zip` |
 | Upload Artifact | `actions/upload-artifact@v4` mit `if-no-files-found: error` | ZIP als Workflow-Artifact (Zwischenspeicher für Job 2) |
 
@@ -177,7 +177,7 @@ Minimal-Permission-Prinzip: kein `packages: write`, kein `id-token: write`. Nur 
 | NuGet-Packages | `AiRecall.*` sind Anwendungs-DLLs, nicht Library-Pakete. Falls später Libraries extrahiert werden, separates Workflow-Feature |
 | `*.nupkg` für Tessdata-Modelle | Spec 0012 plant Auto-Download zur Laufzeit, kein Build-Time-Bundling |
 | Code-Signierung | Aktuell deaktiviert — Spec-Kandidat (Spec 0017), würde Codesign-Cert + Windows-Secrets erfordern |
-| Linux-/macOS-Builds | `net8.0-windows` targettet Windows-only (Spec 0002 v1.0) |
+| Linux-/macOS-Builds | `net10.0-windows` targettet Windows-only (Spec 0002 v1.0) |
 
 ---
 
@@ -204,9 +204,9 @@ Wer das Build lokal reproduzieren will, kann auf seinem Windows-Entwicklungsrech
 dotnet restore AiRecall.sln
 dotnet build -c Release
 dotnet test -c Release --no-build
-dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -o publish/AiRecall.TrayApp
+dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:PublishProfile=WinX64SingleFile -o publish/AiRecall.TrayApp
 # manuelles Zippen:
-Compress-Archive -Path publish/AiRecall.TrayApp/* -DestinationPath AiRecall-0.1.0-rc1-win-x64.zip
+Compress-Archive -LiteralPath publish/AiRecall.TrayApp/AiRecall.TrayApp.exe -CompressionLevel Optimal -DestinationPath AiRecall-0.2.0-win-x64.zip
 ```
 
 ---
@@ -238,7 +238,7 @@ Beide Targets behalten `win-x64` und loeschen den Rest (~17 RID-Ordner).
 2. **Keine Code-Signierung** — siehe oben, Spec-Kandidat 0017.
 3. **Kein automatischer Changelog-Pre-Render** — `generate_release_notes` reicht vorerst; falls strukturiertes `CHANGELOG.md` gewünscht, Spec-Folge.
 4. **Build-Zeit nicht optimiert** — kein NuGet-Cache zwischen Jobs, keine Matrix-Strategie für Multi-Project-Build. Akzeptabel bei < 10 min Build-Zeit; falls Pipeline > 15 min, Spec-Folge mit Caching.
-5. **Single-File-Publish optional** — aktuell Multi-File-Publish (`PublishSingleFile=false`) für leichteres Debugging. Spec-Folge kann auf Single-File umstellen, falls Größe wichtiger als Debugbarkeit wird.
+5. **Single-EXE:** Die CI prüft exakt eine Datei und führt `--verify-package` ohne Aufnahme aus. x86-OCR-Bibliotheken und PDBs werden vor dem Bündeln entfernt. WinForms-Linker-Trimming ist nicht unterstützt (`NETSDK1175`); der Build verwendet die installierte .NET 10 Desktop Runtime.
 
 ---
 
@@ -248,5 +248,5 @@ Beide Targets behalten `win-x64` und loeschen den Rest (~17 RID-Ordner).
 - **Spec 0013 v0.3 Update 8** — MVP3 Audio Notes (im Release enthalten, Iter. 1-4 + Counter-Race-Fix)
 - **Spec 0014 v1.0** — Tray Audio Indicator + Manual Audio Control
 - **`.gitattributes`** (Commit `77e7293`) — Line-Ending-Strategie (LF für `*.yml`, CRLF für Windows-Scripts)
-- **`global.json`** — .NET 8.0.422-Pin
+- **`global.json`** — .NET 10.0.402-Pin
 - **`projects/PROJECT-RULES.md`** — Pflicht-Sektionen `## Git` und `## CI/CD` in `PROJECT.md`

@@ -116,6 +116,9 @@ public sealed class TriggerSupervisor : IDisposable
         ITriggerService? service = null;
         try
         {
+            var previous = _service;
+            _service = null;
+            previous?.Dispose();
             service = _serviceFactory(config, _logger);
             service.Start();
             _service = service;
@@ -158,15 +161,20 @@ public sealed class TriggerSupervisor : IDisposable
     }
 
     /// <summary>
-    /// Stops the current service (if any), disposes it, and starts a new
-    /// one with the given configuration. Used for settings hot-reload
-    /// (Spec 0009 §Hot-Reload).
+    /// Applies settings without starting a stopped recorder. A running
+    /// service is stopped and replaced with one using the new configuration.
     /// </summary>
     public void Restart(AppConfig newConfig)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(newConfig);
-        _logger.Information("TriggerSupervisor.Restart requested");
+        if (State != TriggerState.Running)
+        {
+            _currentConfig = newConfig;
+            return;
+        }
 
+        _logger.Information("TriggerSupervisor.Restart requested");
         Stop();
         if (_service is not null)
         {

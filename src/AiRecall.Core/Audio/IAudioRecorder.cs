@@ -21,10 +21,10 @@ public interface IAudioRecorder : IDisposable
     void Start();
 
     /// <summary>
-    /// Stoppt das Aufnahme-Capture. Liefert die aufgezeichneten PCM-Rohbytes.
+    /// Stoppt das Aufnahme-Capture und wartet auf das Ende des Streams.
     /// Wirft, wenn noch nicht gestartet oder bereits gestoppt.
     /// </summary>
-    /// <returns>PCM-Rohbytes (Mono, 16-bit Little-Endian, passend zum <see cref="Format"/>).</returns>
+    /// <returns>Vollständige WAV-Datei mit PCM-Daten passend zum <see cref="Format"/>.</returns>
     byte[] Stop();
 }
 

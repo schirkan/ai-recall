@@ -397,23 +397,17 @@ Spec 0005 wurde im Bug-Bash Teil 2 (Commit `d245dd2`, Cluster "Trigger-Pipeline 
 
 #### Pipeline-Erweiterung (Schritt 0b im Worker)
 
-Periodic Capture durchläuft die volle Worker-Pipeline, mit folgenden
-Erweiterungen in `TriggerWorker.ProcessEvent`:
+Periodische, ereignisbasierte und Heartbeat-Captures verwenden dieselben
+Ausschlussregeln in `TriggerWorker`:
 
-1. **HWND normalisieren** → identisch zu Foreground/Focus.
-2. **Periodic-spezifischer Vorab-Filter** (NEU): Wenn `triggerKind == Periodic`
-   und (`processName` ∈ `screenRecorder.ignoreApps`
-   oder `windowTitle` ∈ `screenRecorder.ignoreWindowTitles`) → skip.
-3. URL-Filter (NEU): Wenn App-Reader eine URL liefert und sie in
-   `screenRecorder.ignoreUrls` → skip.
-4. **Throttle per HWND** → identisch (greift auch für Periodic).
-5. **Throttle per App** → identisch.
-6. **Self-Capture-Filter** → identisch.
-7. **Class-Blacklist** → identisch.
-8. App-Reader → identisch.
-9. OCR → identisch.
-10. Hash-Dedup → identisch.
-11. Capture schreiben → identisch.
+1. HWND normalisieren und Self-Capture- sowie Klassenfilter anwenden.
+2. Prozess und Titel gegen `trigger.blacklist`, `screenRecorder.ignoreApps`
+   und `screenRecorder.ignoreWindowTitles` prüfen, auch beim Owner eines modalen Dialogs.
+3. Throttle pro HWND und App, Screenshot im Speicher, Hash-Dedup.
+4. Reader ausführen und eine bekannte URL gegen `screenRecorder.ignoreUrls` prüfen.
+   Ein Treffer verhindert sämtliche Capture-Dateien und die Konvertierung.
+5. Vor dem Schreiben Abbruch prüfen. Stopp wartet einen bereits laufenden
+   Schreibvorgang ab, lässt aber keine weiteren Commits dieses Workers zu.
 
 #### Verworfen (Bug-Bash Teil 2)
 

@@ -15,7 +15,7 @@ namespace AiRecall.Trigger;
 /// <para>
 /// Erzeugt:
 /// <list type="bullet">
-///   <item><see cref="MeetingPresencePoller"/> (5-s-Polling) + einen TeamsAppReaderProbe</item>
+///   <item><see cref="MeetingPresencePoller"/> + einen TeamsAppReaderProbe</item>
 ///   <item><see cref="TranscriptionWorker"/> mit Default-Provider
 ///         (Azure Speech oder Deepgram, je nach <see cref="TranscriptionConfig.Provider"/>)</item>
 ///   <item>Recorder-Factory, die <see cref="RecordingSession"/> mit dem echten
@@ -28,9 +28,8 @@ public static class MeetingTriggerFactory
 {
     /// <summary>
     /// Erstellt die Default-Composition. Privacy-First: wenn
-    /// <c>AudioConfig.Enabled=false</c> oder
-    /// <c>TeamsConfig.AutoRecordMeetings=false</c>, wird <c>null</c>
-    /// zurueckgegeben (Consumer startet dann kein Auto-Recording).
+    /// <c>AudioConfig.Enabled=false</c>, wird <c>null</c> zurückgegeben.
+    /// Teams-Polling und Cloud-Transkription haben eigene Schalter.
     /// </summary>
     public static MeetingTrigger? TryCreateDefault(AppConfig config, ILogger logger)
     {
@@ -39,11 +38,13 @@ public static class MeetingTriggerFactory
 
         // Privacy-First Gate: kein Auto-Recording ohne explizite Opt-in
         if (!config.Audio.Enabled) return null;
-        if (!config.AppReader.Teams.Enabled || !config.AppReader.Teams.AutoRecordMeetings) return null;
+        // Teams polling is a separate opt-in; manual audio is still available.
 
         // 1. Poller mit TeamsAppReaderProbe
         var probe = new TeamsAppReaderProbe(logger);
-        var poller = new MeetingPresencePoller(probe, logger: logger);
+        var ticker = new PeriodicPresenceTicker(TimeSpan.FromSeconds(
+            Math.Max(1, config.AppReader.Teams.PresencePollIntervalSeconds)));
+        var poller = new MeetingPresencePoller(probe, ticker, new SystemPresenceClock(), logger);
 
         // 2. Transkriptions-Provider je nach Konfiguration
         ITranscriptionProvider provider = TranscriptionConfigResolver
@@ -54,7 +55,9 @@ public static class MeetingTriggerFactory
         };
 
         // 3. Worker mit Default-Pool (max-N parallel = 2)
-        var worker = new TranscriptionWorker(provider, maxParallel: 2, logger: logger);
+        var worker = config.Transcription.Enabled
+            ? new TranscriptionWorker(provider, maxParallel: 2, logger: logger)
+            : null;
 
         // 4. Recorder-Factory: baut RecordingSession mit NAudio + Default-Devices
         var deviceProvider = new AudioDeviceProvider();
@@ -102,9 +105,9 @@ public static class MeetingTriggerFactory
 
         // 6. Trigger
         var trigger = new MeetingTrigger(
-            poller, worker, recorderCtxFactory, resolvedOptions, logger, manualRecorderFactory);
+            poller, worker, recorderCtxFactory, resolvedOptions, logger, manualRecorderFactory, ownsWorker: true);
 
-        // 6. Poller starten (in Start()-Phase des TriggerSupervisors kommt das)
+        // TriggerService.Start startet den Poller mit der Teams-Konfiguration.
         logger.Information(
             "MeetingTriggerFactory: Composition erstellt (Provider={Provider}, Audio.Enabled={AudioEnabled})",
             provider.Name, config.Audio.Enabled);

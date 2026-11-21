@@ -273,8 +273,8 @@ Felder:
 - `appReader.browser.cdp.endpoint` (Default `http://localhost:9222`) — HTTP-Basis-URL.
 - `appReader.browser.cdp.timeoutMs` (Default `1500`) — sowohl HTTP-Lookup
   als auch WebSocket-Roundtrip.
-- `appReader.browser.markdown.*` — 1:1-Mapping auf `ReverseMarkdown.Config`
-  (v3.13). Wirkt unabhängig vom CDP-Gate; alle Felder optional, nicht
+- `appReader.browser.markdown.*` — Mapping der acht bestehenden JSON-Optionen
+  auf `ReverseMarkdown.Config`. Wirkt unabhängig vom CDP-Gate; alle Felder optional, nicht
   gesetzte Felder lassen die Library-Defaults unangetastet.
   - `unknownTags` (string) — `"PassThrough"` (Default) / `"Drop"` / `"Bypass"` / `"Raise"`
   - `githubFlavored` (bool, Default `false`)

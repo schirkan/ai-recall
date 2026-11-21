@@ -191,27 +191,26 @@ public class TriggerServiceTests
         Assert.Null(svc.MeetingTrigger);
     }
 
-    [Fact]
-    public void MeetingTrigger_TeamsAutoRecordDisabled_PropertyIsNull()
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, true)]
+    public void MeetingTrigger_ManualAudioRemainsAvailable_PollingFollowsTeamsOptIns(
+        bool readerEnabled, bool autoRecordEnabled, bool expectedPolling)
     {
         var (logger, _) = NewLogger();
         var c = NewConfig();
         c.Audio.Enabled = true;
-        c.AppReader.Teams.AutoRecordMeetings = false;
+        c.Transcription.Enabled = false;
+        c.AppReader.Teams.Enabled = readerEnabled;
+        c.AppReader.Teams.AutoRecordMeetings = autoRecordEnabled;
+        c.AppReader.Teams.PresencePollIntervalSeconds = 300; // no real probe during this test
         using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false);
-        Assert.Null(svc.MeetingTrigger);
-    }
-
-    [Fact]
-    public void MeetingTrigger_TeamsReaderDisabled_PropertyIsNull()
-    {
-        var (logger, _) = NewLogger();
-        var c = NewConfig();
-        c.Audio.Enabled = true;
-        c.AppReader.Teams.Enabled = false;       // Master-Switch Teams-Reader
-        c.AppReader.Teams.AutoRecordMeetings = true;
-        using var svc = new TriggerService(c, logger, enableWinEventHook: false, enableHeartbeat: false);
-        Assert.Null(svc.MeetingTrigger);
+        var trigger = Assert.IsType<MeetingTrigger>(svc.MeetingTrigger);
+        svc.Start();
+        Assert.Equal(expectedPolling, trigger.IsPolling);
+        svc.Stop();
+        Assert.False(trigger.IsPolling);
     }
 
     [Fact]

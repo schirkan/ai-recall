@@ -196,8 +196,8 @@ public sealed class BrowserAppReader : AppReaderBase
     /// Baut einen frischen <see cref="ReverseMarkdown.Converter"/> mit den aus
     /// <paramref name="settings"/> gemappten <see cref="ReverseMarkdown.Config"/>-Werten.
     /// Felder, die in <paramref name="settings"/> nicht gesetzt sind, bleiben auf den
-    /// Library-Defaults. Damit ist die JSON-Konfiguration 1:1 auf die
-    /// ReverseMarkdown-Optionen abbildbar.
+    /// Library-Defaults. Die JSON-Namen bleiben von den gruppierten
+    /// ReverseMarkdown-Optionen unabhängig.
     /// </summary>
     public static ReverseMarkdown.Converter BuildConverter(MarkdownSettings? settings)
     {
@@ -209,19 +209,23 @@ public sealed class BrowserAppReader : AppReaderBase
         if (settings.UnknownTags is { Length: > 0 } ut &&
             Enum.TryParse<ReverseMarkdown.Config.UnknownTagsOption>(ut, ignoreCase: true, out var u))
         {
-            cfg.UnknownTags = u;
+            cfg.Tags.Unknown = u;
         }
         if (settings.GithubFlavored is bool gf) cfg.GithubFlavored = gf;
-        if (settings.RemoveComments is bool rc) cfg.RemoveComments = rc;
-        if (settings.WhitelistUriSchemes is { } ws) cfg.WhitelistUriSchemes = ws.ToArray();
-        if (settings.SmartHrefHandling is bool sh) cfg.SmartHrefHandling = sh;
+        if (settings.RemoveComments is bool rc) cfg.Formatting.RemoveComments = rc;
+        if (settings.WhitelistUriSchemes is { } ws)
+        {
+            cfg.Links.WhitelistedSchemes.Clear();
+            cfg.Links.WhitelistedSchemes.UnionWith(ws);
+        }
+        if (settings.SmartHrefHandling is bool sh) cfg.Links.SmartHref = sh;
         if (settings.TableWithoutHeaderRowHandling is { Length: > 0 } twh &&
             Enum.TryParse<ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption>(twh, ignoreCase: true, out var tt))
         {
-            cfg.TableWithoutHeaderRowHandling = tt;
+            cfg.Tables.WithoutHeaderRow = tt;
         }
-        if (settings.ListBulletChar is { Length: > 0 } lb) cfg.ListBulletChar = lb[0];
-        if (settings.DefaultCodeBlockLanguage is { Length: > 0 } dcl) cfg.DefaultCodeBlockLanguage = dcl;
+        if (settings.ListBulletChar is { Length: > 0 } lb) cfg.Formatting.ListBulletChar = lb[0];
+        if (settings.DefaultCodeBlockLanguage is { Length: > 0 } dcl) cfg.Formatting.DefaultCodeBlockLanguage = dcl;
 
         return converter;
     }

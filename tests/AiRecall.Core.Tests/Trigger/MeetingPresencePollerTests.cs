@@ -295,6 +295,7 @@ public class MeetingPresencePollerTests
         Assert.Equal(2, events.Count);
         Assert.False(events[1].IsActive);
         Assert.Null(events[1].Topic);
+        Assert.Equal("abc12345", events[1].ChatIdShort);
         Assert.False(poller.IsActive);
         await poller.StopAsync(CancellationToken.None);
     }
@@ -469,5 +470,6 @@ public class MeetingPresencePollerTests
         await poller.StartAsync(ValidConfig(), CancellationToken.None);
         await poller.DisposeAsync();
         Assert.False(poller.IsRunning);
+        Assert.True(ticker.Disposed);
     }
 }

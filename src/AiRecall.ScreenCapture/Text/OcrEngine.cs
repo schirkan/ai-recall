@@ -36,7 +36,7 @@ public sealed class OcrEngine : IDisposable
         }
         else
         {
-            candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, config.TessDataPath));
+            candidatePaths.Add(AppPaths.ResolveDataPath(config.TessDataPath));
             candidatePaths.Add(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AiRecall", config.TessDataPath));

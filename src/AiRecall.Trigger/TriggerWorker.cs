@@ -56,6 +56,7 @@ public sealed class TriggerWorker : IDisposable
     private readonly HwndDedup _hwndDedup;
     private readonly AppReaderRegistry _appReaderRegistry;
     private readonly ConversionWorker? _conversionWorker;
+    private readonly object _captureCommit = new();
 
     private Thread? _thread;
     private CancellationTokenSource? _cts;
@@ -95,7 +96,8 @@ public sealed class TriggerWorker : IDisposable
     public void Start()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(TriggerWorker));
-        if (_thread is not null) return;
+        if (_thread?.IsAlive == true) return;
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
         _thread = new Thread(() => Loop(token))
@@ -111,12 +113,20 @@ public sealed class TriggerWorker : IDisposable
     {
         if (_disposed) return;
         _cts?.Cancel();
-        try { _reader.Completion.Wait(TimeSpan.FromSeconds(2)); } catch { /* ignore */ }
-        _thread?.Join(TimeSpan.FromSeconds(3));
+        // Finish any commit already in progress. A blocked window or reader
+        // may return later, but its cancelled event cannot commit anything.
+        lock (_captureCommit)
+            _hwndDedup.Save();
+
+        if (_thread is not null && !_thread.Join(TimeSpan.FromSeconds(3)))
+        {
+            _logger.Warning("Capture worker is still waiting on an external window or reader; capture writes are stopped");
+            return;
+        }
+
         _thread = null;
         _cts?.Dispose();
         _cts = null;
-        _hwndDedup.Save();
     }
 
     public void Dispose()
@@ -149,7 +159,11 @@ public sealed class TriggerWorker : IDisposable
 
                 try
                 {
-                    ProcessEvent(ev);
+                    ProcessEvent(ev, token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -171,6 +185,13 @@ public sealed class TriggerWorker : IDisposable
     /// </summary>
     public void ProcessEvent(TriggerEvent ev)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ProcessEvent(ev, _cts?.Token ?? default);
+    }
+
+    private void ProcessEvent(TriggerEvent ev, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
         // 1. HWND normalisieren (Child-HWND → Top-Level)
         var rootHwnd = GetAncestor(ev.Hwnd, GA_ROOT);
         if (rootHwnd == IntPtr.Zero)
@@ -215,18 +236,16 @@ public sealed class TriggerWorker : IDisposable
             parentWindow = WindowInfoLookup.Get(ownerHwnd.ToInt64());
         }
 
-        // 5. Process-Blacklist
-        if (MatchesAny(window.ProcessName, _config.Trigger.Blacklist.Processes))
-        {
-            BlacklistCount++;
-            return;
-        }
+        ProcessWindow(ev, window, parentWindow, WindowScreenshot.CapturePng, token);
+    }
 
-        // 5b. Title-Blacklist (Bug-Bash 2026-07-05)
-        //     Schützt AiRecall-eigene UI-Fenster (SettingsDialog,
-        //     LogviewerWindow) davor, dass der Trigger sich selbst bzw.
-        //     die Settings capturt. Substring-Match analog zu Processes.
-        if (MatchesAny(window.Title, _config.Trigger.Blacklist.WindowTitles))
+    internal void ProcessWindow(TriggerEvent ev, WindowInfo window, WindowInfo? parentWindow,
+        Func<WindowInfo, byte[]> capture, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var rootHwnd = window.Handle;
+        // The owner title is persisted too, so apply metadata filters to both.
+        if (IsWindowIgnored(window) || (parentWindow is not null && IsWindowIgnored(parentWindow)))
         {
             BlacklistCount++;
             return;
@@ -250,7 +269,7 @@ public sealed class TriggerWorker : IDisposable
         byte[] pngBytes;
         try
         {
-            pngBytes = WindowScreenshot.CapturePng(window);
+            pngBytes = capture(window);
         }
         catch (Exception ex)
         {
@@ -261,11 +280,15 @@ public sealed class TriggerWorker : IDisposable
 
         // 9. Hash-Dedup pro HWND
         var hash = Hashing.Sha256(pngBytes);
-        if (_hwndDedup.IsDuplicate(rootHwnd, hash, ev.Timestamp))
+        lock (_captureCommit)
         {
-            _logger.Debug("HWND-Dedup hit for HWND 0x{Hwnd:X}", rootHwnd.ToInt64());
-            DuplicateCount++;
-            return;
+            token.ThrowIfCancellationRequested();
+            if (_hwndDedup.IsDuplicate(rootHwnd, hash, ev.Timestamp))
+            {
+                _logger.Debug("HWND-Dedup hit for HWND 0x{Hwnd:X}", rootHwnd.ToInt64());
+                DuplicateCount++;
+                return;
+            }
         }
 
         // 10. App-Reader (Spec 0004) — wird VOR dem Pending-MD aufgerufen,
@@ -280,11 +303,33 @@ public sealed class TriggerWorker : IDisposable
             {
                 Config = _config,
                 Logger = _logger,
-                CancellationToken = default
+                CancellationToken = token
             };
             readerResult = _appReaderRegistry.TryRead(window, context);
         }
 
+        if (IgnoreMatcher.IsIgnored(window, readerResult?.ContextUrl, _config.ScreenRecorder))
+        {
+            BlacklistCount++;
+            return;
+        }
+
+        lock (_captureCommit)
+        {
+            token.ThrowIfCancellationRequested();
+            CommitCapture(ev, window, parentWindow, pngBytes, hash, readerResult);
+        }
+    }
+
+    private bool IsWindowIgnored(WindowInfo window) =>
+        MatchesAny(window.ProcessName, _config.Trigger.Blacklist.Processes) ||
+        MatchesAny(window.Title, _config.Trigger.Blacklist.WindowTitles) ||
+        IgnoreMatcher.IsIgnored(window, null, _config.ScreenRecorder);
+
+    private void CommitCapture(TriggerEvent ev, WindowInfo window, WindowInfo? parentWindow,
+        byte[] pngBytes, string hash, AppReaderResult? readerResult)
+    {
+        var rootHwnd = window.Handle;
         // 11. Pending-MD schreiben (mit App-Reader-Metadaten wenn vorhanden)
         string? appFilePath = null;
         string? appUiaContent = null;
@@ -296,8 +341,9 @@ public sealed class TriggerWorker : IDisposable
                 appUiaContent = uia;
         }
 
+        var captureRoot = AppPaths.ResolveDataPath(_config.Capture.RootPath);
         var item = CaptureWriter.WritePending(
-            window, pngBytes, hash, _config.Capture.RootPath,
+            window, pngBytes, hash, captureRoot,
             parentWindow: parentWindow,
             filePath: appFilePath,
             uiaContent: appUiaContent);
@@ -315,7 +361,7 @@ public sealed class TriggerWorker : IDisposable
                 readerResult.ReaderName,
                 readerResult.ReaderVersion,
                 readerResult.Extra);
-            CaptureWriter.WriteContent(coreRecord, window, item.Timestamp, _config.Capture.RootPath, readerResult.ContextLabel);
+            CaptureWriter.WriteContent(coreRecord, window, item.Timestamp, captureRoot, readerResult.ContextLabel);
         }
 
         // 12. Async Conversion-Worker (Spec 0007) — enqueue der MD-Pfad
@@ -379,7 +425,7 @@ public sealed class TriggerWorker : IDisposable
             ? AppContext.BaseDirectory
             : Path.IsPathRooted(pluginDir)
                 ? pluginDir
-                : Path.Combine(AppContext.BaseDirectory, pluginDir);
+                : AppPaths.ResolveDataPath(pluginDir);
         return AppReaderRegistry.LoadFromDirectory(resolved, _logger);
     }
 

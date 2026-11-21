@@ -44,7 +44,7 @@ public sealed class TrayAppContext : ApplicationContext
             .MinimumLevel.Information()
             .WriteTo.Sink(LogSink)
             .WriteTo.File(
-                "logs/trayapp-.log",
+                AppPaths.ResolveDataPath("logs/trayapp-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
@@ -66,7 +66,8 @@ public sealed class TrayAppContext : ApplicationContext
             // muss der Tray-Controller bei jedem StateChange neu resolven.
             // MeetingTrigger-Property ist auf TriggerService (nicht auf dem
             // ITriggerService-Interface), daher der Cast.
-            () => _supervisor.Service is TriggerService svc ? svc.MeetingTrigger as IRecordingControl : null);
+            () => _supervisor.State == TriggerState.Running && _supervisor.Service is TriggerService svc
+                ? svc.MeetingTrigger : null);
         _trayIcon.ExitRequested += (_, _) =>
         {
             Log.Information("Exit requested from tray menu");
@@ -276,12 +277,7 @@ public sealed class TrayAppContext : ApplicationContext
     {
         if (_settingsDialog is null || _settingsDialog.IsDisposed)
         {
-            _settingsDialog = new SettingsDialog(_config, onSave: newConfig =>
-            {
-                _config = newConfig;
-                Log.Information("Settings saved, hot-reloading supervisor");
-                _supervisor.Restart(newConfig);
-            });
+            _settingsDialog = new SettingsDialog(_config, onSave: ApplyConfig);
             _settingsDialog.FormClosed += (_, _) => _settingsDialog = null;
         }
         _settingsDialog.Show();

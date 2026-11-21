@@ -156,6 +156,40 @@ public class RecordingSessionTests
     }
 
     [Fact]
+    public async Task DisposeAsync_WhileRecording_FinalizesBothStreamsBeforeReleasingThem()
+    {
+        var storageRoot = Path.Combine(Path.GetTempPath(), "AiRecall-test-" + Guid.NewGuid().ToString("N"));
+        var factory = new FakeRecorderFactory();
+        var session = new RecordingSession(RecordingTriggerSource.ManualAudio, "dispose1",
+            DateTimeOffset.UtcNow, "Manual", new AudioConfig { StorageRoot = storageRoot },
+            _silentLogger, factory, TwoDeviceProvider());
+
+        try
+        {
+            session.Start();
+            await session.DisposeAsync();
+            await session.DisposeAsync();
+
+            Assert.Equal(RecordingState.Recorded, session.State);
+            Assert.Equal(2, factory.Created.Count);
+            Assert.All(factory.Created, recorder =>
+            {
+                Assert.Equal(1, recorder.StopCount);
+                Assert.Equal(1, recorder.DisposeCount);
+            });
+            Assert.Contains("status: recorded", File.ReadAllText(Path.Combine(session.Folder!, "meta.md")));
+            Assert.True(File.Exists(Path.Combine(session.Folder!, "mic.wav")));
+            Assert.True(File.Exists(Path.Combine(session.Folder!, "loopback.wav")));
+            Assert.Throws<ObjectDisposedException>(session.Start);
+        }
+        finally
+        {
+            await session.DisposeAsync();
+            if (Directory.Exists(storageRoot)) Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DoubleStart_Throws()
     {
         var storageRoot = Path.Combine(Path.GetTempPath(), "AiRecall-test-" + Guid.NewGuid().ToString("N"));
@@ -373,26 +407,30 @@ internal sealed class FakeRecorder : IAudioRecorder
     }
 
     public AudioFormat Format { get; }
+    public int StopCount { get; private set; }
+    public int DisposeCount { get; private set; }
 
     public void Start() { _started = true; }
     public byte[] Stop()
     {
-        if (!_started) throw new InvalidOperationException("not started");
+        if (!_started || DisposeCount != 0) throw new InvalidOperationException("not started or disposed");
         _started = false;
+        StopCount++;
         return _data;
     }
 
-    public void Dispose() { }
+    public void Dispose() => DisposeCount++;
 }
 
 internal sealed class FakeRecorderFactory : IAudioRecorderFactory
 {
-    private int _counter;
+    public List<FakeRecorder> Created { get; } = new();
 
     public IAudioRecorder Create(AudioDeviceInfo device, AudioFormat format, bool loopback)
     {
-        _counter++;
         // Erster Recorder = mic (1024 bytes), zweiter = loopback (2048 bytes)
-        return new FakeRecorder(loopback ? 2048 : 1024);
+        var recorder = new FakeRecorder(loopback ? 2048 : 1024);
+        Created.Add(recorder);
+        return recorder;
     }
 }

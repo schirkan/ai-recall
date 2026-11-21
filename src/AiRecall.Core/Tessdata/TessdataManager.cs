@@ -186,7 +186,7 @@ public sealed class TessdataManager
             // Relativ zu AppContext.BaseDirectory (analog zu AiRecall-OcrEngine-Pfad-Logik)
             var resolved = Path.IsPathRooted(configured)
                 ? configured
-                : Path.Combine(AppContext.BaseDirectory, configured);
+                : AppPaths.ResolveDataPath(configured);
             if (Directory.Exists(resolved))
                 return resolved;
         }

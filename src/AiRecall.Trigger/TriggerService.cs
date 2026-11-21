@@ -192,8 +192,7 @@ public sealed class TriggerService : ITriggerService
 
     /// <summary>
     /// Audio-Meeting-Trigger (Spec 0013 v0.3 §1). <c>null</c>, wenn
-    /// <c>AudioConfig.Enabled=false</c> oder <c>TeamsConfig.AutoRecordMeetings=false</c>
-    /// (Privacy-First-Gate in <see cref="MeetingTriggerFactory.TryCreateDefault"/>).
+    /// Audio deaktiviert und kein Trigger injiziert wurde.
     /// </summary>
     public MeetingTrigger? MeetingTrigger => _meetingTrigger;
 
@@ -203,13 +202,14 @@ public sealed class TriggerService : ITriggerService
         if (_disposed) throw new ObjectDisposedException(nameof(TriggerService));
         if (_isRunning) return; // idempotent
         // Reihenfolge: Worker zuerst (liest), dann Trigger-Quellen, dann
-        // MeetingTrigger (subscribt Poller und emittiert Audio-Tasks ueber
+        // MeetingTrigger (startet Poller und emittiert Audio-Tasks ueber
         // TranscriptionWorker — unabhaengig vom Capture-Channel).
         _worker.Start();
-        _meetingTrigger?.Start();
         _winEventHook?.Start();
         _heartbeat?.Start();
         _periodicCapture?.Start();
+        _meetingTrigger?.Start(_config.AppReader.Teams, enablePolling:
+            _config.AppReader.Teams.Enabled && _config.AppReader.Teams.AutoRecordMeetings);
         _isRunning = true;
         _logger.Information(
             "TriggerService started (WinEventHook={Hook}, Heartbeat={Hb} @ {HbSec}s, PeriodicCapture={Pc} @ {PcMs}ms)",
@@ -223,13 +223,14 @@ public sealed class TriggerService : ITriggerService
     /// <inheritdoc />
     public void Stop()
     {
+        // Stop audio even if the rest of the service did not finish starting.
+        try { _meetingTrigger?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "MeetingTrigger.Stop failed"); }
         if (!_isRunning) return; // idempotent
         // Reihenfolge: Quellen zuerst (schreiben nicht mehr), dann Worker,
         // dann Channel-Completion.
         try { _winEventHook?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "WinEventHook.Stop failed"); }
         try { _heartbeat?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Heartbeat.Stop failed"); }
         try { _periodicCapture?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "PeriodicCapture.Stop failed"); }
-        try { _meetingTrigger?.Stop(); } catch (Exception ex) { _logger.Warning(ex, "MeetingTrigger.Stop failed"); }
         _channel.Writer.TryComplete();
         try { _worker.Stop(); } catch (Exception ex) { _logger.Warning(ex, "Worker.Stop failed"); }
         _isRunning = false;
@@ -242,6 +243,10 @@ public sealed class TriggerService : ITriggerService
     {
         if (_disposed) return;
         Stop();
+        if (_ownsMeetingTrigger)
+        {
+            _meetingTrigger?.Dispose();
+        }
         _worker.Dispose();
         _winEventHook?.Dispose();
         _heartbeat?.Dispose();
@@ -249,10 +254,6 @@ public sealed class TriggerService : ITriggerService
         if (_ownsConversionWorker)
         {
             _conversionWorker?.Dispose();
-        }
-        if (_ownsMeetingTrigger)
-        {
-            _meetingTrigger?.Dispose();
         }
         _disposed = true;
     }

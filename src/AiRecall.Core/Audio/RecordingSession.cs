@@ -27,21 +27,13 @@ public enum RecordingTriggerSource
 /// <list type="number">
 ///   <item><see cref="Start"/> erstellt den Meeting-Folder, schreibt initiales
 ///         <c>meta.md</c> mit Status <c>recording</c>, startet zwei NAudio-Captures
-///         (Mic + Loopback) in eigenem Thread.</item>
-///   <item><see cref="StopAsync"/> cancelt den CancellationToken, wartet auf den
-///         Background-Task, schreibt finale WAV-Files (mic.wav + loopback.wav),
+///         (Mic + Loopback).</item>
+///   <item><see cref="StopAsync"/> wartet auf beide Captures und schreibt die
+///         finalen WAV-Files (mic.wav + loopback.wav),
 ///         aktualisiert <c>meta.md</c> mit Status <c>recorded</c> und Audio-Links,
 ///         liefert <see cref="MeetingRecordingPaths"/> fuer den Worker.</item>
-///   <item><see cref="Dispose"/> ruft <see cref="StopAsync"/> falls laufend.</item>
+///   <item><see cref="DisposeAsync"/> finalisiert eine laufende Aufnahme.</item>
 /// </list>
-///
-/// <para>
-/// Threading: NAudio erzeugt pro Capture-Stream einen eigenen internen Thread.
-/// <see cref="Start"/> startet zusaetzlich einen Coordinator-Task via <see cref="Task.Run"/>,
-/// der mit <see cref="Task.Delay(TimeSpan, CancellationToken)"/> auf das Stop-Signal wartet.
-/// Beim Cancel werden die Capture-Streams gestoppt, die WAV-Files geschrieben und
-/// das Coordinator-Task sauber beendet.
-/// </para>
 /// </summary>
 public sealed class RecordingSession : IAsyncDisposable
 {
@@ -52,11 +44,10 @@ public sealed class RecordingSession : IAsyncDisposable
     private readonly IAudioDeviceProvider _deviceProvider;
     private readonly string _meetingIdShort;
     private readonly DateTimeOffset _startedAt;
-    private readonly CancellationTokenSource _cts = new();
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
 
     private IAudioRecorder? _micRecorder;
     private IAudioRecorder? _loopbackRecorder;
-    private Task? _coordinatorTask;
     private string? _folder;
     private RecordingState _state = RecordingState.Created;
     private bool _disposed;
@@ -126,10 +117,26 @@ public sealed class RecordingSession : IAsyncDisposable
     /// </summary>
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_state != RecordingState.Created)
-            throw new InvalidOperationException($"Cannot start: state is {_state}");
+        _lifecycle.Wait();
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_state != RecordingState.Created)
+                throw new InvalidOperationException($"Cannot start: state is {_state}");
 
+            try { StartCore(); }
+            catch
+            {
+                _state = RecordingState.Failed;
+                ReleaseRecorders();
+                throw;
+            }
+        }
+        finally { _lifecycle.Release(); }
+    }
+
+    private void StartCore()
+    {
         // 1) Folder erstellen
         var storageRoot = ResolveStorageRoot(_config.StorageRoot);
         var datePart = _startedAt.ToString("yyyy-MM-dd");
@@ -149,38 +156,17 @@ public sealed class RecordingSession : IAsyncDisposable
         var micDevice = ResolveDevice(_deviceProvider.EnumerateInputDevices(),
             _config.MicDeviceId, () => _deviceProvider.GetDefaultInputDevice());
         if (micDevice == null)
-        {
-            _state = RecordingState.Failed;
             throw new InvalidOperationException("No input (microphone) device available");
-        }
         _micRecorder = _recorderFactory.Create(micDevice, format, loopback: false);
 
         var loopDevice = ResolveDevice(_deviceProvider.EnumerateLoopbackDevices(),
             _config.LoopbackDeviceId, () => _deviceProvider.GetDefaultLoopbackDevice());
         if (loopDevice == null)
-        {
-            _state = RecordingState.Failed;
             throw new InvalidOperationException("No loopback (speaker) device available");
-        }
         _loopbackRecorder = _recorderFactory.Create(loopDevice, format, loopback: true);
 
-        // 3) Recorder starten
-        try
-        {
-            _micRecorder.Start();
-            _loopbackRecorder.Start();
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "RecordingSession: failed to start NAudio captures");
-            _state = RecordingState.Failed;
-            throw;
-        }
-
-        // 4) Coordinator-Task starten (wartet auf CancellationToken)
-        _coordinatorTask = Task.Run(() => CoordinatorLoopAsync(_cts.Token));
-
-        // 5) Initiales meta.md schreiben
+        _micRecorder.Start();
+        _loopbackRecorder.Start();
         WriteInitialMetaMd();
 
         _state = RecordingState.Recording;
@@ -188,55 +174,52 @@ public sealed class RecordingSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stoppt die Aufnahme (CancellationToken-basiert). Schreibt finale WAV-Files
+    /// Stoppt die Aufnahme. Schreibt finale WAV-Files
     /// und aktualisiert meta.md auf Status <c>recorded</c> mit Audio-Links.
     /// </summary>
     public async Task<MeetingRecordingPaths> StopAsync()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_state != RecordingState.Recording)
-            throw new InvalidOperationException($"Cannot stop: state is {_state}");
-
-        _logger.Information("RecordingSession stopping: {Folder}", _folder);
-
-        // 1) CancellationToken canceln -> Coordinator-Task wirft OperationCanceledException
-        _cts.Cancel();
-
-        // 2) Coordinator-Task abwarten (max. 5 s)
-        if (_coordinatorTask != null)
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try
-            {
-                await _coordinatorTask.WaitAsync(TimeSpan.FromSeconds(5));
-            }
-            catch (OperationCanceledException) { /* erwartet */ }
-            catch (TimeoutException)
-            {
-                _logger.Warning("RecordingSession: coordinator task did not finish in 5 s");
-            }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_state != RecordingState.Recording)
+                throw new InvalidOperationException($"Cannot stop: state is {_state}");
+            return await StopCoreAsync().ConfigureAwait(false);
         }
+        finally { _lifecycle.Release(); }
+    }
 
-        // 3) Recorder stoppen und WAV-Rohdaten holen
-        var micBytes = _micRecorder?.Stop() ?? throw new InvalidOperationException("Mic recorder null");
-        var loopBytes = _loopbackRecorder?.Stop() ?? throw new InvalidOperationException("Loopback recorder null");
+    private async Task<MeetingRecordingPaths> StopCoreAsync()
+    {
+        try
+        {
+            _logger.Information("RecordingSession stopping: {Folder}", _folder);
+            // Stop both streams near-simultaneously and wait for both even if one fails.
+            var micStop = Task.Run(_micRecorder!.Stop);
+            var loopStop = Task.Run(_loopbackRecorder!.Stop);
+            var wavs = await Task.WhenAll(micStop, loopStop).ConfigureAwait(false);
 
-        // 4) WAV-Files schreiben
-        if (_folder == null) throw new InvalidOperationException("Folder not initialized");
-        var micPath = Path.Combine(_folder, "mic.wav");
-        var loopPath = Path.Combine(_folder, "loopback.wav");
-        var metaPath = Path.Combine(_folder, "meta.md");
-        await File.WriteAllBytesAsync(micPath, micBytes);
-        await File.WriteAllBytesAsync(loopPath, loopBytes);
+            var folder = _folder!;
+            var micPath = Path.Combine(folder, "mic.wav");
+            var loopPath = Path.Combine(folder, "loopback.wav");
+            var metaPath = Path.Combine(folder, "meta.md");
+            await File.WriteAllBytesAsync(micPath, wavs[0]).ConfigureAwait(false);
+            await File.WriteAllBytesAsync(loopPath, wavs[1]).ConfigureAwait(false);
 
-        // 5) meta.md auf Status "recorded" aktualisieren mit Audio-Links
-        var endedAt = DateTimeOffset.Now;
-        UpdateMetaMdRecorded(endedAt);
+            UpdateMetaMdRecorded(DateTimeOffset.Now);
+            _state = RecordingState.Recorded;
+            _logger.Information("RecordingSession recorded: {Mic} ({MicBytes} B), {Loop} ({LoopBytes} B)",
+                micPath, wavs[0].Length, loopPath, wavs[1].Length);
 
-        _state = RecordingState.Recorded;
-        _logger.Information("RecordingSession recorded: {Mic} ({MicBytes} B), {Loop} ({LoopBytes} B)",
-            micPath, micBytes.Length, loopPath, loopBytes.Length);
-
-        return new MeetingRecordingPaths(_folder, micPath, loopPath, metaPath);
+            return new MeetingRecordingPaths(folder, micPath, loopPath, metaPath);
+        }
+        catch
+        {
+            _state = RecordingState.Failed;
+            throw;
+        }
+        finally { ReleaseRecorders(); }
     }
 
     /// <summary>
@@ -245,18 +228,14 @@ public sealed class RecordingSession : IAsyncDisposable
     /// </summary>
     public Task<MeetingRecordingPaths> ForceStopAsync() => StopAsync();
 
-    private async Task CoordinatorLoopAsync(CancellationToken ct)
+    private void ReleaseRecorders()
     {
-        try
-        {
-            await Task.Delay(Timeout.Infinite, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            // Erwartetes Cancel-Signal vom StopAsync
-        }
-        // Wir machen hier nichts weiteres — die WAV-Files werden in StopAsync geschrieben
-        await Task.CompletedTask;
+        try { _micRecorder?.Dispose(); }
+        catch (Exception ex) { _logger.Warning(ex, "RecordingSession: microphone disposal failed"); }
+        try { _loopbackRecorder?.Dispose(); }
+        catch (Exception ex) { _logger.Warning(ex, "RecordingSession: loopback disposal failed"); }
+        _micRecorder = null;
+        _loopbackRecorder = null;
     }
 
     private void WriteInitialMetaMd()
@@ -339,7 +318,7 @@ public sealed class RecordingSession : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(configured)) configured = "audio";
         if (Path.IsPathRooted(configured)) return configured;
-        return Path.Combine(AppContext.BaseDirectory, configured);
+        return AiRecall.Core.Configuration.AppPaths.ResolveDataPath(configured);
     }
 
     private static AudioDeviceInfo? ResolveDevice(
@@ -368,18 +347,18 @@ public sealed class RecordingSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        if (_state == RecordingState.Recording)
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try { await StopAsync(); }
-            catch (Exception ex) { _logger.Warning(ex, "RecordingSession.DisposeAsync: StopAsync failed"); }
+            if (_disposed) return;
+            if (_state == RecordingState.Recording)
+            {
+                try { await StopCoreAsync().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.Warning(ex, "RecordingSession.DisposeAsync: Stop failed"); }
+            }
+            _disposed = true;
         }
-
-        _micRecorder?.Dispose();
-        _loopbackRecorder?.Dispose();
-        _cts.Dispose();
+        finally { _lifecycle.Release(); }
     }
 }
 
@@ -399,39 +378,18 @@ public sealed class WasapiAudioRecorderFactory : IAudioRecorderFactory
 {
     public IAudioRecorder Create(AudioDeviceInfo device, AudioFormat format, bool loopback)
     {
-        var enumerator = new MMDeviceEnumerator();
+        using var enumerator = new MMDeviceEnumerator();
+        var endpoint = enumerator.GetDevice(device.DeviceId);
         try
         {
-            MMDevice mm;
-            if (loopback)
-            {
-                var renderDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-                try
-                {
-                    mm = renderDevices.First(d => string.Equals(d.ID, device.DeviceId, StringComparison.OrdinalIgnoreCase));
-                }
-                finally
-                {
-                    foreach (var d in renderDevices.Where(d => d.ID != device.DeviceId)) d.Dispose();
-                }
-            }
-            else
-            {
-                var captureDevices = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
-                try
-                {
-                    mm = captureDevices.First(d => string.Equals(d.ID, device.DeviceId, StringComparison.OrdinalIgnoreCase));
-                }
-                finally
-                {
-                    foreach (var d in captureDevices.Where(d => d.ID != device.DeviceId)) d.Dispose();
-                }
-            }
-            return new WasapiAudioRecorder(mm, format, loopback);
+            var flow = loopback ? DataFlow.Render : DataFlow.Capture;
+            if (endpoint.DataFlow != flow || endpoint.State != DeviceState.Active)
+                throw new InvalidOperationException($"Audio endpoint {device.DeviceId} is not active for {flow}");
+            return new WasapiAudioRecorder(endpoint, format, loopback);
         }
         catch
         {
-            enumerator.Dispose();
+            endpoint.Dispose();
             throw;
         }
     }

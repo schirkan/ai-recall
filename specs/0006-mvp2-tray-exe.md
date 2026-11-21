@@ -22,8 +22,8 @@ erhalten, wird aber vom MVP1-Standalone-Mode zum reinen Worker-Mode
 
 ### Neues Projekt
 
-- **`AiRecall.TrayApp`** (WinForms, .NET 8 `net8.0-windows`)
-- Output: `bin/Debug/net8.0-windows/AiRecall.TrayApp.exe`
+- **`AiRecall.TrayApp`** (WinForms, .NET 10 `net10.0-windows`)
+- Output: `bin/Debug/net10.0-windows/AiRecall.TrayApp.exe`
 - Startet im Hintergrund, NotifyIcon erscheint im System-Tray
 - **In-process**: referenziert `AiRecall.Trigger` und instanziiert `ITriggerService` direkt
 - Beim Quit: `ITriggerService.Dispose()` sauber

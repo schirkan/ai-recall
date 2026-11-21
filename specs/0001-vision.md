@@ -43,7 +43,7 @@ Word, Excel, Browser).
 - **App Reader:** Browser-Content, Outlook-Mails, OneNote-Pages,
   Teams-Chats, Word/Excel → MD
 - **Persistenz:** `capture/`-Ordner (Screenshots + MD mit YAML-Frontmatter)
-- **Tech:** C# / .NET 8, DLL-Kern + CLI
+- **Tech:** C# / .NET 10, DLL-Kern + CLI
 - **Konfig:** JSON
 
 ### MVP 2 — Tray-Icon-EXE ✅ (vor Reshuffle „Auto-Meetings")
@@ -60,7 +60,7 @@ Word, Excel, Browser).
 
 - Teams-Meeting-Anwesenheitserkennung via `MeetingPresencePoller`
 - Zweikanaliges Audio-Recording (Mic + Speaker-Loopback)
-  via NAudio.Wasapi 2.2.1
+  via NAudio.Wasapi
 - Stereo-Concatenation als Pre-Processing
 - Transkription mit Diarization (Azure Speech + Deepgram, parallel
   implementiert per Martin-Direktive Update 3)

@@ -37,6 +37,7 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
 
     private TeamsConfig? _cfg;
     private DateTimeOffset? _pendingStartAt;
+    private string? _activeChatIdShort;
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private int _disposed;
@@ -108,8 +109,11 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
         if (Volatile.Read(ref _disposed) == 1) throw new ObjectDisposedException(nameof(MeetingPresencePoller));
         if (IsRunning) throw new InvalidOperationException("Poller laeuft bereits.");
 
+        _cts?.Dispose();
         _cfg = cfg;
         _pendingStartAt = null;
+        _activeChatIdShort = null;
+        Current = null;
         IsActive = false;
 
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -157,6 +161,7 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
                     continue;
                 }
 
+                stoppingCt.ThrowIfCancellationRequested();
                 Current = snap;
                 Evaluate(snap);
 
@@ -220,13 +225,21 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
 
     private void FireChanged(MeetingPresenceSnapshot snap, bool isActive)
     {
-        if (!isActive) IsActive = false;
+        // An inactive probe result has no chat ID. Use the ID from the
+        // confirmed start so MeetingTrigger can stop that exact recording.
+        if (isActive)
+            _activeChatIdShort = snap.ChatIdShort ?? Guid.NewGuid().ToString("N")[..8];
         var args = new MeetingPresenceStateChangedEventArgs(
             IsActive: isActive,
             Topic: isActive ? snap.Topic : null,
             WindowTitle: isActive ? snap.WindowTitle : null,
-            ChatIdShort: isActive ? snap.ChatIdShort : null,
+            ChatIdShort: _activeChatIdShort,
             DetectedAt: _clock.UtcNow);
+        if (!isActive)
+        {
+            IsActive = false;
+            _activeChatIdShort = null;
+        }
         _logger?.Information(
             "MeetingPresencePoller: PresenceChanged isActive={IsActive} topic={Topic} chatIdShort={ChatIdShort}",
             isActive, args.Topic, args.ChatIdShort);
@@ -253,6 +266,7 @@ public sealed class MeetingPresencePoller : IAsyncDisposable
             _cts = null;
             _loopTask = null;
             _cfg = null;
+            await _ticker.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

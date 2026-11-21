@@ -2,7 +2,7 @@
 
 > **Status:** Draft v0.2 (2026-07-02) — Architektur + Trigger präzisiert
 > **Owner:** Martin
-> **Tech-Stack:** C# / .NET 8 (`net8.0-windows`)
+> **Tech-Stack:** C# / .NET 10 (`net10.0-windows`)
 > **Lizenz:** MIT
 > **Zielgruppe:** Personal (Martin)
 
@@ -79,33 +79,33 @@
 ```
 AiRecall.sln
 ├── src/
-│   ├── AiRecall.Core/                  (net8.0-windows, Klassenbibliothek)
+│   ├── AiRecall.Core/                  (net10.0-windows, Klassenbibliothek)
 │   │   ├── Models/                     (CaptureItem, WindowInfo, MailItem, …)
 │   │   ├── Configuration/              (JsonConfig, IConfigProvider)
 │   │   ├── Persistence/                (CaptureWriter, MD-Formatter, Hash)
 │   │   └── Util/                       (Logging)
 │   │
-│   ├── AiRecall.ScreenCapture/         (net8.0-windows, DLL — zentral)
+│   ├── AiRecall.ScreenCapture/         (net10.0-windows, DLL — zentral)
 │   │   ├── Windows/                    (EnumWindows, Active Window)
 │   │   ├── Screenshot/                 (GDI+ Capture)
 │   │   ├── Trigger/                    (EventDetector, Throttle, Dedup)
 │   │   └── Text/                       (OCR + UIA)
 │   │
-│   ├── AiRecall.AppReader.Base/        (net8.0-windows, DLL — Basisklassen)
+│   ├── AiRecall.AppReader.Base/        (net10.0-windows, DLL — Basisklassen)
 │   │   ├── IAppReader.cs
 │   │   ├── AppReaderBase.cs
 │   │   └── ContentExtractor.cs
 │   │
-│   ├── AiRecall.AppReader.Browser/     (net8.0-windows, DLL — Chrome/Edge/FF)
-│   ├── AiRecall.AppReader.Outlook/     (net8.0-windows, DLL — Classic Outlook)
-│   ├── AiRecall.AppReader.Documents/   (net8.0-windows, DLL — Word + Excel)
+│   ├── AiRecall.AppReader.Browser/     (net10.0-windows, DLL — Chrome/Edge/FF)
+│   ├── AiRecall.AppReader.Outlook/     (net10.0-windows, DLL — Classic Outlook)
+│   ├── AiRecall.AppReader.Documents/   (net10.0-windows, DLL — Word + Excel)
 │   │
-│   └── AiRecall.Cli/                   (net8.0-windows, Konsolen-App)
+│   └── AiRecall.Cli/                   (net10.0-windows, Konsolen-App)
 │       └── Commands/                   (list-windows, active-window, read-*)
 │
 └── tests/
-    ├── AiRecall.Core.Tests/            (net8.0-windows)
-    └── AiRecall.Integration.Tests/     (net8.0-windows)
+    ├── AiRecall.Core.Tests/            (net10.0-windows)
+    └── AiRecall.Integration.Tests/     (net10.0-windows)
 ```
 
 ### Abhängigkeiten

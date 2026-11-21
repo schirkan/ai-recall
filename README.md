@@ -3,7 +3,9 @@
 > Lokales, persönliches „Recall"-Tool für Windows — Screenshot-basiertes
 > Memory für Bildschirmarbeit, Mails, Dokumente und (später) Meetings.
 
-⚠️ **Status:** MVP1 + MVP2 + MVP3 v1.0 abgeschlossen. Specs in [`specs/`](./specs/). Kein offizielles Release. **829/829 Tests grün stabil** (Stand 2026-07-15).
+**Status:** MVP1 + MVP2 + MVP3 verfügbar. Details: [Specs](./specs/) und [GitHub-Releases](https://github.com/schirkan/ai-recall/releases).
+
+Die aktuelle Windows-x64-Distribution enthält eine einzelne `AiRecall.TrayApp.exe`. Sie benötigt die [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0). Die EXE entpackt ihre gebündelten DLLs beim Start automatisch; Tesseract-Sprachdaten bleiben separat.
 
 ## Vision
 
@@ -26,7 +28,7 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
   strukturierten Content statt OCR-Fallback:
   - **Browser** (Edge, Chrome, Firefox via CDP): Tab-Titel + URL via UIA,
     optional reichhaltiger via Chrome DevTools Protocol (CDP opt-in),
-    HTML→MD via `ReverseMarkdown` mit allen 8 Feldern 1:1-konfigurierbar
+    HTML→MD via `ReverseMarkdown` mit acht konfigurierbaren Markdown-Optionen
   - **Notepad**: Buffer + Dateiname via Win32 `WM_GETTEXT`
   - **Explorer**: aktueller Pfad aus Fenster-Titel (Hyphen/En-Dash/Em-Dash-tolerant)
   - **Outlook** ([Spec 0004 Iter. 3](./specs/0004-app-reader.md#iter-3-2026-07-05--outlook-app-reader--mail-log-martin--pia)):
@@ -76,19 +78,20 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
 - ✅ **MVP3 Audio Notes** ([Spec 0013](./specs/0013-audio-notes-mvp3.md), v0.3 Update 8 abgeschlossen 2026-07-09):
   - Teams-Meeting-Polling (`MeetingPresencePoller`, 5-s-Intervall, Edge-Detection,
     Start-Debounce `MinMeetingDurationSeconds=30s`)
-  - Zweikanaliges Audio-Recording (Mic + Speaker-Loopback via NAudio.Wasapi 2.2.1)
+  - Zweikanaliges Audio-Recording (Mic + Speaker-Loopback via NAudio.Wasapi)
   - Stereo-Concatenation (`combined-stereo.wav` als Pre-Processing für die
     Provider — Azure Speech + Deepgram parallel)
   - Background-Transkription mit Diarization (`TranscriptionWorker`, analog
     `ConversionWorker`-Pattern aus Spec 0007: Channel + Counter + Recovery-Scan)
   - Beide Provider implementiert (Martin-Direktive Update 3): Azure Speech
-    (`Microsoft.CognitiveServices.Speech 1.40.0`, Speaker-Label `C0-S1`) +
+    (`Microsoft.CognitiveServices.Speech`, Speaker-Label `C0-S1`) +
     Deepgram REST (`/v1/listen?model=nova-2&language=…&diarize=true&smart_format=true`)
   - `TranscriptionConnectionTester` (1-s-Silent-Audio → Provider →
     `ConnectionTestResult`) für Settings-Dialog „Test Connection"
   - Privacy-First: Auto-Recording nur wenn `audio.enabled=true` UND
     `appReader.teams.autoRecordMeetings=true` UND `appReader.teams.enabled=true`;
-    sonst `null` (kein Trigger, kein Background-Task)
+    sonst kein Teams-Polling. Manuelle Aufnahmen benötigen nur `audio.enabled=true`.
+    Audio bleibt lokal, solange `transcription.enabled=false` ist.
   - Trigger-Wiring: `TriggerService` integriert `MeetingTrigger` analog zum
     bestehenden `ConversionWorker`-Pattern (optional ctor-Param +
     `_ownsMeetingTrigger`-Flag)
@@ -101,7 +104,7 @@ Details: [`specs/0001-vision.md`](./specs/0001-vision.md)
 ### Voraussetzungen
 
 - Windows 10/11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (8.0.422 oder höher im 8.0.x-Band)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (ab 10.0.402, gemäß `global.json`; [Paketversionen und Build-Verifikation](specs/0018-dotnet-10-migration.md))
 
 ### Build + erster Smoke-Test
 
@@ -122,7 +125,7 @@ Capture landet in `capture/<yyyy-MM-dd>/<process>/<HHmmss-fff>-<title>.{png,md}`
 
 ### OCR aktivieren (einmalig)
 
-1. `tessdata/`-Ordner neben der Exe anlegen (Standard: `src/AiRecall.Cli/bin/Debug/net8.0-windows/tessdata/`)
+1. `tessdata/`-Ordner neben der Exe anlegen (Standard: `src/AiRecall.Cli/bin/Debug/net10.0-windows/tessdata/`)
 2. Von <https://github.com/tesseract-ocr/tessdata_fast> herunterladen:
    - `deu.traineddata`
    - `eng.traineddata`
@@ -131,7 +134,7 @@ Capture landet in `capture/<yyyy-MM-dd>/<process>/<HHmmss-fff>-<title>.{png,md}`
    **PowerShell-One-Liner** für beide Sprachen:
 
    ```powershell
-   $td = 'src\AiRecall.Cli\bin\Debug\net8.0-windows\tessdata'
+   $td = 'src\AiRecall.Cli\bin\Debug\net10.0-windows\tessdata'
    New-Item -ItemType Directory -Force -Path $td | Out-Null
    Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/deu.traineddata' -OutFile (Join-Path $td 'deu.traineddata')
    Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata' -OutFile (Join-Path $td 'eng.traineddata')

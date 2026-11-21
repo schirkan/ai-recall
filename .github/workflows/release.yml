@@ -1,8 +1,8 @@
-# GitHub Actions Workflow — Spec 0015 CI/CD Release-Pipeline
+# GitHub Actions Workflow — Spec 0017 CI/CD Release-Pipeline
 # Trigger: Tag-Push mit Pattern 'v*' (z. B. v0.1.0-rc1, v1.0.0)
 # Plattform: GitHub Actions
-# Runner:    windows-latest (net8.0-windows erfordert Win32)
-# Spec:      specs/0015-ci-cd-release-pipeline.md
+# Runner:    windows-latest (net10.0-windows erfordert Win32)
+# Spec:      specs/0017-ci-cd-release-pipeline.md
 
 name: Release
 
@@ -30,10 +30,10 @@ jobs:
         with:
           fetch-depth: 0           # volle Historie fuer Release-Notes
 
-      - name: Setup .NET 8
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x    # global.json pinnt auf 8.0.422; 8.0.x = latestFeature-Rollforward
+          global-json-file: global.json
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -52,25 +52,30 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build --logger trx --logger "console;verbosity=normal"
 
-      - name: Publish TrayApp
-        run: dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -o publish/AiRecall.TrayApp --no-build
+      - name: Publish TrayApp (Windows x64 single EXE)
+        run: dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:PublishProfile=WinX64SingleFile -o publish/AiRecall.TrayApp
 
-      - name: Determine version
-        id: version
+      - name: Verify published EXE
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag.TrimStart('v')
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Tag: $tag"
-          Write-Host "Version: $version"
+          $files = @(Get-ChildItem publish/AiRecall.TrayApp -Recurse -File)
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'AiRecall.TrayApp.exe') {
+            throw 'Publish must contain exactly one AiRecall.TrayApp.exe'
+          }
+          $env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = Join-Path $env:RUNNER_TEMP 'ai-recall-bundle-smoke'
+          $stdout = Join-Path $env:RUNNER_TEMP 'ai-recall-smoke.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'ai-recall-smoke.err'
+          $process = Start-Process -FilePath $files[0].FullName -ArgumentList '--verify-package' -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Get-Content $stdout, $stderr
+          if ($process.ExitCode -ne 0) { throw "Package smoke test failed: $($process.ExitCode)" }
 
       - name: ZIP publish output
         shell: pwsh
         run: |
-          $version = "${{ steps.version.outputs.version }}"
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $version = $version -replace '[^a-zA-Z0-9.+-]', '-'
           $zipName = "AiRecall-$version-win-x64.zip"
-          Compress-Archive -Path "publish/AiRecall.TrayApp/*" -DestinationPath $zipName -Force
+          Compress-Archive -LiteralPath 'publish/AiRecall.TrayApp/AiRecall.TrayApp.exe' -DestinationPath $zipName -CompressionLevel Optimal -Force
           Write-Host "Created: $zipName"
           Get-Item $zipName | Format-List Name, Length, LastWriteTime
 

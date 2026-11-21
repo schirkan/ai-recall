@@ -37,6 +37,7 @@ Aliases: `aw`
    - Mit `--hwnd`: `WindowInfoLookup.Get(hwnd)` (prüft via `IsWindow`)
    - Sonst: `ActiveWindowDetector.GetActive()` (`GetForegroundWindow` + Process-Info + Bounds)
 4. Ignore-Check via `IgnoreMatcher` (siehe 0002 §"Trigger-Pipeline")
+   - Prozess und Fenstertitel vor dem Screenshot prüfen. Bekannte URLs aus dem App-Reader vor OCR und vor jeder Capture-Persistenz prüfen. Ohne URL (z. B. bei deaktiviertem Reader) bleiben Prozess- und Titelfilter wirksam.
    - Treffer → Skip + Log + Exit 0 (außer `--include-ignored`)
 5. Screenshot via `WindowScreenshot.CapturePng(window)`:
    - Win32 `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`

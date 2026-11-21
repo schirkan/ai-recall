@@ -255,18 +255,18 @@ public class BrowserAppReaderTests
     public void BuildConverter_EmptySettings_PreservesLibraryDefaults()
     {
         // Bei komplett leerem MarkdownSettings darf KEIN Config-Wert überschrieben werden.
-        // Defaults der Library v3.13 sind hier dokumentiert (per Reflection verifiziert).
+        // Defaults der Library v6.3 sind hier dokumentiert (per Reflection verifiziert).
         var converter = BrowserAppReader.BuildConverter(new MarkdownSettings());
         var cfg = converter.Config;
 
-        Assert.False(cfg.RemoveComments);   // Library-Default
-        Assert.Equal('-', cfg.ListBulletChar); // Library-Default
+        Assert.False(cfg.Formatting.RemoveComments);   // Library-Default
+        Assert.Equal('-', cfg.Formatting.ListBulletChar); // Library-Default
         Assert.False(cfg.GithubFlavored);
-        Assert.False(cfg.SmartHrefHandling);
-        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.UnknownTags);
-        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.Default, cfg.TableWithoutHeaderRowHandling);
-        Assert.Null(cfg.DefaultCodeBlockLanguage);
-        Assert.Null(cfg.WhitelistUriSchemes);
+        Assert.False(cfg.Links.SmartHref);
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.Tags.Unknown);
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.Default, cfg.Tables.WithoutHeaderRow);
+        Assert.Null(cfg.Formatting.DefaultCodeBlockLanguage);
+        Assert.Empty(cfg.Links.WhitelistedSchemes);
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public class BrowserAppReaderTests
         {
             UnknownTags = "Drop",
             GithubFlavored = true,
-            RemoveComments = false,
+            RemoveComments = true,
             WhitelistUriSchemes = new() { "https", "mailto" },
             SmartHrefHandling = true,
             TableWithoutHeaderRowHandling = "EmptyRow",
@@ -285,14 +285,14 @@ public class BrowserAppReaderTests
         };
         var cfg = BrowserAppReader.BuildConverter(s).Config;
 
-        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.UnknownTags);
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.Tags.Unknown);
         Assert.True(cfg.GithubFlavored);
-        Assert.False(cfg.RemoveComments);
-        Assert.Equal(new[] { "https", "mailto" }, cfg.WhitelistUriSchemes);
-        Assert.True(cfg.SmartHrefHandling);
-        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.TableWithoutHeaderRowHandling);
-        Assert.Equal('+', cfg.ListBulletChar);
-        Assert.Equal("bash", cfg.DefaultCodeBlockLanguage);
+        Assert.True(cfg.Formatting.RemoveComments);
+        Assert.True(cfg.Links.WhitelistedSchemes.SetEquals(new[] { "https", "mailto" }));
+        Assert.True(cfg.Links.SmartHref);
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.Tables.WithoutHeaderRow);
+        Assert.Equal('+', cfg.Formatting.ListBulletChar);
+        Assert.Equal("bash", cfg.Formatting.DefaultCodeBlockLanguage);
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public class BrowserAppReaderTests
     {
         var s = new MarkdownSettings { UnknownTags = "drop" }; // lowercase
         var cfg = BrowserAppReader.BuildConverter(s).Config;
-        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.UnknownTags);
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.Drop, cfg.Tags.Unknown);
     }
 
     [Fact]
@@ -309,7 +309,7 @@ public class BrowserAppReaderTests
         // Ungültiger String → kein Override → Library-Default bleibt.
         var s = new MarkdownSettings { UnknownTags = "NotAValidOption" };
         var cfg = BrowserAppReader.BuildConverter(s).Config;
-        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.UnknownTags);
+        Assert.Equal(ReverseMarkdown.Config.UnknownTagsOption.PassThrough, cfg.Tags.Unknown);
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public class BrowserAppReaderTests
     {
         var s = new MarkdownSettings { TableWithoutHeaderRowHandling = "emptyrow" };
         var cfg = BrowserAppReader.BuildConverter(s).Config;
-        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.TableWithoutHeaderRowHandling);
+        Assert.Equal(ReverseMarkdown.Config.TableWithoutHeaderRowHandlingOption.EmptyRow, cfg.Tables.WithoutHeaderRow);
     }
 
     [Fact]
@@ -326,16 +326,17 @@ public class BrowserAppReaderTests
         // Auch wenn der String mehrere Zeichen enthält, wird nur das erste übernommen.
         var s = new MarkdownSettings { ListBulletChar = "->" };
         var cfg = BrowserAppReader.BuildConverter(s).Config;
-        Assert.Equal('-', cfg.ListBulletChar);
+        Assert.Equal('-', cfg.Formatting.ListBulletChar);
     }
 
     [Fact]
-    public void BuildConverter_WhitelistUriSchemes_EmptyList_OverridesDefault()
+    public void BuildConverter_WhitelistUriSchemes_EmptyList_DoesNotFilterLinks()
     {
-        // Leere Liste soll die Whitelist komplett leeren (nicht Default lassen).
         var s = new MarkdownSettings { WhitelistUriSchemes = new() };
-        var cfg = BrowserAppReader.BuildConverter(s).Config;
-        Assert.Empty(cfg.WhitelistUriSchemes);
+        var converter = BrowserAppReader.BuildConverter(s);
+        Assert.Empty(converter.Config.Links.WhitelistedSchemes);
+        Assert.Contains("[Download](ftp://example.test/file)",
+            converter.Convert("<a href=\"ftp://example.test/file\">Download</a>"));
     }
 
     [Fact]

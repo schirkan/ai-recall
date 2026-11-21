@@ -226,7 +226,7 @@ public sealed class CdpConfig
 }
 
 /// <summary>
-/// 1:1-Konfiguration für <c>ReverseMarkdown.Config</c> (v3.13). Alle Felder sind optional.
+/// Optionale ReverseMarkdown-Einstellungen mit stabilen JSON-Namen.
 /// Ungesetzte Felder werden nicht in den Converter geschrieben → die Library-Defaults
 /// bleiben erhalten. Enums werden als Strings in JSON erwartet (case-insensitive).
 /// </summary>
@@ -245,16 +245,16 @@ public sealed class MarkdownSettings
     [JsonPropertyName("githubFlavored")]
     public bool? GithubFlavored { get; set; }
 
-    /// <summary>HTML-Kommentare vor Konvertierung entfernen. Default: <c>true</c>.</summary>
-    [Description("HTML-Kommentare vor Konvertierung entfernen. null = Library-Default (true).")]
+    /// <summary>HTML-Kommentare vor Konvertierung entfernen. Library-Default: <c>false</c>.</summary>
+    [Description("HTML-Kommentare vor Konvertierung entfernen. null = Library-Default (false).")]
     [JsonPropertyName("removeComments")]
     public bool? RemoveComments { get; set; }
 
     /// <summary>
-    /// Erlaubte URI-Schemes für <c>&lt;a href&gt;</c>. Default in der Library:
-    /// <c>{"http", "https", "ftp", "ftps", "mailto", "tel"}</c>.
+    /// Erlaubte URI-Schemes für <c>&lt;a href&gt;</c>. Null oder eine leere Liste
+    /// aktiviert keine Scheme-Whitelist.
     /// </summary>
-    [Description("Erlaubte URI-Schemes fuer <a href>. null = Library-Default.")]
+    [Description("Erlaubte URI-Schemes fuer <a href>. Null oder leer = keine Scheme-Whitelist.")]
     [JsonPropertyName("whitelistUriSchemes")]
     public List<string>? WhitelistUriSchemes { get; set; }
 
@@ -274,9 +274,9 @@ public sealed class MarkdownSettings
 
     /// <summary>
     /// Bullet-Character für unsortierte Listen. Als einzelnes Zeichen oder String;
-    /// bei leerem Wert fällt die Library auf <c>'*'</c> zurück.
+    /// bei leerem Wert fällt die Library auf <c>'-'</c> zurück.
     /// </summary>
-    [Description("Bullet-Character fuer unsortierte Listen. Leer = Library-Default ('*').")]
+    [Description("Bullet-Character fuer unsortierte Listen. Leer = Library-Default ('-').")]
     [JsonPropertyName("listBulletChar")]
     public string? ListBulletChar { get; set; }
 

@@ -127,6 +127,44 @@ public class TriggerSupervisorTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Restart_WhileStopped_AppliesConfigWithoutStarting(bool previouslyRunning)
+    {
+        var (s, factory) = MakeSupervisor();
+        using (s)
+        {
+            if (previouslyRunning)
+            {
+                s.Start(MinimalConfig());
+                s.Stop();
+            }
+
+            var newConfig = MinimalConfig();
+            s.Restart(newConfig);
+
+            Assert.Equal(TriggerState.Stopped, s.State);
+            Assert.Same(newConfig, s.CurrentConfig);
+            Assert.Equal(previouslyRunning ? 1 : 0, factory.CallCount);
+        }
+    }
+
+    [Fact]
+    public void Start_AfterStop_DisposesPreviousService()
+    {
+        var (s, factory) = MakeSupervisor();
+        using (s)
+        {
+            s.Start(MinimalConfig());
+            var first = factory.LastCreated;
+            s.Stop();
+            s.Start(MinimalConfig());
+            Assert.True(first.DisposeCalled);
+            Assert.Equal(TriggerState.Running, s.State);
+        }
+    }
+
     [Fact]
     public void Restart_NullConfig_Throws()
     {

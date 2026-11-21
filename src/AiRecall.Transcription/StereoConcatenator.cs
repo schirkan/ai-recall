@@ -62,8 +62,7 @@ public sealed class StereoConcatenator
         var stereoFormat = WaveFormat.CreateIeeeFloatWaveFormat(mic.WaveFormat.SampleRate, 2);
         using var writer = new WaveFileWriter(stereoPath, stereoFormat);
 
-        // NAudio 2.x: kein direkter Read(float[], ...) auf WaveFileReader —
-        // ToSampleProvider() konvertiert automatisch PCM/IEEE → float.
+        // ToSampleProvider konvertiert PCM und IEEE-Float in einheitliche Float-Samples.
         var micSamples = mic.ToSampleProvider();
         var loopSamples = loop.ToSampleProvider();
 
@@ -71,9 +70,9 @@ public sealed class StereoConcatenator
         var micBuf = new float[mic.WaveFormat.SampleRate / 10];
         var loopBuf = new float[mic.WaveFormat.SampleRate / 10];
         int read;
-        while ((read = micSamples.Read(micBuf, 0, micBuf.Length)) > 0)
+        while ((read = micSamples.Read(micBuf)) > 0)
         {
-            int loopRead = loopSamples.Read(loopBuf, 0, read);
+            int loopRead = loopSamples.Read(loopBuf.AsSpan(0, read));
             if (loopRead != read)
             {
                 throw new InvalidOperationException(

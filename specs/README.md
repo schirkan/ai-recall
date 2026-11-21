@@ -17,6 +17,8 @@
 | [0013](0013-audio-notes-mvp3.md) | **MVP 3 Audio Notes**                | ✅ **abgeschlossen v1.0 (2026-07-09)** — Teams-Meeting-Detection + 2-Kanal-Audio + Diarization-Transkription |
 | [0015](0015-default-credentials-for-downloads.md) | Default-Credentials für HTTP-Downloads | ✅ **abgeschlossen (2026-07-15)** — `HttpClientFactory.CreateDefaultHandler()` für NTLM/Kerberos-Proxy-Auth |
 | [0016](0016-first-run-settings-dialog.md) | First-Run Settings-Dialog        | ✅ **abgeschlossen (2026-07-15)** — Settings-Dialog automatisch beim ersten Start (vor Tessdata-Dialog) |
+| [0017](0017-ci-cd-release-pipeline.md) | CI/CD Release-Pipeline | Implementiert |
+| [0018](0018-dotnet-10-migration.md) | .NET 10 und NuGet-Paketpflege | Implementiert, integrierter Test im Gesamtvorhaben |
 
 ## Konvention
 

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -20,10 +20,17 @@
   <ItemGroup>
     <ProjectReference Include="..\AiRecall.Core\AiRecall.Core.csproj" />
     <ProjectReference Include="..\AiRecall.Trigger\AiRecall.Trigger.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Browser\AiRecall.AppReader.Browser.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Documents\AiRecall.AppReader.Documents.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Explorer\AiRecall.AppReader.Explorer.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Notepad\AiRecall.AppReader.Notepad.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.OneNote\AiRecall.AppReader.OneNote.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Outlook\AiRecall.AppReader.Outlook.csproj" />
+    <ProjectReference Include="..\AiRecall.AppReader.Pdf\AiRecall.AppReader.Pdf.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Serilog" Version="3.1.1" />
-    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
   <!--
@@ -78,7 +85,16 @@
     Build-Schritt aus, daher feuert PostBuildRuntimesTrim dort NICHT
     (nur dieser Target laeuft).
   -->
-  <Target Name="PostPublishRuntimesTrim" AfterTargets="Publish">
+  <!-- Filter before bundle creation: post-publish deletion cannot remove entries from the EXE. -->
+  <Target Name="TrimWinX64BundleAssets" AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(PublishSingleFile)' == 'true' and '$(RuntimeIdentifier)' == 'win-x64'">
+    <ItemGroup>
+      <_ExcludedBundleAsset Include="@(ResolvedFileToPublish)"
+        Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '(?i)(^x86[/\\]|[.]pdb$)'))" />
+      <ResolvedFileToPublish Remove="@(_ExcludedBundleAsset)" />
+    </ItemGroup>
+  </Target>
+  <Target Name="PostPublishRuntimesTrim" AfterTargets="Publish" Condition="'$(PublishSingleFile)' != 'true'">
     <PropertyGroup>
       <_PublishRuntimesDir>$(PublishDir)runtimes</_PublishRuntimesDir>
       <_KeepRid>win-x64</_KeepRid>

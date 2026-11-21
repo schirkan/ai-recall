@@ -1,5 +1,7 @@
 using System.Threading.Channels;
+using AiRecall.AppReader.Base;
 using AiRecall.Core.Configuration;
+using AiRecall.Core.Models;
 using AiRecall.Trigger;
 using Serilog;
 using Serilog.Core;
@@ -16,6 +18,88 @@ public class TriggerWorkerTests
             .MinimumLevel.Is(LogEventLevel.Verbose)
             .WriteTo.Sink(new NullSink())
             .CreateLogger();
+
+    private static WindowInfo FakeBrowser => new(new IntPtr(0x24fff), "Example tab", 42,
+        "chrome", true, new WindowRect(0, 0, 100, 100));
+
+    [Theory]
+    [InlineData(TriggerKind.Periodic, "app")]
+    [InlineData(TriggerKind.Periodic, "title")]
+    [InlineData(TriggerKind.Foreground, "app")]
+    [InlineData(TriggerKind.Foreground, "title")]
+    public void ProcessWindow_IgnoredAppOrTitle_DoesNotTakeScreenshot(TriggerKind kind, string filter)
+    {
+        var config = MakeConfig();
+        if (filter == "app") config.ScreenRecorder.IgnoreApps.Add("Chrome");
+        else config.ScreenRecorder.IgnoreWindowTitles.Add("example TAB");
+        var channel = Channel.CreateUnbounded<TriggerEvent>();
+        var logger = MakeLogger();
+        using var worker = new TriggerWorker(channel.Reader, config, logger, AppReaderRegistry.Empty(logger));
+        var window = FakeBrowser;
+        var screenshots = 0;
+
+        worker.ProcessWindow(new(window.Handle, kind, DateTimeOffset.Now), window, null,
+            _ => { screenshots++; return [1]; }, CancellationToken.None);
+
+        Assert.Equal(0, screenshots);
+        Assert.Equal(1, worker.BlacklistCount);
+    }
+
+    [Fact]
+    public void ProcessWindow_IgnoredBrowserUrl_DoesNotPersistAnyCapture()
+    {
+        var config = MakeConfig();
+        config.Capture.RootPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        config.ScreenRecorder.IgnoreUrls.Add("private.example");
+        var logger = MakeLogger();
+        var registry = AppReaderRegistry.FromReaders([new BrowserStub(_ =>
+            new("", "Generic title", "url", "Browser stub", "1", new Dictionary<string, string>
+            {
+                ["url"] = "https://private.example/"
+            }))], logger);
+        using var worker = new TriggerWorker(Channel.CreateUnbounded<TriggerEvent>().Reader, config, logger, registry);
+        var window = FakeBrowser;
+
+        worker.ProcessWindow(new(window.Handle, TriggerKind.Periodic, DateTimeOffset.Now), window, null,
+            _ => Guid.NewGuid().ToByteArray(), CancellationToken.None);
+
+        Assert.False(Directory.Exists(config.Capture.RootPath));
+        Assert.Equal(1, worker.BlacklistCount);
+        Assert.Equal(0, worker.CaptureCount);
+    }
+
+    [Fact]
+    public void ProcessWindow_CancelledWhileReaderIsRunning_DoesNotPersistAnyCapture()
+    {
+        var config = MakeConfig();
+        config.Capture.RootPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        using var cts = new CancellationTokenSource();
+        var logger = MakeLogger();
+        var observedToken = CancellationToken.None;
+        var registry = AppReaderRegistry.FromReaders([new BrowserStub(context =>
+        {
+            observedToken = context.CancellationToken;
+            cts.Cancel();
+            return null;
+        })], logger);
+        using var worker = new TriggerWorker(Channel.CreateUnbounded<TriggerEvent>().Reader, config, logger, registry);
+        var window = FakeBrowser;
+
+        Assert.Throws<OperationCanceledException>(() => worker.ProcessWindow(
+            new(window.Handle, TriggerKind.Foreground, DateTimeOffset.Now), window, null,
+            _ => Guid.NewGuid().ToByteArray(), cts.Token));
+        Assert.Equal(cts.Token, observedToken);
+        Assert.False(Directory.Exists(config.Capture.RootPath));
+        Assert.Equal(0, worker.CaptureCount);
+    }
+
+    private sealed class BrowserStub(Func<AppReaderContext, AppReaderResult?> read) : IAppReader
+    {
+        public IReadOnlyCollection<string> SupportedProcesses => ["chrome"];
+        public string DisplayName => "Browser stub";
+        public bool CanRead(WindowInfo window) => window.ProcessName == "chrome";
+        public AppReaderResult? Read(WindowInfo window, AppReaderContext context) => read(context);
+    }
 
     private sealed class NullSink : ILogEventSink
     {

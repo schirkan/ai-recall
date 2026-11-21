@@ -41,7 +41,7 @@ public class StereoConcatenatorTests : IDisposable
         var dir = Path.Combine(_root, subdir);
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, fileName);
-        // NAudio 2.x: WaveFileWriter hat WriteSamples(float[]), nicht short[].
+        // WaveFileWriter hat WriteSamples(float[]), nicht short[].
         // Wir schreiben einen IEEE-Float-Stream und kodieren manuell in 16-bit PCM.
         var format = new WaveFormat(sampleRate, 16, 1);
         using var writer = new WaveFileWriter(path, format);
@@ -167,13 +167,13 @@ public class StereoConcatenatorTests : IDisposable
         Assert.Equal(2, reader.WaveFormat.Channels);
         var left = new float[sampleCount];
         var right = new float[sampleCount];
-        // NAudio 2.x: ToSampleProvider() liefert interleavte float-Stereo-Samples: L,R,L,R,...
+        // ToSampleProvider() liefert interleavte float-Stereo-Samples: L,R,L,R,...
         var interleaved = new float[sampleCount * 2];
         var sampleProvider = reader.ToSampleProvider();
         int totalRead = 0;
         while (totalRead < interleaved.Length)
         {
-            int n = sampleProvider.Read(interleaved, totalRead, interleaved.Length - totalRead);
+            int n = sampleProvider.Read(interleaved.AsSpan(totalRead));
             if (n <= 0) break;
             totalRead += n;
         }
@@ -219,8 +219,8 @@ public class StereoConcatenatorTests : IDisposable
         using var r2 = new WaveFileReader(results[1]);
         var s1 = new float[100];
         var s2 = new float[100];
-        r1.ToSampleProvider().Read(s1, 0, 100);
-        r2.ToSampleProvider().Read(s2, 0, 100);
+        r1.ToSampleProvider().Read(s1);
+        r2.ToSampleProvider().Read(s2);
         Assert.NotEqual(s1[0], s2[0]);
     }
 

@@ -152,7 +152,7 @@ Config
   4. Atomic write: `config.json.tmp` schreiben → `File.Move(tmp, config.json, overwrite: true)`
   5. Modified-Flag auf SettingsDialog zurücksetzen
 - **Hot-Reload (in-process, revidiert v0.2)**:
-  - Nach Save → `TriggerSupervisor.RestartAsync(newConfig)` auf UI-Thread
+  - Nach Save → `TriggerSupervisor.Restart(newConfig)` auf dem UI-Thread. Nur ein laufender Dienst startet neu; bei gestoppter Aufnahme wird die Konfiguration bis zum manuellen Start lediglich übernommen.
   - Bei Restart-Fehler → Rollback auf Backup + Warning-Dialog
   - TriggerSupervisor disposet den alten `ITriggerService` sauber und startet neuen mit neuer Config
   - **Keine Prozess-Kill**, **kein Cold-Start**, **kein MMF-Reinit**

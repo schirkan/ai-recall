@@ -130,6 +130,20 @@ internal static class ActiveWindowCommand
         var hash = Hashing.Sha256(pngBytes);
         logger.Debug("Screenshot captured ({Bytes} bytes, hash {Hash})", pngBytes.Length, hash);
 
+        AppReaderResult? appReaderResult = null;
+        if (config.AppReader.Enabled)
+        {
+            var registry = AppReaderRegistry.LoadFromDirectory(ResolvePluginDir(config.AppReader.PluginPath), logger);
+            appReaderResult = registry.TryRead(window, new AppReaderContext { Config = config, Logger = logger });
+        }
+
+        if (!includeIgnored && IgnoreMatcher.IsIgnored(window, appReaderResult?.ContextUrl, config.ScreenRecorder))
+        {
+            Console.WriteLine("Skipped (URL matches the ignore list). Use --include-ignored to force capture.");
+            logger.Information("Skipped window {Process}: URL matches the ignore list", window.ProcessName);
+            return 0;
+        }
+
         string contentText = string.Empty;
         if (!noOcr)
         {
@@ -157,40 +171,20 @@ internal static class ActiveWindowCommand
             hash,
             config.Capture.RootPath);
 
-        // App-Reader: vor OCR oder parallel — liefert strukturierten Content, der als
-        // *.content.md neben dem Capture-MD persistiert wird (Spec 0004).
-        AppReaderResult? appReaderResult = null;
         string? contentPath = null;
-        if (config.AppReader.Enabled)
+        if (appReaderResult is not null)
         {
-            var pluginDir = ResolvePluginDir(config.AppReader.PluginPath);
-            var registry = AppReaderRegistry.LoadFromDirectory(pluginDir, logger);
-            var context = new AppReaderContext
-            {
-                Config = config,
-                Logger = logger,
-                CancellationToken = default
-            };
-            appReaderResult = registry.TryRead(window, context);
-            if (appReaderResult is not null)
-            {
-                var coreRecord = new AppContentRecord(
-                    appReaderResult.ContentMarkdown,
-                    appReaderResult.ContextLabel,
-                    appReaderResult.ContextKind,
-                    appReaderResult.ReaderName,
-                    appReaderResult.ReaderVersion,
-                    appReaderResult.Extra);
-                contentPath = CaptureWriter.WriteContent(
-                    coreRecord,
-                    window,
-                    item.Timestamp,
-                    config.Capture.RootPath,
-                    appReaderResult.ContextLabel);
-                logger.Information(
-                    "AppReader {Reader} produced content for {Process}/{Title} -> {Path}",
-                    appReaderResult.ReaderName, window.ProcessName, window.Title, contentPath);
-            }
+            var coreRecord = new AppContentRecord(
+                appReaderResult.ContentMarkdown,
+                appReaderResult.ContextLabel,
+                appReaderResult.ContextKind,
+                appReaderResult.ReaderName,
+                appReaderResult.ReaderVersion,
+                appReaderResult.Extra);
+            contentPath = CaptureWriter.WriteContent(
+                coreRecord, window, item.Timestamp, config.Capture.RootPath, appReaderResult.ContextLabel);
+            logger.Information("AppReader {Reader} produced content for {Process}/{Title} -> {Path}",
+                appReaderResult.ReaderName, window.ProcessName, window.Title, contentPath);
         }
 
         sw.Stop();

@@ -3,9 +3,17 @@
 > Projekt-Workspace: `projects/ai-recall/`
 > GitHub: `schirkan/ai-recall` (public, MIT)
 > Branch: `main`
-> Tech-Stack MVP1: C# / .NET 8 (`net8.0-windows`)
+> Tech-Stack: C# / .NET 10 (`net10.0-windows`) · SDK `10.0.402`
+
+## Workboard
+
+- Board `ai-recall`: `1d9e2eb5-1bcb-45a1-90f9-27f968afbc0e` abgeschlossen (Review-Fixes und .NET 10); `56069431-1153-4f7d-b635-bd947f78ec61` verfolgt das Single-EXE-Release und den CI-Nachweis.
 
 ## Aktueller Status
+
+**2026-11-21 (Single-EXE):** Windows-x64-Publish mit 1 EXE (32,73 MiB; lokal 11,57 MiB im ZIP). 851/851 Release-Tests und Paket-Smoke mit zehn App-Readern, Konfigurations-Roundtrip, OCR- und Speech-Nativbibliotheken bestanden. Die .NET 10 Desktop Runtime x64 bleibt Voraussetzung.
+
+**2026-11-21:** Sechs Review-Befunde behoben (Capture-Filter/Stop, Tray-Hot-Reload, Teams-Polling, Audio-Stop und WAV-Finalisierung), .NET 10 und aktuelle NuGet-Pakete. Lokal: **851/851 Release-Tests**, Tray-Publish (win-x64) und CLI-Hilfe erfolgreich. Keine Live-Aufnahme mit Teams, Mikrofon oder Loopback ausgeführt. Siehe `specs/0018-dotnet-10-migration.md`.
 
 **MVP1 + MVP2 + MVP3 + Spec 0014 abgeschlossen** — MVP1: `active-window` + App-Reader-Foundation (Spec 0004: Browser [UIA + CDP opt-in + ReverseMarkdown 1:1], Notepad, Explorer, Documents [Word/Excel/PowerPoint mit COM-Interop Iter. 2/3], Outlook + Mail-Log [Iter. 3], PDF-Viewer) + Trigger-Pipeline (Spec 0005) + Async Document Conversion Pipeline (Spec 0007 v1.0). MVP2: Tray-Icon-EXE (Spec 0006/0008/0009 v1.0). **MVP3: Audio Notes (Spec 0013 v0.3 Update 8)** — Teams-Meeting-Polling (`MeetingPresencePoller`) + zweikanaliges Recording (Mic + Speaker-Loopback via NAudio.Wasapi 2.2.1) + Stereo-Concatenation + Background-Transkription mit Diarization (Azure Speech + Deepgram, parallel) + TriggerSupervisor-Integration. **Spec 0014 (Tray Audio Indicator + Manual Audio Control) v1.0** — Tray-Icon zeigt Audio-Recording-Indikator (🎙) mit Audio > Capture > Idle-Prioritaet, Tray-Menu-Items fuer manuelle Audio-Steuerung (Ctrl+Shift+R / Ctrl+Shift+T) mit Privacy-First-Gate (Audio.Enabled), Single-Active-Recording-Constraint, IRecordingControl-Provider-Pattern. **Iter. 3.1 (2026-07-20):** `trigger_source` im MD-Frontmatter parametrisiert via `RecordingTriggerSource`-Enum (Polling → `polling`, ManualAudio → `manual-audio`), Folder-Key-Schema mit `manual-`-Prefix fuer manuelle Aufnahmen. + 834/834 Tests gruen stabil (Counter/Async 5/5 stable, defensive WaitUntilAsync-Timeout-Erhoehung 2000→5000ms fuer Pre-existing Counter-Race-Flake).
 
@@ -176,7 +184,7 @@ Ausführlich: `specs/0001-vision.md`
 | `.gitignore`                                                                         | Generische + .NET + Capture/Laufzeit-Ausschlüsse                                                                                                  |
 | `AGENTS.md`                                                                         | Diese Datei — Current Status, Project Files                                                                                                       |
 | `AiRecall.sln`                                                                       | Solution-Datei; absoluter Pfad: `C:\Users\Admin\.openclaw\workspace\projects\ai-recall\AiRecall.sln`                                                |
-| `global.json`                                                                        | .NET SDK-Pin (8.0.422, `latestFeature`)                                                                                                           |
+| `global.json`                                                                        | .NET SDK-Pin (10.0.402, `latestFeature`)                                                                                                           |
 | `specs/`                                                                             | Spezifikationen, Roadmaps                                                                                                                         |
 | `specs/0001-vision.md`                                                               | Vision + Roadmap MVP1/MVP2/MVP3                                                                                                                   |
 | `specs/0002-mvp1-scope.md`                                                           | MVP1-Scope, User Stories, Architektur, Config                                                                                                     |
@@ -213,11 +221,11 @@ Ausführlich: `specs/0001-vision.md`
 - **Plattform:** GitHub Actions
 - **Workflow-Datei(en):** `.github/workflows/release.yml`
 - **Trigger:** Tag-Push mit Pattern `v*` (z. B. `v0.1.0-rc1`, `v1.2.3-beta.1`) — kein PR-Build, kein Push-auf-main-Build. Zusätzlich `workflow_dispatch` für Notfall-Rebuilds.
-- **Was wird gebaut:** `AiRecall.TrayApp` (Spec 0006, MVP2-Tray-Icon-EXE) als verteilbares Multi-File-Binary (`dotnet publish`).
+- **Was wird gebaut:** `AiRecall.TrayApp` mit `WinX64SingleFile` als einzelne EXE; benötigt die .NET 10 Desktop Runtime x64.
 - **Output / Artefakte:** GitHub-Release mit Auto-generierten Release-Notes (`generate_release_notes: true`) und ZIP-Asset `AiRecall-{version}-win-x64.zip` als Release-Anhang.
 - **Pipeline-Struktur:** 2 Jobs — `build-and-test` (Restore + Build Release + xUnit-Tests + Publish + ZIP + Artifact-Upload) → `release` (`needs: build-and-test`, GitHub-Release erstellen). Tests-MUSS-grün-Gate vor Release-Erstellung.
-- **Runner:** `windows-latest` (Pflicht, weil `net8.0-windows` Win32-P/Invoke benötigt; `ubuntu-latest` würde Build brechen).
-- **.NET-Version:** `actions/setup-dotnet@v4` mit `dotnet-version: 8.0.x` (kompatibel mit `global.json`-Pin 8.0.422 + `latestFeature`-Rollforward).
+- **Runner:** `windows-latest` (`net10.0-windows`, Win32 und Windows Desktop).
+- **.NET-Version:** `actions/setup-dotnet@v4` liest `global.json` (SDK `10.0.402`, `latestFeature`); Paketmatrix: `specs/0018-dotnet-10-migration.md`.
 - **Externe Actions:** `actions/checkout@v4`, `actions/setup-dotnet@v4`, `actions/cache@v4` (NuGet), `actions/upload-artifact@v4`, `actions/download-artifact@v4`, `softprops/action-gh-release@v2`.
 - **Letzter bekannter Lauf:** `v0.1.0` stable (Pipeline-Run #29803125302 success, 2026-07-21 05:11 UTC, 3 Min 10 Sek Laufzeit), Commit `26a54c8` mit `PostBuildRuntimesTrim` (c0070e2) + `PostPublishRuntimesTrim` (06237dc). ZIP-Groesse 12,10 MiB (83 % kleiner als v0.1.0 — 70,86 MiB → 12,10 MiB durch RID-Trim der 17 Nicht-Windows-x64-Plattformen).
 - **Spec:** `specs/0017-ci-cd-release-pipeline.md`

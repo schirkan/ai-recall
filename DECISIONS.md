@@ -5,6 +5,20 @@ Bedarf von PROJECT.md oder specs/*.md geladen.
 
 ---
 
+## 2026-11-21 — Single-EXE-Release Windows x64
+
+WinForms lehnt IL-Linker-Trimming mit `NETSDK1175` ab. Das Release verwendet daher die installierte .NET 10 Desktop Runtime und entfernt stattdessen x86-Tesseract-DLLs und PDBs vor dem Bündeln. Die EXE extrahiert ihre verwalteten und nativen Abhängigkeiten, damit die App-Reader-Discovery und Tesseract erhalten bleiben. Relative Nutzerdaten bleiben außerhalb des Extraktionscaches. Der Tag-Workflow prüft die EXE ohne Aufnahmen oder Cloud-Zugriffe, bevor er das ZIP veröffentlicht.
+
+---
+
+## 2026-11-21 — Capture-Stop, Ausschlussregeln und .NET 10
+
+- **Datenschutz:** Aufnahmefilter gelten für alle Screenshot-Trigger. URL-Regeln greifen vor Persistenz, sobald der App-Reader eine URL auflösen kann. Beim Stopp wird ein bereits gestarteter Schreibvorgang abgeschlossen; ein blockierter Win32-Aufruf oder Reader darf anschließend keine Aufnahme mehr speichern.
+- **Tray:** Speichern ändert nur die Konfiguration, wenn die Aufnahme vorher gestoppt war. Hot-Reload ersetzt ausschließlich einen laufenden Dienst.
+- **Toolchain:** Die Windows-Projekte wechseln auf `net10.0-windows`; `global.json` pinnt SDK `10.0.402` mit `latestFeature` und dient auch der Release-CI als Quelle. NuGet-Updates werden gegen die Registry und den gemeinsamen Release-Build geprüft.
+
+---
+
 ## 2026-07-21 — PostPublishRuntimesTrim (CI/CD-Pipeline-Optimierung)
 
 **Anlass:** ZIP-Groesse nach `c0070e2` (PostBuildRuntimesTrim) noch 68,56 MiB im Publish-Output — die CI-Pipeline ruft nur `dotnet publish` auf, nicht `dotnet build`. Daher feuerte PostBuildRuntimesTrim in CI NICHT. Martin hat in `06237dc` (10:54) ein zweites Target `PostPublishRuntimesTrim` mit `AfterTargets="Publish"` hinzugefuegt. Commit `26a54c8` (10:54) ergaenzt `.gitignore` um `publish/`.

@@ -66,7 +66,7 @@ Dialog-Klasse. Aufruf erfolgt via `dialog.ShowDialog()` mit Owner = TrayApp-Haup
 
 | Button | Wirkung |
 |---|---|
-| **Speichern** | `SettingsDialog.OnSave` ruft `ApplyConfig(newConfig)` auf → Hot-Reload via `TriggerSupervisor.Restart`. Beim nächsten Start ist `loadedFromUserFile == true` → Dialog erscheint nicht mehr. |
+| **Speichern** | `SettingsDialog.OnSave` ruft `ApplyConfig(newConfig)` auf. Die Einstellungen werden übernommen; der gestoppte Recorder startet dabei nicht. Beim nächsten Start ist `loadedFromUserFile == true` → Dialog erscheint nicht mehr. |
 | **Überspringen** | Dialog schließen, Config bleibt auf `AppConfig`-Defaults. Beim nächsten Start ist weiterhin `loadedFromUserFile == false` → Dialog erscheint erneut (User hatte keine Chance zu speichern). User kann später jederzeit über das Tray-Menu „Settings" öffnen. |
 
 ## Konfiguration
