@@ -56,6 +56,15 @@ dotnet publish src/AiRecall.TrayApp/AiRecall.TrayApp.csproj -c Release -p:Publis
 
 Der Publish erzeugt `publish/AiRecall/AiRecall.exe` als einzelne Windows-x64-Datei. Die .NET 10 Desktop Runtime bleibt erforderlich. Die [Release-Pipeline](./.github/workflows/release.yml) baut und testet bei gepushten `v*`-Tags und veröffentlicht das ZIP erst nach erfolgreicher Paketprüfung.
 
+
+## Architektur-Diagramme
+
+Drei `docs/diagrams/`-Dateien zeigen den Aufbau von AI Recall als eigenständige HTML-Diagramme im hellen Standardstil:
+
+- [Systemübersicht](./docs/diagrams/01-systemuebersicht.html) - Einstiegspunkte, Trigger, AppReader-Plugins und Persistenz
+- [AppReader-Plugin-System](./docs/diagrams/02-appreader-plugin-system.html) - Laden der Reader-DLLs, der `IAppReader`-Vertrag und die Auswahlregeln
+- [Ablauf einer Fensteraufnahme](./docs/diagrams/03-ablauf-fensteraufnahme.html) - Sequenz vom Reader-Lookup bis zur Markdown-Datei
+
 ## Dokumentation und Beiträge
 
 - [Versionshinweise](./CHANGELOG.md), [Spezifikationen](./specs/README.md), [Roadmap](./specs/0001-vision.md) und [Architekturentscheidungen](./DECISIONS.md)

@@ -13,6 +13,9 @@
 
 ## Aktueller Status
 
+**2026-11-28 (Architektur-Diagramme):** Drei HTML-Diagramme unter `docs/diagrams/` (Systemuebersicht, AppReader-Plugin-System, Ablauf einer Fensteraufnahme) im hellen Diagram-Design-Stil. `self_check.py` und `verify_geometry.py` des Diagram-Design-Skills melden fuer alle drei Dateien null Befunde; zusaetzlich als PNG gerendert und visuell geprueft. Die README verlinkt die Diagramme.
+
+
 **v0.2.1:** Patch-Release mit `AiRecall.exe`, Refactorings und neuem README-Schnellstart. Anwenderrelevante Änderungen stehen in `CHANGELOG.md`.
 
 **2026-11-21 (Refactorings):** Conversion und Transkription nutzen gemeinsamen Queue-Shutdown. CLI und Hintergrundaufnahme teilen Filterstufen und Reader-Mapping. Settings und Tessdata nutzen atomare Konfigurationspersistenz; YAML-Werte einschließlich mehrzeiliger UIA-Inhalte und Windows-Pfade werden korrekt gelesen. Lokal 866/866 Release-Tests und `AiRecall.exe --verify-package` erfolgreich.
