@@ -13,7 +13,7 @@
 
 ## Aktueller Status
 
-**2026-11-28 (Architektur-Diagramme):** Drei HTML-Diagramme unter `docs/diagrams/` (Systemuebersicht, AppReader-Plugin-System, Ablauf einer Fensteraufnahme) im hellen Diagram-Design-Stil. `self_check.py` und `verify_geometry.py` des Diagram-Design-Skills melden fuer alle drei Dateien null Befunde; zusaetzlich als PNG gerendert und visuell geprueft. Die README verlinkt die Diagramme.
+**2026-11-28 (Architektur-Diagramme):** Drei HTML-Diagramme unter `docs/diagrams/` (Systemübersicht, AppReader-Plugin-System, Ablauf einer Fensteraufnahme) im hellen Diagram-Design-Stil. `self_check.py` und `verify_geometry.py` des Diagram-Design-Skills melden für alle drei Dateien null Befunde; zusätzlich als PNG gerendert und visuell geprüft. Die README verlinkt die Diagramme.
 
 
 **v0.2.1:** Patch-Release mit `AiRecall.exe`, Refactorings und neuem README-Schnellstart. Anwenderrelevante Änderungen stehen in `CHANGELOG.md`.
